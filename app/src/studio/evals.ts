@@ -1,8 +1,17 @@
 // Phase-0 evaluation set: prompts with checks a kernel can verify. Sizes are
 // compared sorted (orientation-agnostic); `upright` additionally checks the
 // expected X/Y/Z extents for prompts that state an orientation.
+import type { PickInfo } from "./annotations"
 import type { BuildReport } from "./kernel/build"
 import type { Tree } from "./dsl"
+
+type V3 = [number, number, number]
+
+/** A click the learner makes before asking: which face / edge, where, and the note. */
+export type EvalNote = { kind: "face" | "edge"; match: (p: PickInfo) => boolean; point?: V3; note: string }
+
+/** Read access to the finished model, for checks the generic ones can't express. */
+export type EvalQuery = { inspect: (what: "faces" | "edges", selector: unknown) => string }
 
 export type EvalCase = {
   id: string
@@ -13,7 +22,22 @@ export type EvalCase = {
   ops?: string[]
   /** Upper bound on volume: proves a part is hollow without prescribing how. */
   maxVolume?: number
+  /** Annotation cases: the model the learner starts from, and what they clicked. */
+  start?: Tree
+  notes?: EvalNote[]
+  extra?: (q: EvalQuery) => EvalCheck[]
 }
+
+const plate = (L: number, W: number, T: number): Tree => ({
+  params: { L, W, T },
+  features: [
+    { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W" }] },
+    { id: "base", op: "extrude", sketch: "sk", distance: "T" },
+  ],
+})
+
+/** Centres of the faces an `inspect faces` listing shows. */
+const centres = (listing: string) => [...listing.matchAll(/中心\(([^)]+)\)/g)].map((m) => m[1].split(",").map(Number))
 
 const PI = Math.PI
 
@@ -27,12 +51,56 @@ export const EVALS: EvalCase[] = [
   { id: "boss-plate", prompt: "做一块 100×100×10 的底板，顶面中间放一个 ⌀30、高 40 的圆柱凸台，凸台中心有一个 ⌀10 的通孔，贯穿凸台和底板。", size: [100, 100, 50], upright: true, volume: 100 * 100 * 10 + PI * 225 * 40 - PI * 25 * 50 },
   { id: "l-bracket", prompt: "做一个 L 形支架：底板 80×40×5（长沿 X），在底板 +Y 一侧的边上立一块 80×5 的立板，立板总高 50（从底板底面算起），两板内侧交线做 R3 圆角。", size: [80, 40, 50], upright: true },
   { id: "hex-nut", prompt: "做一个简化的六角螺母：对边 13、厚 6.5，中心 ⌀6.8 通孔，上下两个端面的外缘各倒角 C0.8。", size: [15.01, 13, 6.5], ops: ["chamfer"] },
+  {
+    id: "anno-hole",
+    prompt: "按标注修改。",
+    start: plate(100, 60, 10),
+    notes: [{ kind: "face", match: (p) => p.what.includes("朝上"), point: [25, 10, 10], note: "在这里开一个 ⌀8 的通孔" }],
+    size: [100, 60, 10],
+    upright: true,
+    volume: 100 * 60 * 10 - PI * 16 * 10,
+    extra: (q) => {
+      const c = centres(q.inspect("faces", { kind: "cylinder", radius: 4 }))
+      const ok = c.length === 1 && Math.abs(c[0][0] - 25) < 1 && Math.abs(c[0][1] - 10) < 1
+      return [{ name: "孔在点的位置", pass: ok, detail: c.map((x) => `(${x.join(", ")})`).join(" ") || "没有 R4 的孔" }]
+    },
+  },
+  {
+    id: "anno-edge",
+    prompt: "按标注修改。",
+    start: plate(60, 40, 20),
+    notes: [{ kind: "edge", match: (p) => p.what.includes("沿 Z") && Math.abs(p.point[0] - 30) < 1 && Math.abs(p.point[1] - 20) < 1, note: "这条棱倒 R5 圆角，其他棱不动" }],
+    size: [60, 40, 20],
+    upright: true,
+    volume: 60 * 40 * 20 - (25 - (PI * 25) / 4) * 20,
+    extra: (q) => {
+      const c = centres(q.inspect("faces", { kind: "cylinder", radius: 5 }))
+      return [{ name: "只倒了那一条棱", pass: c.length === 1 && c[0][0] > 20 && c[0][1] > 10, detail: c.map((x) => `(${x.join(", ")})`).join(" ") || "没有 R5 圆角" }]
+    },
+  },
+  {
+    id: "anno-boss",
+    prompt: "按标注修改。",
+    start: {
+      params: { L: 100, T: 10, D: 30, h: 20 },
+      features: [
+        { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "L" }] },
+        { id: "base", op: "extrude", sketch: "sk", distance: "T" },
+        { id: "bsk", op: "sketch", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, shapes: [{ type: "circle", d: "D" }] },
+        { id: "boss", op: "extrude", sketch: "bsk", distance: "h" },
+      ],
+    },
+    notes: [{ kind: "face", match: (p) => p.what.includes("朝上") && p.origins.includes("boss"), note: "把这个凸台加高 10 mm" }],
+    size: [100, 100, 40],
+    upright: true,
+    volume: 100 * 100 * 10 + PI * 225 * 30,
+  },
   { id: "rib-plate", prompt: "做一块 120×80×4 的底板，顶面上沿 X 方向等距放 3 条加强筋（每条长 100、宽 3、高 12），筋间距 25，中间那条在 Y=0。", size: [120, 80, 16], upright: true, volume: 120 * 80 * 4 + 3 * 100 * 3 * 12 },
 ]
 
 export type EvalCheck = { name: string; pass: boolean; detail: string }
 
-export function checkCase(c: EvalCase, tree: Tree, report: BuildReport): EvalCheck[] {
+export function checkCase(c: EvalCase, tree: Tree, report: BuildReport, q?: EvalQuery): EvalCheck[] {
   const out: EvalCheck[] = []
   const b = report.body
   const failed = report.features.filter((f) => f.state !== "ok")
@@ -53,5 +121,6 @@ export function checkCase(c: EvalCase, tree: Tree, report: BuildReport): EvalChe
     const missing = c.ops.filter((o) => !have.has(o as never))
     out.push({ name: "用到的特征", pass: missing.length === 0, detail: missing.length ? `缺 ${missing.join(", ")}` : "ok" })
   }
+  if (c.extra && q) out.push(...c.extra(q))
   return out
 }

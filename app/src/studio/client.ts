@@ -1,5 +1,6 @@
 import type { KernelPort } from "./apply"
 import type { Tree } from "./dsl"
+import type { PickInfo } from "./annotations"
 import type { BuildReport, DisplayData } from "./kernel/build"
 import type { WorkerMessage, WorkerRequest } from "./worker"
 
@@ -60,6 +61,14 @@ export class KernelClient implements KernelPort {
 
   inspect(what: "body" | "faces" | "edges", selector?: unknown): Promise<string> {
     return this.call("inspect", { type: "inspect", what, selector })
+  }
+
+  pick(kind: "face" | "edge", hash: number, point: [number, number, number]): Promise<PickInfo | null> {
+    return this.call("pick", { type: "pick", kind, hash, point })
+  }
+
+  locate(kind: "face" | "edge", selector: unknown): Promise<number[] | null> {
+    return this.call("locate", { type: "locate", kind, selector })
   }
 
   exportBody(format: "step" | "stl", index?: number): Promise<Blob | null> {

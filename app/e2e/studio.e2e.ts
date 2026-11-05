@@ -22,6 +22,31 @@ test.describe("工作台", () => {
     await expect(page.getByText(/extrude\(sk_sk1, amount=H\)/).first()).toBeVisible()
   })
 
+  test("/studio 在模型上标注（脚本模型）", async ({ page }) => {
+    await page.goto("/studio?start=flange")
+    await expect(page.getByText("5 个特征").first()).toBeVisible({ timeout: 90_000 })
+    await expectRendered(page.locator("canvas").first(), "/studio annotate")
+    // Click around the disc until a face card opens.
+    const box = (await page.locator("canvas").first().boundingBox())!
+    const card = page.getByRole("dialog")
+    for (const [fx, fy] of [[0.62, 0.42], [0.66, 0.5], [0.4, 0.42], [0.55, 0.35], [0.7, 0.45], [0.35, 0.5]]) {
+      await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy)
+      if (await card.getByText(/^① 面 ·/).isVisible().catch(() => false)) break
+    }
+    await expect(card.getByText(/^① 面 ·/), "a click on the model opens the note card").toBeVisible()
+    await card.getByLabel("标注备注").fill("在这里加一个 ⌀6 的通孔")
+    await card.getByRole("button", { name: "加到消息" }).click()
+    const pins = page.locator(".scene-labels .bg-primary")
+    await expect(pins, "the annotation stays on the model as pin 1").toHaveCount(1)
+    await page.getByRole("tab", { name: "对话" }).click()
+    await expect(page.getByLabel("要随消息发出的标注").getByText("在这里加一个 ⌀6 的通孔")).toBeVisible()
+    await page.getByRole("button", { name: "发送" }).click()
+    await expect(page.getByText(/^做好了/), "the scripted turn finishes").toBeVisible({ timeout: 90_000 })
+    await expect(page.getByRole("img", { name: "标注截图" }), "the annotated view went with the message").toBeVisible()
+    await expect(page.getByRole("button", { name: /① 在这里加一个 ⌀6 的通孔/ }), "the sent message keeps its chip").toBeVisible()
+    await expect(pins, "pins clear once the reply is done").toHaveCount(0)
+  })
+
   test("/studio?start=flange 现成特征树与改参数", async ({ page }) => {
     await page.goto("/studio?start=flange")
     await expect(page.getByText("5 个特征").first()).toBeVisible({ timeout: 90_000 })

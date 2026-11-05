@@ -2,6 +2,7 @@ import * as React from "react"
 import { Link } from "react-router"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { CIRCLED_RE, circledNumber } from "../annotations"
 
 /** Paths on this site the assistant may cite; they open in a new tab so the model stays put. */
 const SITE_PATH = /^\/(?:lesson|teardown|card|atlas|glossary)\/[A-Za-z0-9._-]+$/
@@ -18,7 +19,17 @@ function SiteLink({ to, children }: { to: string; children: React.ReactNode }) {
   )
 }
 
-const components: Components = {
+function Anchor({ href, children }: { href?: string; children?: React.ReactNode }) {
+  return href && SITE_PATH.test(href) ? (
+    <SiteLink to={href}>{children}</SiteLink>
+  ) : (
+    <a href={href} target="_blank" rel="noopener noreferrer" className={linkClass}>
+      {children}
+    </a>
+  )
+}
+
+const base: Components = {
   p: ({ children }) => <p className="my-2 first:mt-0 last:mb-0">{children}</p>,
   strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
   h1: ({ children }) => <h3 className="mt-3 mb-1 text-heading font-semibold first:mt-0">{children}</h3>,
@@ -29,14 +40,7 @@ const components: Components = {
   ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5 first:mt-0 last:mb-0">{children}</ol>,
   blockquote: ({ children }) => <blockquote className="my-2 border-l-2 pl-3 text-muted-foreground">{children}</blockquote>,
   hr: () => <hr className="my-3 border-t" />,
-  a: ({ href, children }) =>
-    href && SITE_PATH.test(href) ? (
-      <SiteLink to={href}>{children}</SiteLink>
-    ) : (
-      <a href={href} target="_blank" rel="noopener noreferrer" className={linkClass}>
-        {children}
-      </a>
-    ),
+  a: ({ href, children }) => <Anchor href={href}>{children}</Anchor>,
   code: ({ className, children }) => {
     const text = String(children)
     // Fenced blocks carry a language class or a newline; everything else is inline.
@@ -54,15 +58,65 @@ const components: Components = {
   td: ({ children }) => <td className="border px-2 py-1 tabular">{children}</td>,
 }
 
+type MdNode = { type: string; value?: string; url?: string; children?: MdNode[] }
+
+/** ①②… in prose become links to `#pin-N`, so a reply can point back at an annotation. */
+function remarkPins() {
+  const walk = (node: MdNode) => {
+    if (!node.children || node.type === "link") return
+    node.children = node.children.flatMap((c): MdNode[] => {
+      if (c.type !== "text" || !c.value?.match(CIRCLED_RE)) {
+        walk(c)
+        return [c]
+      }
+      const out: MdNode[] = []
+      let last = 0
+      for (const m of c.value.matchAll(CIRCLED_RE)) {
+        const at = m.index ?? 0
+        if (at > last) out.push({ type: "text", value: c.value.slice(last, at) })
+        out.push({ type: "link", url: `#pin-${circledNumber(m[0])}`, children: [{ type: "text", value: m[0] }] })
+        last = at + m[0].length
+      }
+      if (last < c.value.length) out.push({ type: "text", value: c.value.slice(last) })
+      return out
+    })
+  }
+  return (tree: MdNode) => walk(tree)
+}
+
 /**
  * The assistant's replies: Markdown (GFM) with the site's type and colours.
- * Raw HTML is not rendered. Bare lesson paths become links too.
+ * Raw HTML is not rendered. Bare lesson paths become links too; with `onPin`,
+ * ①②… are buttons that show that annotation on the model.
  */
-export function Markdown({ text }: { text: string }) {
+export function Markdown({ text, onPin }: { text: string; onPin?: (n: number) => void }) {
   const source = React.useMemo(() => text.replace(BARE_SITE_PATH, "$1[$2]($2)"), [text])
+  const components = React.useMemo<Components>(
+    () =>
+      onPin
+        ? {
+            ...base,
+            a: (props) => {
+              const pin = props.href?.match(/^#pin-(\d+)$/)
+              if (!pin) return <Anchor href={props.href}>{props.children}</Anchor>
+              return (
+                <button
+                  type="button"
+                  onClick={() => onPin(Number(pin[1]))}
+                  className="mx-0.5 font-semibold text-primary underline decoration-primary/40 underline-offset-4"
+                  aria-label={`在模型上显示标注 ${pin[1]}`}
+                >
+                  {props.children}
+                </button>
+              )
+            },
+          }
+        : base,
+    [onPin],
+  )
   return (
     <div className="text-reading break-words">
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={onPin ? [remarkGfm, remarkPins] : [remarkGfm]} components={components}>
         {source}
       </ReactMarkdown>
     </div>

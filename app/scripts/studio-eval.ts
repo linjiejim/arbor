@@ -6,10 +6,11 @@ import fs from "node:fs"
 import { generateText, isStepCount, tool, type ModelMessage, type ToolSet } from "ai"
 import { executeTool, treeText, type KernelPort } from "../src/studio/apply"
 import { EMPTY_TREE, type Tree } from "../src/studio/dsl"
-import { EVALS, checkCase } from "../src/studio/evals"
+import { EVALS, checkCase, type EvalNote } from "../src/studio/evals"
 import { Kernel } from "../src/studio/kernel/build"
 import { initNodeKernel } from "../src/studio/kernel/node"
 import { SYSTEM_PROMPT, statePrompt, withState } from "../src/studio/prompt"
+import { annotationText, type Annotation } from "../src/studio/annotations"
 import { STUDIO_TOOLS } from "../src/studio/tools"
 import { deepseekRoute, openrouterRoute, OPENROUTER_MODEL } from "../server/models"
 
@@ -36,8 +37,10 @@ for (const c of cases) {
     rebuild: async (t) => kernel.rebuild(t),
     inspect: async (what, sel) => kernel.inspect(what, undefined, sel),
   }
-  let tree: Tree = EMPTY_TREE
+  let tree: Tree = c.start ?? EMPTY_TREE
   let summary = ""
+  if (c.start) summary = treeText(tree, kernel.rebuild(tree))
+  const notes = c.notes ? annotate(kernel, c.notes) : []
   let calls = 0
   let failedCalls = 0
   const log: { name: string; input: unknown; ok: boolean; text: string }[] = []
@@ -67,7 +70,8 @@ for (const c of cases) {
   ) as ToolSet
   const t0 = performance.now()
   // Same shape as the server: state on the user message, stable system prompt.
-  const messages: ModelMessage[] = withState([{ role: "user", content: c.prompt }], statePrompt(tree, summary))
+  const content = notes.length ? [{ type: "text" as const, text: c.prompt }, { type: "text" as const, text: annotationText(notes) }] : c.prompt
+  const messages: ModelMessage[] = withState([{ role: "user", content }], statePrompt(tree, summary))
   let text = ""
   let usage = { inputTokens: 0, cacheReadTokens: 0, outputTokens: 0 }
   let usd = 0
@@ -99,7 +103,7 @@ for (const c of cases) {
     error = (e as Error).message
   }
   const report = kernel.rebuild(tree)
-  const checks = checkCase(c, tree, report)
+  const checks = checkCase(c, tree, report, { inspect: (what, sel) => kernel.inspect(what, undefined, sel) })
   const pass = !error && checks.every((x) => x.pass)
   const sec = (performance.now() - t0) / 1000
   results.push({ id: c.id, pass, checks, calls, failedCalls, sec, usage, usd, hosts: [...hosts], error, tree, text, log })
@@ -121,4 +125,25 @@ console.log(`report: ${file}`)
 function median(a: number[]) {
   const s = [...a].sort((x, y) => x - y)
   return s.length ? s[Math.floor(s.length / 2)] : 0
+}
+
+/** Click like the learner would: find the face / edge the note means, pick it at the given point. */
+function annotate(kernel: Kernel, specs: EvalNote[]): Annotation[] {
+  const d = kernel.display()
+  const v = d.mesh!.vertices
+  const t = d.mesh!.triangles
+  const e = d.edges ?? new Float32Array()
+  return specs.map((spec, i) => {
+    const targets =
+      spec.kind === "face"
+        ? d.groups.map((g) => ({ hash: g.hash, point: [0, 1, 2].map((k) => (v[t[g.start] * 3 + k] + v[t[g.start + 1] * 3 + k] + v[t[g.start + 2] * 3 + k]) / 3) }))
+        : d.edgeGroups.map((g) => ({ hash: g.hash, point: [0, 1, 2].map((k) => (e[g.start * 3 + k] + e[(g.start + 1) * 3 + k]) / 2) }))
+    for (const target of targets) {
+      const info = kernel.pick({ kind: spec.kind, hash: target.hash, point: target.point as [number, number, number] })
+      if (!info || !spec.match(info)) continue
+      const at = spec.point ? kernel.pick({ kind: spec.kind, hash: target.hash, point: spec.point })! : info
+      return { ...at, n: i + 1, note: spec.note }
+    }
+    throw new Error(`no ${spec.kind} matches note ${i + 1}: ${spec.note}`)
+  })
 }

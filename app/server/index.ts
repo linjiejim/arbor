@@ -15,6 +15,7 @@ import { serve } from "@hono/node-server"
 import { convertToModelMessages, streamText, type UIMessage } from "ai"
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
+import { Annotations, annotationText } from "../src/studio/annotations"
 import { Tree } from "../src/studio/dsl"
 import { SYSTEM_PROMPT, TEACH_PROMPT, statePrompt, withState } from "../src/studio/prompt"
 import { STUDIO_TOOLS } from "../src/studio/tools"
@@ -73,7 +74,7 @@ app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) 
   const state = snapTree.success
     ? statePrompt(snapTree.data, typeof snap.summary === "string" ? snap.summary.slice(0, 12000) : "")
     : statePrompt(tree.data, summary)
-  const messages = await convertToModelMessages(trimMessages(body.messages), { tools: STUDIO_TOOLS, ignoreIncompleteToolCalls: true })
+  const messages = await convertToModelMessages(trimMessages(body.messages.map(withAnnotations)), { tools: STUDIO_TOOLS, ignoreIncompleteToolCalls: true })
   const result = streamText({
     model: MOCK ? mockModel() : route!.model,
     system: `${SYSTEM_PROMPT}${body.mode === "teach" ? `\n\n${TEACH_PROMPT}` : ""}`,
@@ -106,6 +107,17 @@ app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) 
     },
   })
 })
+
+/**
+ * Where the learner pointed (message metadata) becomes text the model reads,
+ * appended to that message. Deterministic, so history stays a cacheable prefix.
+ */
+function withAnnotations(m: UIMessage): UIMessage {
+  if (m.role !== "user") return m
+  const notes = Annotations.safeParse((m.metadata as { annotations?: unknown } | undefined)?.annotations)
+  if (!notes.success || !notes.data.length) return m
+  return { ...m, parts: [...m.parts, { type: "text", text: annotationText(notes.data) }] }
+}
 
 const port = Number(env.PORT ?? 18914)
 serve({ fetch: app.fetch, port, hostname: env.HOST ?? "127.0.0.1" }, () => {

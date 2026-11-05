@@ -11,17 +11,31 @@ import {
   drawRoundedRectangle,
   makeCompound,
   makePlane,
+  measureArea,
   measureShapeVolumeProperties,
   sketchCircle,
   sketchRectangle,
   type Drawing,
   type Shape3D,
 } from "replicad"
-import { displayName, type Feature, type FeatureOp, type PlaneRef, type SketchShape, type Tree } from "../dsl"
+import type { PickInfo } from "../annotations"
+import { displayName, EMPTY_TREE, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
 import { describeError, explain, InputError } from "./errors"
 import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
-import { DIRS, describeEdge, describeFace, disposeInfos, edgeInfos, faceInfos, selectEdges, selectFaces } from "./select"
+import {
+  axisDir,
+  DIRS,
+  describeEdge,
+  describeFace,
+  disposeInfos,
+  edgeInfos,
+  faceInfos,
+  selectEdges,
+  selectFaces,
+  uniqueEdgeSelector,
+  uniqueFaceSelector,
+} from "./select"
 
 type V3 = [number, number, number]
 type PlaneName = "XY" | "XZ" | "YZ"
@@ -81,9 +95,11 @@ export type BuildReport = {
 export type DisplayData = {
   index: number
   mesh: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array } | null
-  /** One per B-rep face, in mesh order. */
-  groups: { start: number; count: number; status: FaceStatus; origin: string }[]
+  /** One per B-rep face, in mesh order. `hash` identifies the face for picking. */
+  groups: { start: number; count: number; status: FaceStatus; origin: string; hash: number }[]
   edges: Float32Array | null
+  /** One per edge: a run of points in `edges` (segment pairs). */
+  edgeGroups: { start: number; count: number; hash: number }[]
   /** Outline of the sketch, when the shown step is a sketch. */
   sketch: Float32Array | null
   bbox: [V3, V3] | null
@@ -108,9 +124,11 @@ export class Kernel {
   private steps: Step[] = []
   private paramsKey = ""
   private scope: Scope = {}
+  private tree: Tree = EMPTY_TREE
 
   rebuild(tree: Tree): BuildReport {
     const t0 = performance.now()
+    this.tree = tree
     const paramsKey = JSON.stringify(tree.params)
     let paramError: string | undefined
     try {
@@ -162,7 +180,7 @@ export class Kernel {
   display(index?: number): DisplayData {
     const i = index ?? this.steps.findLastIndex((s) => s.result.state === "ok")
     const step = this.steps[i]
-    const empty: DisplayData = { index: i, mesh: null, groups: [], edges: null, sketch: null, bbox: null }
+    const empty: DisplayData = { index: i, mesh: null, groups: [], edges: null, edgeGroups: [], sketch: null, bbox: null }
     if (!step) return empty
     const body = step.result.state === "ok" ? step : this.lastBuilt(i)
     const out: DisplayData = { ...empty, sketch: step.sketch ? step.sketch.lines.slice() : null }
@@ -179,9 +197,11 @@ export class Kernel {
           count: g.count,
           status: isThisStep && k >= 0 ? body.status[k] : "kept",
           origin: k >= 0 ? body.origins[k] : "?",
+          hash: g.faceId,
         }
       })
       out.edges = body.edges ? body.edges.lines.slice() : null
+      out.edgeGroups = body.edges ? body.edges.edgeGroups.map((g) => ({ start: g.start, count: g.count, hash: g.edgeId })) : []
       const bb = body.body.boundingBox.bounds as [V3, V3]
       out.bbox = [[...bb[0]], [...bb[1]]] as [V3, V3]
     }
@@ -217,6 +237,99 @@ export class Kernel {
       }
     } catch (e) {
       return describeError(e).message
+    } finally {
+      disposeInfos(faces)
+    }
+  }
+
+  /**
+   * What the learner clicked on the latest body (by mesh hash): a description,
+   * a selector verified to pick exactly it, and sketch coordinates on a face.
+   */
+  pick(target: { kind: "face" | "edge"; hash: number; point: V3 }): PickInfo | null {
+    const step = this.lastBuilt(this.steps.length)
+    if (!step?.body) return null
+    const faces = faceInfos(step.body, step.origins)
+    const name = (id: string) => {
+      const f = this.tree.features.find((x) => x.id === id)
+      return f ? displayName(this.tree, f) : id
+    }
+    try {
+      if (target.kind === "face") {
+        const face = faces.find((f) => f.face.hashCode === target.hash)
+        if (!face) return null
+        const n = face.normal ? axisDir(face.normal) : null
+        const kind = { plane: "平面", cylinder: "圆柱面", cone: "圆锥面", sphere: "球面", torus: "环面", freeform: "自由曲面" }[face.kind]
+        const facing = n ? `朝${{ "+Z": "上", "-Z": "下", "+X": "右（+X）", "-X": "左（-X）", "+Y": "后（+Y）", "-Y": "前（-Y）" }[n]}` : null
+        const what = [kind, facing && `${facing}${n?.[1] === "Z" ? `（${n}）` : ""}`, face.radius !== undefined && `R${fmt(face.radius)}`].filter(Boolean).join(" · ")
+        const origins = face.origin && face.origin !== "?" ? [face.origin] : []
+        const plane = n ? ({ Z: "XY", Y: "XZ", X: "YZ" } as const)[n[1] as "X" | "Y" | "Z"] : null
+        const uv = (p: V3): [number, number] => (plane === "XY" ? [p[0], p[1]] : plane === "XZ" ? [p[0], p[2]] : [p[1], p[2]])
+        return {
+          kind: "face",
+          hash: target.hash,
+          point: target.point,
+          what,
+          where: origins.length ? `来自「${name(origins[0])}」` : "来源不明",
+          origins,
+          facts: `面积 ${fmt(measureArea(face.face))} mm²`,
+          selector: uniqueFaceSelector(face, faces, this.scope, target.point),
+          sketch: plane && n ? { plane, offset: r2(face.center["XYZ".indexOf(n[1])]), uv: uv(target.point).map(r2) as [number, number] } : null,
+        }
+      }
+      const edges = edgeInfos(step.body, faces)
+      try {
+        const edge = edges.find((e) => e.edge.hashCode === target.hash)
+        if (!edge) return null
+        const d = edge.dir ? axisDir(edge.dir) : null
+        const kind = { line: "直线边", circle: "圆弧边", freeform: "曲线边" }[edge.kind]
+        const what = [kind, d && `沿 ${d[1]} 方向`, edge.radius !== undefined && `R${fmt(edge.radius)}`].filter(Boolean).join(" · ")
+        const origins = [...new Set(edge.faces.map((i) => faces[i]?.origin).filter((o): o is string => !!o && o !== "?"))]
+        const where =
+          origins.length === 0 ? "来源不明" : origins.length === 1 ? `「${name(origins[0])}」的面相交处` : `在「${name(origins[0])}」和「${name(origins[1])}」的面之间`
+        // Tangent line between a fillet and its neighbour: drawn like an edge, but there's no corner there.
+        let smooth = false
+        if (edge.faces.length === 2) {
+          const [na, nb] = edge.faces.map((i) => faces[i].face.normalAt(edge.mid))
+          smooth = na.dot(nb) > 0.999
+          na.delete()
+          nb.delete()
+        }
+        return {
+          kind: "edge",
+          hash: target.hash,
+          point: target.point,
+          what,
+          where,
+          origins,
+          facts: `长 ${fmt(edge.length)} mm`,
+          selector: uniqueEdgeSelector(edge, edges, faces, this.scope, target.point),
+          smooth,
+          sketch: null,
+        }
+      } finally {
+        disposeInfos([], edges)
+      }
+    } finally {
+      disposeInfos(faces)
+    }
+  }
+
+  /** Mesh hashes a selector picks on the latest body now; null when it no longer resolves. */
+  locate(kind: "face" | "edge", selector: unknown): number[] | null {
+    const step = this.lastBuilt(this.steps.length)
+    if (!step?.body) return null
+    const faces = faceInfos(step.body, step.origins)
+    try {
+      if (kind === "face") return selectFaces(selector as FaceSelector, faces, this.scope).map((f) => f.face.hashCode)
+      const edges = edgeInfos(step.body, faces)
+      try {
+        return selectEdges(selector as EdgeSelector, edges, faces, this.scope).map((e) => e.edge.hashCode)
+      } finally {
+        disposeInfos([], edges)
+      }
+    } catch {
+      return null
     } finally {
       disposeInfos(faces)
     }
