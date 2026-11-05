@@ -125,8 +125,11 @@ export function useStudioChat(studio: Studio) {
       const t = text.trim()
       if (!t && !files?.length) return
       setPaused(false)
-      bridge.studio?.checkpoint()
-      void chat.sendMessage({ text: t || "照着这张图建模", files })
+      const s = bridge.studio
+      s?.checkpoint()
+      // What the model is told the part looks like for this whole turn.
+      const metadata = s ? { tree: s.treeRef.current, summary: s.summary } : undefined
+      void chat.sendMessage({ text: t || "照着这张图建模", files, metadata })
     },
     [chat],
   )

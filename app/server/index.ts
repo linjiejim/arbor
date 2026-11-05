@@ -14,7 +14,7 @@ import { convertToModelMessages, streamText, type UIMessage } from "ai"
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { Tree } from "../src/studio/dsl"
-import { SYSTEM_PROMPT, TEACH_PROMPT, statePrompt } from "../src/studio/prompt"
+import { SYSTEM_PROMPT, TEACH_PROMPT, statePrompt, withState } from "../src/studio/prompt"
 import { STUDIO_TOOLS } from "../src/studio/tools"
 import { trimMessages } from "../src/studio/trim"
 import { Budget, costUSD, RateLimiter } from "./limits"
@@ -58,11 +58,19 @@ app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) 
     return c.json({ error: "budget", message: "今天的公共额度用完了：明天再来，或者填自己的 DeepSeek key。" }, 429)
 
   const deepseek = createDeepSeek({ apiKey, baseURL: env.DEEPSEEK_BASE_URL })
+  // The state the learner saw when they sent the message (snapshot in its
+  // metadata); older clients only send the live tree.
+  const lastUser = [...body.messages].reverse().find((m) => m.role === "user")
+  const snap = (lastUser?.metadata ?? {}) as { tree?: unknown; summary?: unknown }
+  const snapTree = Tree.safeParse(snap.tree)
+  const state = snapTree.success
+    ? statePrompt(snapTree.data, typeof snap.summary === "string" ? snap.summary.slice(0, 12000) : "")
+    : statePrompt(tree.data, summary)
   const messages = await convertToModelMessages(trimMessages(body.messages), { tools: STUDIO_TOOLS, ignoreIncompleteToolCalls: true })
   const result = streamText({
     model: MOCK ? mockModel() : deepseek(MODEL),
-    system: `${SYSTEM_PROMPT}${body.mode === "teach" ? `\n\n${TEACH_PROMPT}` : ""}\n\n${statePrompt(tree.data, summary)}`,
-    messages,
+    system: `${SYSTEM_PROMPT}${body.mode === "teach" ? `\n\n${TEACH_PROMPT}` : ""}`,
+    messages: withState(messages, state),
     tools: STUDIO_TOOLS,
     maxOutputTokens: 8000,
     abortSignal: c.req.raw.signal,

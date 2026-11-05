@@ -14,6 +14,11 @@ describe("parameter expressions", () => {
     expect(evaluate("2^3^2", {})).toBe(512)
     expect(evaluate("-sqrt(16) + cos(60)*2", {})).toBeCloseTo(-3)
   })
+  it("ignores a stray pair of quotes around an expression", () => {
+    expect(evaluate('"d"', { d: 6 })).toBe(6)
+    expect(evaluate("'L-2*e'", { L: 100, e: 8 })).toBe(84)
+  })
+
   it("resolves parameters in dependency order and rejects cycles and unknown names", () => {
     expect(resolveParams({ inner: "outer - 2*t", outer: 50, t: 2 })).toEqual({ inner: 46, outer: 50, t: 2 })
     expect(() => resolveParams({ a: "b", b: "a" })).toThrow(/循环/)
@@ -109,6 +114,47 @@ describe("kernel", () => {
     })
     expect(drafted.features[2].selected).toBe(4)
     expect(drafted.body!.volume).toBeLessThan(60 * 40 * 25)
+  })
+
+  it("treats a cylinder's rim as one circle and never selects its seam", () => {
+    const rep = k.rebuild({
+      params: {},
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 60, h: 40 }, { type: "circle", d: 10, cut: true }] },
+        { id: "b", op: "extrude", sketch: "s", distance: 10 },
+        { id: "f", op: "fillet", edges: { parallel: "Z", expect: 4 }, r: 5 },
+        { id: "c", op: "sketch", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, shapes: [{ type: "circle", d: 20, center: [20, 0] }] },
+        { id: "boss", op: "extrude", sketch: "c", distance: 10 },
+        { id: "ch", op: "chamfer", edges: { kind: "circle", radius: 10, extreme: "+Z", expect: 1 }, d: 1 },
+      ],
+    })
+    expect(rep.features.map((f) => f.state)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok"])
+    const mug = k.rebuild({
+      params: {},
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "circle", d: 80 }] },
+        { id: "b", op: "extrude", sketch: "s", distance: 100 },
+        { id: "f", op: "fillet", edges: { kind: "circle", extreme: "-Z", expect: 1 }, r: 5 },
+      ],
+    })
+    expect(mug.features[2].state).toBe("ok")
+  })
+
+  it("takes pattern counts and polygon sides from parameters", () => {
+    const tree: Tree = {
+      params: { n: 6, k: 2.5 },
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "polygon", sides: "n", d: 100 }] },
+        { id: "b", op: "extrude", sketch: "s", distance: 5 },
+        { id: "h", op: "hole", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, at: [[30, 0]], d: 6 },
+        { id: "p", op: "circular_pattern", features: ["h"], axis: "Z", count: "n" },
+      ],
+    }
+    const rep = k.rebuild(tree)
+    expect(rep.features.map((f) => f.state)).toEqual(["ok", "ok", "ok", "ok"])
+    expect(rep.features[3].summary).toMatch(/×6/)
+    const bad = k.rebuild({ ...tree, features: tree.features.map((f) => (f.id === "p" ? { ...f, count: "k" } : f)) as Tree["features"] })
+    expect(bad.features[3].message).toMatch(/整数/)
   })
 
   it("refuses a revolve profile that crosses the axis", () => {

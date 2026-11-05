@@ -4,12 +4,18 @@
 // `of` (provenance) is approximated by "lies on that feature's tool body".
 import type { EdgeSelector, FaceSelector, Feature, PlaneRef, SketchShape, Tree } from "./dsl"
 import { displayName } from "./dsl"
-import { namesIn } from "./expr"
+import { namesIn, unquote } from "./expr"
 
 type N = number | string
 
 /** A number or an expression, as Python. */
-const py = (v: N) => (typeof v === "number" ? fmt(v) : /^[A-Za-z_一-龥][A-Za-z0-9_一-龥]*$/.test(v.trim()) ? v.trim() : `(${v.replace(/\^/g, "**")})`)
+/** Counts can be expressions; Python's range() needs an int. */
+const pyInt = (v: N) => (typeof v === "number" ? String(v) : `round(${py(v)})`)
+const py = (raw: N) => {
+  if (typeof raw === "number") return fmt(raw)
+  const v = unquote(raw).trim()
+  return /^[A-Za-z_一-龥][A-Za-z0-9_一-龥]*$/.test(v) ? v : `(${v.replace(/\^/g, "**")})`
+}
 const fmt = (x: number) => (Number.isInteger(x) ? String(x) : String(Math.round(x * 1e6) / 1e6))
 const neg = (v: N) => (typeof v === "number" ? fmt(-v) : `-${py(v)}`)
 
@@ -40,7 +46,7 @@ function shape2d(s: SketchShape): string {
     case "circle":
       return `${at}Circle(${py(s.d)} / 2)`
     case "polygon":
-      return `${at}RegularPolygon(${py(s.d)} / 2, ${s.sides}${s.rotate !== undefined ? `, rotation=${py(s.rotate)}` : ""})`
+      return `${at}RegularPolygon(${py(s.d)} / 2, ${pyInt(s.sides)}${s.rotate !== undefined ? `, rotation=${py(s.rotate)}` : ""})`
     case "slot":
       return `${at}SlotOverall(${py(s.length)}, ${py(s.width)}${s.angle !== undefined ? `, rotation=${py(s.angle)}` : ""})`
     case "polyline": {
@@ -144,16 +150,17 @@ function feature(f: Feature, tree: Tree): string[] {
     }
     case "linear_pattern": {
       const v = `Vector${DIR_VEC[f.dir]} * ${py(f.spacing)}`
-      const v2 = f.dir2 && f.count2 && f.spacing2 !== undefined ? `Vector${DIR_VEC[f.dir2]} * ${py(f.spacing2)}` : null
-      const rng = v2 ? `for i in range(${f.count}) for j in range(${f.count2}) if i or j` : `for i in range(1, ${f.count})`
+      const v2 = f.dir2 && f.count2 !== undefined && f.spacing2 !== undefined ? `Vector${DIR_VEC[f.dir2]} * ${py(f.spacing2)}` : null
+      const rng = v2 ? `for i in range(${pyInt(f.count)}) for j in range(${pyInt(f.count2!)}) if i or j` : `for i in range(1, ${pyInt(f.count)})`
       const move = v2 ? `Pos(${v} * i + ${v2} * j)` : `Pos(${v} * i)`
       return [...head, ...f.features.map((id) => `for copy in [${move} * tool_${id} ${rng}]:\n    part = part ${modeOf(tree, id) === "cut" ? "-" : "+"} copy`)]
     }
     case "circular_pattern": {
       const total = f.angle !== undefined ? py(f.angle) : "360"
-      const step = f.angle === undefined || Number(f.angle) >= 360 ? `360 / ${f.count}` : `${total} / ${f.count - 1}`
+      const c = pyInt(f.count)
+      const step = f.angle === undefined || Number(f.angle) >= 360 ? `360 / ${c}` : `${total} / (${c} - 1)`
       const rot = { X: "Rot(X=a)", Y: "Rot(Y=a)", Z: "Rot(Z=a)" }[f.axis]
-      return [...head, ...f.features.map((id) => `for a in [${step} * i for i in range(1, ${f.count})]:\n    part = part ${modeOf(tree, id) === "cut" ? "-" : "+"} ${rot} * tool_${id}`)]
+      return [...head, ...f.features.map((id) => `for a in [${step} * i for i in range(1, ${c})]:\n    part = part ${modeOf(tree, id) === "cut" ? "-" : "+"} ${rot} * tool_${id}`)]
     }
     case "sweep": {
       const pts = f.path.points.map((p) => (Array.isArray(p) ? { to: p as [N, N] } : { to: p.to as [N, N], via: p.via as [N, N] }))

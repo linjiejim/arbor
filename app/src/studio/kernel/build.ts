@@ -360,6 +360,7 @@ export class Kernel {
     warnings: string[],
   ): { body?: Shape3D; summary: string; selected?: number; sketch?: Step["sketch"]; tools?: Tool[] } {
     const n = (v: number | string) => num(v, this.scope)
+    const int = (v: number | string, min: number, what: string) => count(n(v), min, what)
     const body = prev?.body ?? null
     switch (f.op) {
       case "sketch": {
@@ -473,19 +474,22 @@ export class Kernel {
         let summary: string
         if (f.op === "linear_pattern") {
           const v = mul(DIRS[f.dir], n(f.spacing))
-          const v2 = f.dir2 && f.count2 && f.spacing2 !== undefined ? mul(DIRS[f.dir2], n(f.spacing2)) : null
-          for (let i = 0; i < f.count; i++)
-            for (let j = 0; j < (v2 ? f.count2! : 1); j++) {
+          const v2 = f.dir2 && f.count2 !== undefined && f.spacing2 !== undefined ? mul(DIRS[f.dir2], n(f.spacing2)) : null
+          const c1 = int(f.count, 2, "个数")
+          const c2 = v2 ? int(f.count2!, 2, "第二方向的个数") : 1
+          for (let i = 0; i < c1; i++)
+            for (let j = 0; j < c2; j++) {
               if (i === 0 && j === 0) continue
               const t = add(mul(v, i), v2 ? mul(v2, j) : [0, 0, 0])
               moves.push((s) => s.translate(t))
             }
-          summary = `×${f.count}${v2 ? ` × ${f.count2}` : ""} · 间距 ${fmt(n(f.spacing))}`
+          summary = `×${c1}${v2 ? ` × ${c2}` : ""} · 间距 ${fmt(n(f.spacing))}`
         } else {
           const total = f.angle !== undefined ? n(f.angle) : 360
-          const stepA = total >= 360 - 1e-9 ? 360 / f.count : total / (f.count - 1)
-          for (let i = 1; i < f.count; i++) moves.push((s) => s.rotate(stepA * i, [0, 0, 0], AXIS[f.axis]))
-          summary = `×${f.count} · ${fmt(total)}° · 绕 ${f.axis} 轴`
+          const c = int(f.count, 2, "个数")
+          const stepA = total >= 360 - 1e-9 ? 360 / c : total / (c - 1)
+          for (let i = 1; i < c; i++) moves.push((s) => s.rotate(stepA * i, [0, 0, 0], AXIS[f.axis]))
+          summary = `×${c} · ${fmt(total)}° · 绕 ${f.axis} 轴`
         }
         return this.copyTools(body, sources, moves, summary, warnings)
       }
@@ -579,7 +583,9 @@ function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut", war
     if (Math.abs(before - after) < 1e-6 * Math.max(1, before)) warnings.push("切除没有碰到实体，模型没有变化")
     return next
   }
-  const next = body ? body.fuse(tool) : tool.clone()
+  // Booleans already unify same-domain faces; the first solid needs it too,
+  // or an extruded circle keeps two half-cylinders and two half-arcs per rim.
+  const next = body ? body.fuse(tool) : unified(tool)
   if (body) {
     const before = measureShapeVolumeProperties(body).volume
     const after = measureShapeVolumeProperties(next).volume
@@ -588,6 +594,20 @@ function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut", war
   const solids = next.solids?.length ?? 1
   if (solids > 1) warnings.push(`现在是 ${solids} 个不相连的实体：新加的料没有和原来的实体接上`)
   return next
+}
+
+/** Counts may be expressions; they must land on a whole number. */
+function count(v: number, min: number, what: string): number {
+  const r = Math.round(v)
+  if (Math.abs(v - r) > 1e-6 || r < min) throw new InputError(`${what}要是不小于 ${min} 的整数，现在是 ${fmt(v)}`)
+  return r
+}
+
+function unified(tool: Shape3D): Shape3D {
+  const copy = tool.clone()
+  const out = copy.simplify()
+  copy.delete()
+  return out
 }
 
 function stats(body: Shape3D): BodyStats {
@@ -652,7 +672,7 @@ function sketchDrawing(shapes: SketchShape[], scope: Scope): Drawing {
       case "polygon": {
         const dd = n(s.d)
         if (!(dd > 0)) throw new InputError("多边形的外接圆直径必须大于 0")
-        d = drawPolysides(dd / 2, s.sides)
+        d = drawPolysides(dd / 2, count(n(s.sides), 3, "边数"))
         if (s.rotate !== undefined) d = d.rotate(n(s.rotate), [0, 0])
         d = d.translate(c[0], c[1])
         break
