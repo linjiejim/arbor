@@ -2,10 +2,11 @@
   "name": "featuretree-app",
   "private": true,
   "version": "0.0.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build && node scripts/precompress.mjs",
+    "build": "tsc -b && vite build && node scripts/prerender.mjs && node scripts/precompress.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
     "bake": "cd ../models && ../.venv/bin/python -m ftbake",

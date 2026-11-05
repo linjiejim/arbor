@@ -82,12 +82,11 @@ function shuffle<T>(a: T[], seed: number) {
 
 function OrderExercise({ modelId }: { modelId: string }) {
   const m = useAsync(() => loadManifest(modelId) as Promise<PartManifest>, [modelId])
-  const [order, setOrder] = React.useState<string[] | null>(null)
+  // The learner's own order once they move something; until then, the shuffle for this seed.
+  const [moved, setMoved] = React.useState<string[] | null>(null)
   const [checked, setChecked] = React.useState<null | { hard: OrderRule[]; soft: OrderRule[] }>(null)
   const [seed, setSeed] = React.useState(7)
-  React.useEffect(() => {
-    if (m.data) setOrder(shuffle(m.data.features.map((f) => f.id), seed))
-  }, [m.data, seed])
+  const order = moved ?? (m.data ? shuffle(m.data.features.map((f) => f.id), seed) : null)
   if (m.error) return <StateView kind="error" description="模型没加载出来。" onRetry={m.retry} />
   if (!m.data || !order) return <Spinner label="正在加载" />
   const feats = new Map(m.data.features.map((f) => [f.id, f]))
@@ -97,7 +96,7 @@ function OrderExercise({ modelId }: { modelId: string }) {
     if (j < 0 || j >= order.length) return
     const next = [...order]
     ;[next[i], next[j]] = [next[j], next[i]]
-    setOrder(next)
+    setMoved(next)
     setChecked(null)
   }
   const check = () => {
@@ -143,6 +142,7 @@ function OrderExercise({ modelId }: { modelId: string }) {
             variant="secondary"
             onClick={() => {
               setSeed((x) => x + 13)
+              setMoved(null)
               setChecked(null)
             }}
           >

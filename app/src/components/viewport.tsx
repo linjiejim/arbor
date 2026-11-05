@@ -4,14 +4,13 @@ import { House } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { IconButton } from "@/components/ui/button"
 import { Viewer, type ViewName, type ViewerOptions } from "@/three/viewer"
+import { ViewerCtx } from "@/components/viewer-context"
 
 /**
  * Hosts one Viewer. `onReady` runs once with the viewer and may return a
- * cleanup. Overlays (view cube, triad, toolbars) are plain HTML on top.
+ * cleanup. Overlays (view cube, triad, toolbars) are plain HTML on top;
+ * they can reach the viewer with `useViewer()` from viewer-context.
  */
-const ViewerCtx = React.createContext<Viewer | null>(null)
-export const useViewer = () => React.useContext(ViewerCtx)
-
 export function Viewport({
   onReady,
   options,

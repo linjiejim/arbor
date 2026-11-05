@@ -32,7 +32,6 @@ export function StudioPage() {
   const ready = studio.kernel.phase === "ready"
 
   React.useEffect(() => {
-    document.title = "AI 建模工作台 · FeatureTree"
     fetch("/api/studio/status")
       .then((r) => (r.ok ? r.json() : null))
       .then((s) => s && setStatus(s))

@@ -8,7 +8,7 @@ FeatureTree 是纯静态站：`app/dist/` 加上烘焙好的 `app/public/models/
 cd app
 npm ci --registry=https://registry.npmmirror.com
 npm run check     # 类型检查、lint、设计守卫
-npm run build     # 产出 app/dist
+npm run build     # 产出 app/dist，最后一步生成每个页面的 HTML、sitemap.xml 和 robots.txt
 ```
 
 模型只有在改了 `models/` 之后才需要重新烘焙（`npm run bake`，需要 Python 环境，见 `docs/dev/models.md`）。烘焙结果提交在仓库里，所以只改前端时不需要 Python。
@@ -29,7 +29,34 @@ ssh jim-server 'ls -t /srv/featuretree/releases'
 ssh jim-server 'ln -sfn /srv/featuretree/releases/<sha7> /srv/featuretree/current'
 ```
 
-服务器上的 Caddy 配置（`/etc/caddy/Caddyfile`）：单页应用的路由回落到 `index.html`；带哈希的资源长期缓存；模型文件名不带哈希，重新烘焙后最多缓存 1 小时；页面本身不缓存（`header` 在 `try_files` 改写路径之前执行，所以按「不是 assets / models」匹配，而不是按 `/index.html`）。
+### 每个页面一份 HTML
+
+网站是单页应用，微信、X 和搜索引擎的爬虫不运行 JavaScript，只看 HTML 里的 `<title>` 和 meta。所以 `npm run build` 的最后一步（`app/scripts/prerender.mjs`）把 `dist/index.html` 复制成每个页面一份，写入：
+
+- 这一页的 `<title>` 和 description
+- canonical 链接
+- Open Graph / Twitter 标签：绝对地址，分享图是 `/og.png`，1200×630
+
+| 文件 | 页面 |
+| --- | --- |
+| `dist/index.html` | 首页，也是未知路由的回落页 |
+| `dist/<页面>/index.html` | `learn`、`teardown`、`practice`、`atlas`、`glossary` |
+| `dist/lesson/<id>/index.html` | 每节已注册的课 |
+| `dist/teardown/<id>/index.html` | 每个烘焙好的模型 |
+| `dist/sitemap.xml`、`dist/robots.txt` | 全部上述页面 |
+
+- 标题和描述写在 `app/src/lib/page-meta.ts`，浏览器里的 `document.title` 也用它。
+- 新加的课和模型下次构建时自动生成，不用手动维护。
+- 这些副本加载的是同一份 JS，打开后照常是单页应用。
+
+服务器要先找 `{path}/index.html`，找不到再回落到 `/index.html`，见下面的 `try_files`。
+
+- 服务器还是旧的 `try_files {path} /index.html` 时网站照常能用，只是每个页面都拿到首页的标题。
+- 改好后用 `curl -s https://featuretree.linjiejim.com/lesson/revolve | grep '<title>'` 验证，应该看到这节课的标题。
+
+### Caddy
+
+服务器上的 Caddy 配置（`/etc/caddy/Caddyfile`）：页面先找预渲染的 `{path}/index.html`，没有再回落到 `index.html`；带哈希的资源长期缓存；模型文件名不带哈希，重新烘焙后最多缓存 1 小时；页面本身不缓存（`header` 在 `try_files` 改写路径之前执行，所以按「不是 assets / models」匹配，而不是按 `/index.html`）。
 
 ```caddyfile
 featuretree.linjiejim.com {
@@ -55,7 +82,7 @@ featuretree.linjiejim.com {
 	header @models Cache-Control "public, max-age=3600"
 	@pages not path /assets/* /models/*
 	header @pages Cache-Control "no-cache"
-	try_files {path} /index.html
+	try_files {path} {path}/index.html /index.html
 	file_server
 }
 ```

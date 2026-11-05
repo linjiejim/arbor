@@ -1,0 +1,43 @@
+name: Bug
+description: 页面打不开、3D 画面不对、按钮没反应、显示错乱
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: input
+    id: url
+    attributes:
+      label: 页面
+      description: 出问题的页面链接，课程或拆解请写到第几步。
+      placeholder: https://featuretree.linjiejim.com/teardown/mug 第 9 步
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 怎么复现
+      description: 一步一步写，别人照着做能看到同样的问题。
+      placeholder: |
+        1. 打开…
+        2. 点「下一步」…
+        3. 拖动…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望和实际
+      description: 本来应该怎样，实际怎样。
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 浏览器和设备
+      placeholder: Chrome 131 · macOS 15 · 1440×900；或 微信内置浏览器 · iPhone 15
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 截图和控制台报错
+      description: 有截图最好。打开开发者工具（F12）看到红色报错的话，也贴过来。
