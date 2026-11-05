@@ -1,0 +1,125 @@
+{
+ "mug": {
+  "kind": "part",
+  "id": "mug",
+  "title": "马克杯",
+  "subtitle": "旋转 · 圆角 · 抽壳 · 扫掠",
+  "level": "入门",
+  "teaches": [
+   "旋转体只画半截面",
+   "先圆角再抽壳",
+   "扫掠的路径与截面",
+   "圆角放在最后"
+  ],
+  "features": 9
+ },
+ "brick": {
+  "kind": "part",
+  "id": "brick",
+  "title": "积木砖",
+  "subtitle": "计数驱动 · 抽壳 · 矩形阵列",
+  "level": "入门",
+  "teaches": [
+   "用数量驱动尺寸",
+   "先抽壳再加凸点",
+   "矩形阵列",
+   "底管卡住凸点"
+  ],
+  "features": 7
+ },
+ "box_fillet_first": {
+  "kind": "part",
+  "id": "box_fillet_first",
+  "title": "小盒子 A：先圆角后抽壳",
+  "subtitle": "圆角先后对比 · 同一个盒子的两种做法",
+  "level": "入门",
+  "teaches": [
+   "特征顺序决定结果",
+   "抽壳会偏移圆角",
+   "内外圆角同心，壁厚均匀"
+  ],
+  "features": 4
+ },
+ "box_shell_first": {
+  "kind": "part",
+  "id": "box_shell_first",
+  "title": "小盒子 B：先抽壳后圆角",
+  "subtitle": "圆角先后对比 · 同一个盒子的两种做法",
+  "level": "入门",
+  "teaches": [
+   "特征顺序决定结果",
+   "后倒圆角只圆外面",
+   "转角处壁厚变薄"
+  ],
+  "features": 4
+ },
+ "keycap": {
+  "kind": "part",
+  "id": "keycap",
+  "title": "机械键盘键帽",
+  "subtitle": "放样 · 球面切除 · 抽壳 · 十字轴座",
+  "level": "进阶",
+  "teaches": [
+   "放样出斜面，顺带拔模",
+   "球面碟的深度由半径决定",
+   "抽壳让顶板和裙边一样厚",
+   "轴座拉伸到顶板下表面"
+  ],
+  "features": 8
+ },
+ "gear": {
+  "kind": "part",
+  "id": "gear",
+  "title": "直齿轮",
+  "subtitle": "渐开线 · 模数与齿数驱动 · 圆周阵列",
+  "level": "进阶",
+  "teaches": [
+   "派生尺寸：分度圆 = m × z",
+   "只画一个齿",
+   "圆周阵列",
+   "孔径跟着齿轮走"
+  ],
+  "features": 7
+ },
+ "enclosure_bottom": {
+  "kind": "part",
+  "id": "enclosure_bottom",
+  "title": "温湿度计底壳",
+  "subtitle": "拔模 · 抽壳 · 螺丝柱 · 加强筋",
+  "level": "进阶",
+  "teaches": [
+   "壁厚处处一致",
+   "拔模让零件脱得出模",
+   "螺丝柱用筋连到侧壁",
+   "筋厚约为壁厚的 60%"
+  ],
+  "features": 8
+ },
+ "enclosure": {
+  "kind": "assembly",
+  "id": "enclosure",
+  "title": "桌面温湿度计",
+  "subtitle": "上下壳 · 螺丝柱 · 爆炸图",
+  "level": "进阶",
+  "teaches": [
+   "上下壳在分型面对齐",
+   "螺丝柱夹住主板",
+   "外购件只建包络",
+   "爆炸方向就是拆卸方向"
+  ],
+  "parts": 8
+ },
+ "hinge_box": {
+  "kind": "assembly",
+  "id": "hinge_box",
+  "title": "带铰链盒子",
+  "subtitle": "关节 · 销钉 · 配合与自由度",
+  "level": "进阶",
+  "teaches": [
+   "关节交错排在同一根轴线上",
+   "过盈配合与间隙配合",
+   "约束只留一个转动自由度"
+  ],
+  "parts": 3
+ }
+}

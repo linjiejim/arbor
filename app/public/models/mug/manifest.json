@@ -1,0 +1,970 @@
+{
+ "kind": "part",
+ "id": "mug",
+ "title": "马克杯",
+ "subtitle": "旋转 · 圆角 · 抽壳 · 扫掠",
+ "level": "入门",
+ "teaches": [
+  "旋转体只画半截面",
+  "先圆角再抽壳",
+  "扫掠的路径与截面",
+  "圆角放在最后"
+ ],
+ "params": [
+  {
+   "id": "H",
+   "label": "杯高",
+   "unit": "mm",
+   "default": 96,
+   "values": [],
+   "feature": "sk1"
+  },
+  {
+   "id": "D",
+   "label": "杯口直径",
+   "unit": "mm",
+   "default": 84,
+   "values": [],
+   "feature": "sk1"
+  },
+  {
+   "id": "d",
+   "label": "杯底直径",
+   "unit": "mm",
+   "default": 72,
+   "values": [],
+   "feature": "sk1"
+  },
+  {
+   "id": "rb",
+   "label": "杯底圆角",
+   "unit": "mm",
+   "default": 9,
+   "values": [
+    2,
+    5,
+    9,
+    13
+   ],
+   "feature": "fil1"
+  },
+  {
+   "id": "t",
+   "label": "壁厚",
+   "unit": "mm",
+   "default": 3.5,
+   "values": [
+    2.5,
+    3.5,
+    5,
+    7
+   ],
+   "feature": "shell1"
+  },
+  {
+   "id": "rl",
+   "label": "杯口圆角",
+   "unit": "mm",
+   "default": 1.2,
+   "values": [],
+   "feature": "fil2"
+  },
+  {
+   "id": "reach",
+   "label": "把手外伸",
+   "unit": "mm",
+   "default": 30,
+   "values": [],
+   "feature": "sk2"
+  },
+  {
+   "id": "span",
+   "label": "把手跨度",
+   "unit": "mm",
+   "default": 54,
+   "values": [],
+   "feature": "sk2"
+  },
+  {
+   "id": "ha",
+   "label": "把手截面厚",
+   "unit": "mm",
+   "default": 5.5,
+   "values": [],
+   "feature": "sk3"
+  },
+  {
+   "id": "hb",
+   "label": "把手截面宽",
+   "unit": "mm",
+   "default": 9,
+   "values": [],
+   "feature": "sk3"
+  },
+  {
+   "id": "rj",
+   "label": "把手根部圆角",
+   "unit": "mm",
+   "default": 2,
+   "values": [],
+   "feature": "fil3"
+  }
+ ],
+ "features": [
+  {
+   "id": "sk1",
+   "op": "sketch",
+   "name": "草图1",
+   "title": "杯身半截面",
+   "why": "旋转体只画一半截面，另一半由旋转生成。截面画在杯背后一侧，旋转的接缝就落在杯背后，不会碰到把手。",
+   "summary": "前视基准面 · H96 · Ø84 / Ø72",
+   "summaryTemplate": "前视基准面 · H{H} · Ø{D} / Ø{d}",
+   "pitfall": "轮廓一旦越过中心线，旋转会自交失败。",
+   "view": [
+    0,
+    -1,
+    0
+   ],
+   "focus": null,
+   "code": "with BuildSketch(Plane.XZ) as body:\n    Polygon((0, 0), (-R0, 0), (-R1, H), (0, H), align=None)"
+  },
+  {
+   "id": "rev1",
+   "op": "revolve",
+   "name": "旋转1",
+   "title": "杯身",
+   "why": "先得到一个实心的「毛坯」。后面的特征都在它上面做加减，就像车床上的一根料。",
+   "summary": "360° · 绕中心线",
+   "summaryTemplate": "360° · 绕中心线",
+   "pitfall": "",
+   "view": [
+    1.0,
+    -1.1,
+    0.85
+   ],
+   "focus": null,
+   "code": "cup = revolve(body.sketch, Axis.Z)"
+  },
+  {
+   "id": "fil1",
+   "op": "fillet",
+   "name": "圆角1",
+   "title": "杯底外圆角",
+   "why": "在抽壳之前给外底边加圆角：抽壳会把它向内偏移出一个同心的内圆角，转角处的壁厚和别处一样。",
+   "summary": "R9",
+   "summaryTemplate": "R{rb}",
+   "pitfall": "圆角半径正好等于壁厚时，后面的抽壳会失败；比壁厚小时，内侧会变成尖角。在参数里把两者调到一样大试试。",
+   "view": [
+    1,
+    -1.1,
+    -0.5
+   ],
+   "focus": null,
+   "code": "bottom_edge = cup.edges().filter_by(GeomType.CIRCLE).sort_by(Axis.Z)[0]\ncup = fillet(bottom_edge, radius=p[\"rb\"])"
+  },
+  {
+   "id": "shell1",
+   "op": "shell",
+   "name": "抽壳1",
+   "title": "掏空杯身",
+   "why": "抽壳把实心件变成等壁厚的薄壁件：选中的顶面被打开，其余所有面向内偏移一个壁厚。注意杯口那圈面在内核看来是「被修改的顶面」，不是新面。",
+   "summary": "壁厚 3.5 · 移除顶面",
+   "summaryTemplate": "壁厚 {t} · 移除顶面",
+   "pitfall": "",
+   "view": [
+    0.8,
+    -1,
+    1.6
+   ],
+   "focus": null,
+   "code": "top_face = cup.faces().sort_by(Axis.Z)[-1]\ncup = offset(cup, amount=-t, openings=top_face)"
+  },
+  {
+   "id": "fil2",
+   "op": "fillet",
+   "name": "圆角2",
+   "title": "杯口圆角",
+   "why": "嘴唇接触的边必须圆滑。它只依赖杯口，放在把手之前，以后改把手不会碰到它。",
+   "summary": "R1.2 · 内外两条边",
+   "summaryTemplate": "R{rl} · 内外两条边",
+   "pitfall": "半径超过壁厚的一半就放不下：内外两个圆角会撞在一起。",
+   "view": [
+    0.7,
+    -1,
+    0.9
+   ],
+   "focus": [
+    [
+     -42.0,
+     -42.0,
+     78
+    ],
+    [
+     42.0,
+     42.0,
+     98
+    ]
+   ],
+   "code": "rim_edges = cup.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1]\ncup = fillet(rim_edges, radius=p[\"rl\"])"
+  },
+  {
+   "id": "sk2",
+   "op": "sketch",
+   "name": "草图2",
+   "title": "把手路径",
+   "why": "路径画在杯身的对称面上，把手天然左右对称。两端伸进杯壁里，扫掠出来才能和杯身合成一体。",
+   "summary": "前视基准面 · 外伸 30 · 跨度 54",
+   "summaryTemplate": "前视基准面 · 外伸 {reach} · 跨度 {span}",
+   "pitfall": "",
+   "view": [
+    0,
+    -1,
+    0
+   ],
+   "focus": null,
+   "code": "def wall_x(z):  # the outer wall's radius at height z\n    return R0 + (R1 - R0) * z / H\n\nz1, z2 = H * 0.54 + p[\"span\"] / 2, H * 0.54 - p[\"span\"] / 2\nc = p[\"reach\"] * 4 / 3\npath = Bezier(\n    (wall_x(z1) - t / 2, 0, z1),\n    (wall_x(z1) + c, 0, z1 + p[\"reach\"] * 0.12),\n    (wall_x(z2) + c, 0, z2 - p[\"reach\"] * 0.12),\n    (wall_x(z2) - t / 2, 0, z2),\n)"
+  },
+  {
+   "id": "sk3",
+   "op": "sketch",
+   "name": "草图3",
+   "title": "把手截面",
+   "why": "截面画在路径起点的法平面上。椭圆比圆更好握：窄的一面贴手指，宽的一面承力。",
+   "summary": "椭圆 5.5×9（半轴）",
+   "summaryTemplate": "椭圆 {ha}×{hb}（半轴）",
+   "pitfall": "",
+   "view": [
+    1.4,
+    -0.9,
+    0.5
+   ],
+   "focus": null,
+   "code": "start, tangent = path @ 0, path % 0\nin_plane = Vector(0, 1, 0).cross(tangent).normalized()\nsection_plane = Plane(origin=start, x_dir=in_plane, z_dir=tangent)\nwith BuildSketch(section_plane) as section:\n    Ellipse(p[\"ha\"], p[\"hb\"])"
+  },
+  {
+   "id": "sweep1",
+   "op": "sweep",
+   "name": "扫掠1",
+   "title": "把手",
+   "why": "截面沿路径走一遍得到把手，同时与杯身合并成一个实体。合并会在杯壁上开出把手的入口，所以杯壁显示为「被修改」。",
+   "summary": "沿草图2 · 合并到杯身",
+   "summaryTemplate": "沿草图2 · 合并到杯身",
+   "pitfall": "",
+   "view": [
+    1.0,
+    -1.1,
+    0.85
+   ],
+   "focus": null,
+   "code": "handle = sweep(section.sketch, path=path)\nmug = cup + handle"
+  },
+  {
+   "id": "fil3",
+   "op": "fillet",
+   "name": "圆角3",
+   "title": "把手根部圆角",
+   "why": "最后才倒把手根部的圆角：它引用的是合并后才出现的交线，放在前面就没有可选的边。圆角放最后，前面改什么都不容易让它断。",
+   "summary": "R2",
+   "summaryTemplate": "R{rj}",
+   "pitfall": "根部圆角太大，会吃掉把手截面，或者伸进杯子里面。",
+   "view": [
+    1.3,
+    -0.6,
+    0.4
+   ],
+   "focus": null,
+   "code": "junction = mug.edges() - cup.edges() - handle.edges()\nmug = fillet(junction, radius=p[\"rj\"])"
+  }
+ ],
+ "failures": {
+  "shell1": "杯底圆角正好等于壁厚：抽壳要把外圆角向内偏移出一个半径为「圆角 − 壁厚」的内圆角，半径恰好为零时这个面退化，内核算不出来。圆角比壁厚小时，内核会退一步给出尖的内角；比壁厚大时，内角是同心圆角。实际建模时让圆角明显大于壁厚。",
+  "fil2": "杯口圆角放不下：两侧圆角加起来超过了壁厚。",
+  "fil3": "把手根部圆角失败：交线附近的几何太窄，圆角滚不过去。减小圆角半径或加粗把手。",
+  "sweep1": "把手扫掠失败：路径弯得太急，截面在拐角处自交。"
+ },
+ "defaultVariant": "rb-9_t-3.5",
+ "variants": {
+  "rb-2_t-2.5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 2,
+    "t": 2.5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-2_t-2.5.glb",
+   "bytes": 205560,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R2",
+    "shell1": "壁厚 2.5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9236,
+   "volume": 79876.56,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.48,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-2_t-3.5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 2,
+    "t": 3.5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-2_t-3.5.glb",
+   "bytes": 205780,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R2",
+    "shell1": "壁厚 3.5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9246,
+   "volume": 104406.12,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.35,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-2_t-5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 2,
+    "t": 5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-2_t-5.glb",
+   "bytes": 205716,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R2",
+    "shell1": "壁厚 5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9234,
+   "volume": 139364.78,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.17,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-2_t-7": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 2,
+    "t": 7,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-2_t-7.glb",
+   "bytes": 202136,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R2",
+    "shell1": "壁厚 7 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 8943,
+   "volume": 182642.13,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     73.91,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-5_t-2.5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 5,
+    "t": 2.5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-5_t-2.5.glb",
+   "bytes": 227568,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R5",
+    "shell1": "壁厚 2.5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9998,
+   "volume": 79264.38,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.48,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-5_t-3.5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 5,
+    "t": 3.5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-5_t-3.5.glb",
+   "bytes": 227812,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R5",
+    "shell1": "壁厚 3.5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 10010,
+   "volume": 103637.58,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.35,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-5_t-5": {
+   "ok": false,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 5,
+    "t": 5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "failedAt": "shell1",
+   "reason": "offset Error, an alternative kind may resolve this error",
+   "file": "rb-5_t-5.glb",
+   "bytes": 39732,
+   "steps": 3
+  },
+  "rb-5_t-7": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 5,
+    "t": 7,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-5_t-7.glb",
+   "bytes": 200160,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R5",
+    "shell1": "壁厚 7 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 8783,
+   "volume": 181788.68,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     73.91,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-9_t-2.5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 9,
+    "t": 2.5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-9_t-2.5.glb",
+   "bytes": 227084,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R9",
+    "shell1": "壁厚 2.5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9958,
+   "volume": 78406.16,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.48,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-9_t-3.5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 9,
+    "t": 3.5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-9_t-3.5.glb",
+   "bytes": 227796,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R9",
+    "shell1": "壁厚 3.5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 10008,
+   "volume": 102457.16,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.35,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-9_t-5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 9,
+    "t": 5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-9_t-5.glb",
+   "bytes": 227724,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R9",
+    "shell1": "壁厚 5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9996,
+   "volume": 136870.19,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.17,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-9_t-7": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 9,
+    "t": 7,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-9_t-7.glb",
+   "bytes": 224148,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R9",
+    "shell1": "壁厚 7 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9705,
+   "volume": 179714.26,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     73.91,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-13_t-2.5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 13,
+    "t": 2.5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-13_t-2.5.glb",
+   "bytes": 226620,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R13",
+    "shell1": "壁厚 2.5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9920,
+   "volume": 77514.94,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.48,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-13_t-3.5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 13,
+    "t": 3.5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-13_t-3.5.glb",
+   "bytes": 226844,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R13",
+    "shell1": "壁厚 3.5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9930,
+   "volume": 101230.53,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.35,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-13_t-5": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 13,
+    "t": 5,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-13_t-5.glb",
+   "bytes": 227804,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R13",
+    "shell1": "壁厚 5 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 10002,
+   "volume": 135163.05,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     74.17,
+     41.92,
+     96.0
+    ]
+   ]
+  },
+  "rb-13_t-7": {
+   "ok": true,
+   "values": {
+    "H": 96,
+    "D": 84,
+    "d": 72,
+    "rb": 13,
+    "t": 7,
+    "rl": 1.2,
+    "reach": 30,
+    "span": 54,
+    "ha": 5.5,
+    "hb": 9,
+    "rj": 2
+   },
+   "file": "rb-13_t-7.glb",
+   "bytes": 224232,
+   "steps": 9,
+   "summaries": {
+    "sk1": "前视基准面 · H96 · Ø84 / Ø72",
+    "rev1": "360° · 绕中心线",
+    "fil1": "R13",
+    "shell1": "壁厚 7 · 移除顶面",
+    "fil2": "R1.2 · 内外两条边",
+    "sk2": "前视基准面 · 外伸 30 · 跨度 54",
+    "sk3": "椭圆 5.5×9（半轴）",
+    "sweep1": "沿草图2 · 合并到杯身",
+    "fil3": "R2"
+   },
+   "triangles": 9711,
+   "volume": 177408.6,
+   "bbox": [
+    [
+     -41.92,
+     -41.92,
+     0.0
+    ],
+    [
+     73.91,
+     41.92,
+     96.0
+    ]
+   ]
+  }
+ },
+ "source": "models/parts/mug.py"
+}

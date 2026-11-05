@@ -1,0 +1,528 @@
+{
+ "kind": "part",
+ "id": "brick",
+ "title": "积木砖",
+ "subtitle": "计数驱动 · 抽壳 · 矩形阵列",
+ "level": "入门",
+ "teaches": [
+  "用数量驱动尺寸",
+  "先抽壳再加凸点",
+  "矩形阵列",
+  "底管卡住凸点"
+ ],
+ "params": [
+  {
+   "id": "nx",
+   "label": "长向凸点数",
+   "unit": "个",
+   "default": 4,
+   "values": [
+    1,
+    2,
+    3,
+    4
+   ],
+   "feature": "sk1"
+  },
+  {
+   "id": "ny",
+   "label": "宽向凸点数",
+   "unit": "个",
+   "default": 2,
+   "values": [
+    1,
+    2
+   ],
+   "feature": "sk1"
+  },
+  {
+   "id": "H",
+   "label": "砖高",
+   "unit": "mm",
+   "default": 9.6,
+   "values": [],
+   "feature": "ext1"
+  },
+  {
+   "id": "t",
+   "label": "壁厚",
+   "unit": "mm",
+   "default": 1.2,
+   "values": [],
+   "feature": "shell1"
+  },
+  {
+   "id": "ds",
+   "label": "凸点直径",
+   "unit": "mm",
+   "default": 4.8,
+   "values": [],
+   "feature": "boss1"
+  },
+  {
+   "id": "hs",
+   "label": "凸点高",
+   "unit": "mm",
+   "default": 1.8,
+   "values": [],
+   "feature": "boss1"
+  },
+  {
+   "id": "dt",
+   "label": "底管外径",
+   "unit": "mm",
+   "default": 6.51,
+   "values": [],
+   "feature": "tube1"
+  },
+  {
+   "id": "rf",
+   "label": "凸点圆角",
+   "unit": "mm",
+   "default": 0.3,
+   "values": [],
+   "feature": "fil1"
+  }
+ ],
+ "features": [
+  {
+   "id": "sk1",
+   "op": "sketch",
+   "name": "草图1",
+   "title": "底面矩形",
+   "why": "外形不直接写死，而是由凸点数算出来：边长 = 8 × 个数 − 0.2。0.2 是两块砖并排时留的缝，每边各让 0.1。以后改个数，尺寸自己跟着变。",
+   "summary": "上视基准面 · 4×2 个凸点 · 节距 8",
+   "summaryTemplate": "上视基准面 · {nx}×{ny} 个凸点 · 节距 8",
+   "pitfall": "直接按 8 的整数倍画，两块砖并排会挤在一起，插不进去。",
+   "view": [
+    0,
+    0,
+    1
+   ],
+   "focus": null,
+   "code": "L, W = PITCH * nx - GAP, PITCH * ny - GAP\noutline = Rectangle(L, W)"
+  },
+  {
+   "id": "ext1",
+   "op": "extrude",
+   "name": "拉伸1",
+   "title": "砖体",
+   "why": "把矩形拉成实心的砖体。高度 9.6 是标准砖的高度，三块薄板摞起来正好等于一块砖。",
+   "summary": "高 9.6",
+   "summaryTemplate": "高 {H}",
+   "pitfall": "",
+   "view": [
+    1.0,
+    -1.1,
+    0.85
+   ],
+   "focus": null,
+   "code": "brick = extrude(outline, amount=H)"
+  },
+  {
+   "id": "shell1",
+   "op": "shell",
+   "name": "抽壳1",
+   "title": "掏空砖体",
+   "why": "选中底面作为开口，其余面向内偏移一个壁厚。抽壳放在加凸点之前：这时砖还是一个简单的盒子，抽壳最稳；凸点后加，也不会被掏空。",
+   "summary": "壁厚 1.2 · 移除底面",
+   "summaryTemplate": "壁厚 {t} · 移除底面",
+   "pitfall": "先加凸点再抽壳，凸点也会被掏成空心的小杯子。",
+   "view": [
+    0.8,
+    -1,
+    -1.2
+   ],
+   "focus": null,
+   "code": "bottom = brick.faces().sort_by(Axis.Z)[0]\nbrick = offset(brick, amount=-t, openings=bottom)"
+  },
+  {
+   "id": "boss1",
+   "op": "extrude",
+   "name": "拉伸2",
+   "title": "第一个凸点",
+   "why": "先只做一个凸点，放在阵列的第一个位置。阵列复制的是这个「种子」特征，以后改凸点直径只需要改这一处。",
+   "summary": "Ø4.8 × 1.8",
+   "summaryTemplate": "Ø{ds} × {hs}",
+   "pitfall": "",
+   "view": [
+    1,
+    -1.1,
+    1.2
+   ],
+   "focus": null,
+   "code": "stud = Pos(0, 0, H) * Cylinder(p[\"ds\"] / 2, p[\"hs\"], align=UP)\nfirst = Pos(-PITCH * (nx - 1) / 2, -PITCH * (ny - 1) / 2) * stud\nbrick += first"
+  },
+  {
+   "id": "pat1",
+   "op": "pattern",
+   "name": "阵列1",
+   "title": "凸点阵列",
+   "why": "矩形阵列按节距 8 把凸点铺满顶面，两个方向的个数就是参数里的凸点数。阵列以砖的中心对称展开，所以凸点永远居中。",
+   "summary": "4×2 · 间距 8",
+   "summaryTemplate": "{nx}×{ny} · 间距 8",
+   "pitfall": "",
+   "view": [
+    1,
+    -1.1,
+    1.2
+   ],
+   "focus": null,
+   "code": "brick += GridLocations(PITCH, PITCH, nx, ny) * stud"
+  },
+  {
+   "id": "tube1",
+   "op": "extrude",
+   "name": "拉伸3",
+   "title": "底管",
+   "why": "底管站在四个凸点的正中间，外径 6.51 正好同时顶住四周的凸点，砖就是靠它夹紧的。只有一排凸点的砖放不下空心管，改成凸点之间的细实心柱；1×1 的砖什么都不用加。",
+   "summary": "Ø6.51 · 从底面到顶板",
+   "summaryTemplate": "Ø{dt} · 从底面到顶板",
+   "pitfall": "底管长到顶板下表面就要停：短了接不上顶板，成了悬空的零件。",
+   "view": [
+    0.8,
+    -1,
+    -1.2
+   ],
+   "focus": null,
+   "code": "h = H - t  # 从底面一直长到顶板下表面\nif nx > 1 and ny > 1:  # 空心管：卡在四个凸点中间\n    post = Cylinder(p[\"dt\"] / 2, h, align=UP) - Cylinder(p[\"ds\"] / 2, h, align=UP)\nelse:  # 只有一排：凸点之间的细实心柱\n    post = Cylinder(1.6, h, align=UP)\nif nx > 1 or ny > 1:\n    brick += GridLocations(PITCH, PITCH, max(nx - 1, 1), max(ny - 1, 1)) * post"
+  },
+  {
+   "id": "fil1",
+   "op": "fillet",
+   "name": "圆角1",
+   "title": "凸点顶边",
+   "why": "凸点顶边倒一个小圆角，插拔时不刮手，也更好对准。圆角最后做，前面改阵列个数不会让它丢边。",
+   "summary": "R0.3",
+   "summaryTemplate": "R{rf}",
+   "pitfall": "",
+   "view": [
+    1,
+    -1.1,
+    1.2
+   ],
+   "focus": null,
+   "code": "stud_tops = brick.edges().filter_by(GeomType.CIRCLE).group_by(Axis.Z)[-1]\nbrick = fillet(stud_tops, radius=p[\"rf\"])"
+  }
+ ],
+ "failures": {
+  "shell1": "抽壳失败：壁厚太厚，内腔放不下。",
+  "fil1": "凸点圆角放不下：圆角半径超过了凸点的高度或半径。"
+ },
+ "defaultVariant": "nx-4_ny-2",
+ "variants": {
+  "nx-1_ny-1": {
+   "ok": true,
+   "values": {
+    "nx": 1,
+    "ny": 1,
+    "H": 9.6,
+    "t": 1.2,
+    "ds": 4.8,
+    "hs": 1.8,
+    "dt": 6.51,
+    "rf": 0.3
+   },
+   "file": "nx-1_ny-1.glb",
+   "bytes": 39980,
+   "steps": 7,
+   "summaries": {
+    "sk1": "上视基准面 · 1×1 个凸点 · 节距 8",
+    "ext1": "高 9.6",
+    "shell1": "壁厚 1.2 · 移除底面",
+    "boss1": "Ø4.8 × 1.8",
+    "pat1": "1×1 · 间距 8",
+    "tube1": "Ø6.51 · 从底面到顶板",
+    "fil1": "R0.3"
+   },
+   "triangles": 1248,
+   "volume": 371.41,
+   "bbox": [
+    [
+     -3.9,
+     -3.9,
+     0.0
+    ],
+    [
+     3.9,
+     3.9,
+     11.4
+    ]
+   ]
+  },
+  "nx-1_ny-2": {
+   "ok": true,
+   "values": {
+    "nx": 1,
+    "ny": 2,
+    "H": 9.6,
+    "t": 1.2,
+    "ds": 4.8,
+    "hs": 1.8,
+    "dt": 6.51,
+    "rf": 0.3
+   },
+   "file": "nx-1_ny-2.glb",
+   "bytes": 71244,
+   "steps": 7,
+   "summaries": {
+    "sk1": "上视基准面 · 1×2 个凸点 · 节距 8",
+    "ext1": "高 9.6",
+    "shell1": "壁厚 1.2 · 移除底面",
+    "boss1": "Ø4.8 × 1.8",
+    "pat1": "1×2 · 间距 8",
+    "tube1": "Ø6.51 · 从底面到顶板",
+    "fil1": "R0.3"
+   },
+   "triangles": 2680,
+   "volume": 707.41,
+   "bbox": [
+    [
+     -3.9,
+     -7.9,
+     0.0
+    ],
+    [
+     3.9,
+     7.9,
+     11.4
+    ]
+   ]
+  },
+  "nx-2_ny-1": {
+   "ok": true,
+   "values": {
+    "nx": 2,
+    "ny": 1,
+    "H": 9.6,
+    "t": 1.2,
+    "ds": 4.8,
+    "hs": 1.8,
+    "dt": 6.51,
+    "rf": 0.3
+   },
+   "file": "nx-2_ny-1.glb",
+   "bytes": 71244,
+   "steps": 7,
+   "summaries": {
+    "sk1": "上视基准面 · 2×1 个凸点 · 节距 8",
+    "ext1": "高 9.6",
+    "shell1": "壁厚 1.2 · 移除底面",
+    "boss1": "Ø4.8 × 1.8",
+    "pat1": "2×1 · 间距 8",
+    "tube1": "Ø6.51 · 从底面到顶板",
+    "fil1": "R0.3"
+   },
+   "triangles": 2680,
+   "volume": 707.41,
+   "bbox": [
+    [
+     -7.9,
+     -3.9,
+     0.0
+    ],
+    [
+     7.9,
+     3.9,
+     11.4
+    ]
+   ]
+  },
+  "nx-2_ny-2": {
+   "ok": true,
+   "values": {
+    "nx": 2,
+    "ny": 2,
+    "H": 9.6,
+    "t": 1.2,
+    "ds": 4.8,
+    "hs": 1.8,
+    "dt": 6.51,
+    "rf": 0.3
+   },
+   "file": "nx-2_ny-2.glb",
+   "bytes": 120756,
+   "steps": 7,
+   "summaries": {
+    "sk1": "上视基准面 · 2×2 个凸点 · 节距 8",
+    "ext1": "高 9.6",
+    "shell1": "壁厚 1.2 · 移除底面",
+    "boss1": "Ø4.8 × 1.8",
+    "pat1": "2×2 · 间距 8",
+    "tube1": "Ø6.51 · 从底面到顶板",
+    "fil1": "R0.3"
+   },
+   "triangles": 5280,
+   "volume": 1144.99,
+   "bbox": [
+    [
+     -7.9,
+     -7.9,
+     0.0
+    ],
+    [
+     7.9,
+     7.9,
+     11.4
+    ]
+   ]
+  },
+  "nx-3_ny-1": {
+   "ok": true,
+   "values": {
+    "nx": 3,
+    "ny": 1,
+    "H": 9.6,
+    "t": 1.2,
+    "ds": 4.8,
+    "hs": 1.8,
+    "dt": 6.51,
+    "rf": 0.3
+   },
+   "file": "nx-3_ny-1.glb",
+   "bytes": 98244,
+   "steps": 7,
+   "summaries": {
+    "sk1": "上视基准面 · 3×1 个凸点 · 节距 8",
+    "ext1": "高 9.6",
+    "shell1": "壁厚 1.2 · 移除底面",
+    "boss1": "Ø4.8 × 1.8",
+    "pat1": "3×1 · 间距 8",
+    "tube1": "Ø6.51 · 从底面到顶板",
+    "fil1": "R0.3"
+   },
+   "triangles": 4064,
+   "volume": 1043.42,
+   "bbox": [
+    [
+     -11.9,
+     -3.9,
+     0.0
+    ],
+    [
+     11.9,
+     3.9,
+     11.4
+    ]
+   ]
+  },
+  "nx-3_ny-2": {
+   "ok": true,
+   "values": {
+    "nx": 3,
+    "ny": 2,
+    "H": 9.6,
+    "t": 1.2,
+    "ds": 4.8,
+    "hs": 1.8,
+    "dt": 6.51,
+    "rf": 0.3
+   },
+   "file": "nx-3_ny-2.glb",
+   "bytes": 175600,
+   "steps": 7,
+   "summaries": {
+    "sk1": "上视基准面 · 3×2 个凸点 · 节距 8",
+    "ext1": "高 9.6",
+    "shell1": "壁厚 1.2 · 移除底面",
+    "boss1": "Ø4.8 × 1.8",
+    "pat1": "3×2 · 间距 8",
+    "tube1": "Ø6.51 · 从底面到顶板",
+    "fil1": "R0.3"
+   },
+   "triangles": 8048,
+   "volume": 1650.12,
+   "bbox": [
+    [
+     -11.9,
+     -7.9,
+     0.0
+    ],
+    [
+     11.9,
+     7.9,
+     11.4
+    ]
+   ]
+  },
+  "nx-4_ny-1": {
+   "ok": true,
+   "values": {
+    "nx": 4,
+    "ny": 1,
+    "H": 9.6,
+    "t": 1.2,
+    "ds": 4.8,
+    "hs": 1.8,
+    "dt": 6.51,
+    "rf": 0.3
+   },
+   "file": "nx-4_ny-1.glb",
+   "bytes": 125180,
+   "steps": 7,
+   "summaries": {
+    "sk1": "上视基准面 · 4×1 个凸点 · 节距 8",
+    "ext1": "高 9.6",
+    "shell1": "壁厚 1.2 · 移除底面",
+    "boss1": "Ø4.8 × 1.8",
+    "pat1": "4×1 · 间距 8",
+    "tube1": "Ø6.51 · 从底面到顶板",
+    "fil1": "R0.3"
+   },
+   "triangles": 5448,
+   "volume": 1379.43,
+   "bbox": [
+    [
+     -15.9,
+     -3.9,
+     0.0
+    ],
+    [
+     15.9,
+     3.9,
+     11.4
+    ]
+   ]
+  },
+  "nx-4_ny-2": {
+   "ok": true,
+   "values": {
+    "nx": 4,
+    "ny": 2,
+    "H": 9.6,
+    "t": 1.2,
+    "ds": 4.8,
+    "hs": 1.8,
+    "dt": 6.51,
+    "rf": 0.3
+   },
+   "file": "nx-4_ny-2.glb",
+   "bytes": 230408,
+   "steps": 7,
+   "summaries": {
+    "sk1": "上视基准面 · 4×2 个凸点 · 节距 8",
+    "ext1": "高 9.6",
+    "shell1": "壁厚 1.2 · 移除底面",
+    "boss1": "Ø4.8 × 1.8",
+    "pat1": "4×2 · 间距 8",
+    "tube1": "Ø6.51 · 从底面到顶板",
+    "fil1": "R0.3"
+   },
+   "triangles": 10816,
+   "volume": 2155.25,
+   "bbox": [
+    [
+     -15.9,
+     -7.9,
+     0.0
+    ],
+    [
+     15.9,
+     7.9,
+     11.4
+    ]
+   ]
+  }
+ },
+ "source": "models/parts/brick.py"
+}

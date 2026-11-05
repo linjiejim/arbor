@@ -1,0 +1,473 @@
+{
+ "kind": "part",
+ "id": "keycap",
+ "title": "机械键盘键帽",
+ "subtitle": "放样 · 球面切除 · 抽壳 · 十字轴座",
+ "level": "进阶",
+ "teaches": [
+  "放样出斜面，顺带拔模",
+  "球面碟的深度由半径决定",
+  "抽壳让顶板和裙边一样厚",
+  "轴座拉伸到顶板下表面"
+ ],
+ "params": [
+  {
+   "id": "B",
+   "label": "底面边长",
+   "unit": "mm",
+   "default": 18,
+   "values": [],
+   "feature": "sk1"
+  },
+  {
+   "id": "TX",
+   "label": "顶面长",
+   "unit": "mm",
+   "default": 12.5,
+   "values": [],
+   "feature": "sk2"
+  },
+  {
+   "id": "TY",
+   "label": "顶面宽",
+   "unit": "mm",
+   "default": 14,
+   "values": [],
+   "feature": "sk2"
+  },
+  {
+   "id": "H",
+   "label": "高度",
+   "unit": "mm",
+   "default": 8,
+   "values": [],
+   "feature": "sk2"
+  },
+  {
+   "id": "R",
+   "label": "碟面球半径",
+   "unit": "mm",
+   "default": 35,
+   "values": [
+    25,
+    35,
+    50
+   ],
+   "feature": "cut1"
+  },
+  {
+   "id": "t",
+   "label": "壁厚",
+   "unit": "mm",
+   "default": 1.5,
+   "values": [
+    1.0,
+    1.5
+   ],
+   "feature": "shell1"
+  },
+  {
+   "id": "ds",
+   "label": "轴座外径",
+   "unit": "mm",
+   "default": 5.5,
+   "values": [],
+   "feature": "sk3"
+  },
+  {
+   "id": "rf",
+   "label": "顶边圆角",
+   "unit": "mm",
+   "default": 0.6,
+   "values": [],
+   "feature": "fil1"
+  }
+ ],
+ "features": [
+  {
+   "id": "sk1",
+   "op": "sketch",
+   "name": "草图1",
+   "title": "底面轮廓",
+   "why": "键帽的底面是一个 18 × 18 的正方形，这是 1u 键位 19.05 的节距减去两侧的缝。",
+   "summary": "上视基准面 · 18 × 18",
+   "summaryTemplate": "上视基准面 · {B} × {B}",
+   "pitfall": "",
+   "view": [
+    0,
+    0,
+    1
+   ],
+   "focus": null,
+   "code": "base = Rectangle(p[\"B\"], p[\"B\"])"
+  },
+  {
+   "id": "sk2",
+   "op": "sketch",
+   "name": "草图2",
+   "title": "顶面轮廓",
+   "why": "顶面画在离底面 8 mm 的基准面上，比底面小一圈。两张草图一大一小，下一步放样把它们连起来。",
+   "summary": "基准面1（高 8）· 12.5 × 14",
+   "summaryTemplate": "基准面1（高 {H}）· {TX} × {TY}",
+   "pitfall": "",
+   "view": [
+    0.6,
+    -1,
+    0.6
+   ],
+   "focus": null,
+   "code": "top_plane = Plane.XY.offset(H)\ntop = top_plane * Rectangle(p[\"TX\"], p[\"TY\"])"
+  },
+  {
+   "id": "loft1",
+   "op": "loft",
+   "name": "放样1",
+   "title": "键帽外形",
+   "why": "放样把底面和顶面连成四个斜面。斜面本身就是很大的拔模角：键帽从模具里顶出来时，侧面不会和模具摩擦。",
+   "summary": "草图1 → 草图2 · 直纹",
+   "summaryTemplate": "草图1 → 草图2 · 直纹",
+   "pitfall": "两张草图的顶点数要一样多，否则放样会扭成麻花。",
+   "view": [
+    1.0,
+    -1.1,
+    0.85
+   ],
+   "focus": null,
+   "code": "cap = loft([base, top], ruled=True)"
+  },
+  {
+   "id": "cut1",
+   "op": "cut",
+   "name": "切除1",
+   "title": "球面碟",
+   "why": "用一个大球从顶面切出浅浅的碟，手指按下去刚好落在中间。碟口的直径固定为 11，球半径越大，碟越浅：R25 深 0.6，R50 只有 0.3。",
+   "summary": "球面 R35 · 碟口 Ø11",
+   "summaryTemplate": "球面 R{R} · 碟口 Ø11",
+   "pitfall": "球的极点不能落在碟的正中心。极点处曲面退化，后面的抽壳会失败，所以先把球转 90°，让极点躺到侧面去。",
+   "view": [
+    0.5,
+    -1,
+    1.6
+   ],
+   "focus": null,
+   "code": "depth = R - sqrt(R**2 - (DISH / 2) ** 2)  # 碟口直径固定，半径越大碟越浅\nball = Pos(0, 0, H - depth + R) * Rot(90, 0, 0) * Sphere(R)  # 极点转到侧面\ncap -= ball"
+  },
+  {
+   "id": "shell1",
+   "op": "shell",
+   "name": "抽壳1",
+   "title": "掏空键帽",
+   "why": "从底面打开抽壳，顶板跟着球面一起向下偏移，碟面下面的顶板也是均匀的一个壁厚。注塑件最怕厚薄不均，厚的地方冷却慢，表面会缩出凹坑。",
+   "summary": "壁厚 1.5 · 移除底面",
+   "summaryTemplate": "壁厚 {t} · 移除底面",
+   "pitfall": "",
+   "view": [
+    0.6,
+    -0.8,
+    -1.4
+   ],
+   "focus": null,
+   "code": "bottom = cap.faces().sort_by(Axis.Z)[0]\ncap = offset(cap, amount=-t, openings=bottom)"
+  },
+  {
+   "id": "sk3",
+   "op": "sketch",
+   "name": "草图3",
+   "title": "十字轴截面",
+   "why": "轴座截面是一个 Ø5.5 的圆减掉十字孔。十字孔 4 × 1.17 对应 MX 轴的十字头，过盈一点点就能卡紧。",
+   "summary": "离底面 1 · Ø5.5 圆 − 十字 4 × 1.17",
+   "summaryTemplate": "离底面 1 · Ø{ds} 圆 − 十字 4 × 1.17",
+   "pitfall": "",
+   "view": [
+    0,
+    0,
+    -1
+   ],
+   "focus": null,
+   "code": "stem_plane = Plane.XY.offset(STEM_Z0)\ncross = Rectangle(4.0, 1.17) + Rectangle(1.17, 4.0)\nstem_profile = stem_plane * (Circle(p[\"ds\"] / 2) - cross)"
+  },
+  {
+   "id": "ext1",
+   "op": "extrude",
+   "name": "拉伸1",
+   "title": "十字轴座",
+   "why": "轴座从下往上长，直到顶板的下表面。CAD 里一般选「成形到下一面」；这里算出顶板下表面最低点的高度，再多伸 0.3 吃进顶板，效果一样，而且尺寸写得明明白白。",
+   "summary": "到顶板下表面 + 0.3",
+   "summaryTemplate": "到顶板下表面 + 0.3",
+   "pitfall": "只拉到下表面最低点会留一圈缝：顶板下表面是球面，离中心越远越高。",
+   "view": [
+    0.6,
+    -0.8,
+    -1.4
+   ],
+   "focus": null,
+   "code": "underside = H - depth - t  # 顶板下表面的最低点\ncap += extrude(stem_profile, amount=underside - STEM_Z0 + OVERLAP)"
+  },
+  {
+   "id": "fil1",
+   "op": "fillet",
+   "name": "圆角1",
+   "title": "顶面四边",
+   "why": "最后给顶面四条边倒小圆角，摸上去不割手。放在最后，前面改碟面或壁厚都不会碰到它。",
+   "summary": "R0.6",
+   "summaryTemplate": "R{rf}",
+   "pitfall": "圆角不能大于碟口到边的距离，否则会和碟面撞在一起。",
+   "view": [
+    1,
+    -1.1,
+    1.2
+   ],
+   "focus": null,
+   "code": "top_edges = cap.edges().group_by(Axis.Z)[-1].filter_by(GeomType.LINE)\ncap = fillet(top_edges, radius=p[\"rf\"])"
+  }
+ ],
+ "failures": {
+  "shell1": "抽壳失败：顶板向下偏移后和侧壁撞在一起，或者碟面太深。",
+  "ext1": "轴座没能和顶板连成一体。",
+  "fil1": "顶边圆角放不下：圆角伸进了碟面。"
+ },
+ "defaultVariant": "R-35_t-1.5",
+ "variants": {
+  "R-25_t-1": {
+   "ok": true,
+   "values": {
+    "B": 18,
+    "TX": 12.5,
+    "TY": 14,
+    "H": 8,
+    "R": 25,
+    "t": 1.0,
+    "ds": 5.5,
+    "rf": 0.6
+   },
+   "file": "R-25_t-1.glb",
+   "bytes": 73720,
+   "steps": 8,
+   "summaries": {
+    "sk1": "上视基准面 · 18 × 18",
+    "sk2": "基准面1（高 8）· 12.5 × 14",
+    "loft1": "草图1 → 草图2 · 直纹",
+    "cut1": "球面 R25 · 碟口 Ø11",
+    "shell1": "壁厚 1.0 · 移除底面",
+    "sk3": "离底面 1 · Ø5.5 圆 − 十字 4 × 1.17",
+    "ext1": "到顶板下表面 + 0.3",
+    "fil1": "R0.6"
+   },
+   "triangles": 936,
+   "volume": 703.74,
+   "bbox": [
+    [
+     -9.0,
+     -9.0,
+     -0.0
+    ],
+    [
+     9.0,
+     9.0,
+     8.0
+    ]
+   ]
+  },
+  "R-25_t-1.5": {
+   "ok": true,
+   "values": {
+    "B": 18,
+    "TX": 12.5,
+    "TY": 14,
+    "H": 8,
+    "R": 25,
+    "t": 1.5,
+    "ds": 5.5,
+    "rf": 0.6
+   },
+   "file": "R-25_t-1.5.glb",
+   "bytes": 72900,
+   "steps": 8,
+   "summaries": {
+    "sk1": "上视基准面 · 18 × 18",
+    "sk2": "基准面1（高 8）· 12.5 × 14",
+    "loft1": "草图1 → 草图2 · 直纹",
+    "cut1": "球面 R25 · 碟口 Ø11",
+    "shell1": "壁厚 1.5 · 移除底面",
+    "sk3": "离底面 1 · Ø5.5 圆 − 十字 4 × 1.17",
+    "ext1": "到顶板下表面 + 0.3",
+    "fil1": "R0.6"
+   },
+   "triangles": 909,
+   "volume": 949.7,
+   "bbox": [
+    [
+     -9.0,
+     -9.0,
+     -0.0
+    ],
+    [
+     9.0,
+     9.0,
+     8.0
+    ]
+   ]
+  },
+  "R-35_t-1": {
+   "ok": true,
+   "values": {
+    "B": 18,
+    "TX": 12.5,
+    "TY": 14,
+    "H": 8,
+    "R": 35,
+    "t": 1.0,
+    "ds": 5.5,
+    "rf": 0.6
+   },
+   "file": "R-35_t-1.glb",
+   "bytes": 73620,
+   "steps": 8,
+   "summaries": {
+    "sk1": "上视基准面 · 18 × 18",
+    "sk2": "基准面1（高 8）· 12.5 × 14",
+    "loft1": "草图1 → 草图2 · 直纹",
+    "cut1": "球面 R35 · 碟口 Ø11",
+    "shell1": "壁厚 1.0 · 移除底面",
+    "sk3": "离底面 1 · Ø5.5 圆 − 十字 4 × 1.17",
+    "ext1": "到顶板下表面 + 0.3",
+    "fil1": "R0.6"
+   },
+   "triangles": 925,
+   "volume": 705.55,
+   "bbox": [
+    [
+     -9.0,
+     -9.0,
+     -0.0
+    ],
+    [
+     9.0,
+     9.0,
+     8.0
+    ]
+   ]
+  },
+  "R-35_t-1.5": {
+   "ok": true,
+   "values": {
+    "B": 18,
+    "TX": 12.5,
+    "TY": 14,
+    "H": 8,
+    "R": 35,
+    "t": 1.5,
+    "ds": 5.5,
+    "rf": 0.6
+   },
+   "file": "R-35_t-1.5.glb",
+   "bytes": 72708,
+   "steps": 8,
+   "summaries": {
+    "sk1": "上视基准面 · 18 × 18",
+    "sk2": "基准面1（高 8）· 12.5 × 14",
+    "loft1": "草图1 → 草图2 · 直纹",
+    "cut1": "球面 R35 · 碟口 Ø11",
+    "shell1": "壁厚 1.5 · 移除底面",
+    "sk3": "离底面 1 · Ø5.5 圆 − 十字 4 × 1.17",
+    "ext1": "到顶板下表面 + 0.3",
+    "fil1": "R0.6"
+   },
+   "triangles": 893,
+   "volume": 951.28,
+   "bbox": [
+    [
+     -9.0,
+     -9.0,
+     -0.0
+    ],
+    [
+     9.0,
+     9.0,
+     8.0
+    ]
+   ]
+  },
+  "R-50_t-1": {
+   "ok": true,
+   "values": {
+    "B": 18,
+    "TX": 12.5,
+    "TY": 14,
+    "H": 8,
+    "R": 50,
+    "t": 1.0,
+    "ds": 5.5,
+    "rf": 0.6
+   },
+   "file": "R-50_t-1.glb",
+   "bytes": 73620,
+   "steps": 8,
+   "summaries": {
+    "sk1": "上视基准面 · 18 × 18",
+    "sk2": "基准面1（高 8）· 12.5 × 14",
+    "loft1": "草图1 → 草图2 · 直纹",
+    "cut1": "球面 R50 · 碟口 Ø11",
+    "shell1": "壁厚 1.0 · 移除底面",
+    "sk3": "离底面 1 · Ø5.5 圆 − 十字 4 × 1.17",
+    "ext1": "到顶板下表面 + 0.3",
+    "fil1": "R0.6"
+   },
+   "triangles": 925,
+   "volume": 707.0,
+   "bbox": [
+    [
+     -9.0,
+     -9.0,
+     -0.0
+    ],
+    [
+     9.0,
+     9.0,
+     8.0
+    ]
+   ]
+  },
+  "R-50_t-1.5": {
+   "ok": true,
+   "values": {
+    "B": 18,
+    "TX": 12.5,
+    "TY": 14,
+    "H": 8,
+    "R": 50,
+    "t": 1.5,
+    "ds": 5.5,
+    "rf": 0.6
+   },
+   "file": "R-50_t-1.5.glb",
+   "bytes": 72824,
+   "steps": 8,
+   "summaries": {
+    "sk1": "上视基准面 · 18 × 18",
+    "sk2": "基准面1（高 8）· 12.5 × 14",
+    "loft1": "草图1 → 草图2 · 直纹",
+    "cut1": "球面 R50 · 碟口 Ø11",
+    "shell1": "壁厚 1.5 · 移除底面",
+    "sk3": "离底面 1 · Ø5.5 圆 − 十字 4 × 1.17",
+    "ext1": "到顶板下表面 + 0.3",
+    "fil1": "R0.6"
+   },
+   "triangles": 893,
+   "volume": 952.62,
+   "bbox": [
+    [
+     -9.0,
+     -9.0,
+     -0.0
+    ],
+    [
+     9.0,
+     9.0,
+     8.0
+    ]
+   ]
+  }
+ },
+ "source": "models/parts/keycap.py"
+}

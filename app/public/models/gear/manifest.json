@@ -1,0 +1,648 @@
+{
+ "kind": "part",
+ "id": "gear",
+ "title": "直齿轮",
+ "subtitle": "渐开线 · 模数与齿数驱动 · 圆周阵列",
+ "level": "进阶",
+ "teaches": [
+  "派生尺寸：分度圆 = m × z",
+  "只画一个齿",
+  "圆周阵列",
+  "孔径跟着齿轮走"
+ ],
+ "params": [
+  {
+   "id": "m",
+   "label": "模数",
+   "unit": "mm",
+   "default": 1.5,
+   "values": [
+    1,
+    1.5,
+    2
+   ],
+   "feature": "sk1"
+  },
+  {
+   "id": "z",
+   "label": "齿数",
+   "unit": "个",
+   "default": 18,
+   "values": [
+    12,
+    18,
+    24,
+    36
+   ],
+   "feature": "pat1"
+  },
+  {
+   "id": "alpha",
+   "label": "压力角",
+   "unit": "°",
+   "default": 20,
+   "values": [],
+   "feature": "sk2"
+  },
+  {
+   "id": "B",
+   "label": "齿宽",
+   "unit": "mm",
+   "default": 8,
+   "values": [],
+   "feature": "ext1"
+  },
+  {
+   "id": "c",
+   "label": "孔口倒角",
+   "unit": "mm",
+   "default": 0.5,
+   "values": [],
+   "feature": "cha1"
+  }
+ ],
+ "features": [
+  {
+   "id": "sk1",
+   "op": "sketch",
+   "name": "草图1",
+   "title": "齿根圆",
+   "why": "齿轮所有的圆都由模数和齿数算出来：分度圆 d = m × z，齿顶圆大一个 m，齿根圆小 1.25 m。草图里只画齿根圆，其余几个圆画成构造线，给后面画齿当参照。",
+   "summary": "分度圆 d = m × z = 1.5 × 18 = 27",
+   "summaryTemplate": "",
+   "pitfall": "不要把分度圆直径直接写成数字：以后改齿数，它就对不上了。",
+   "view": [
+    0,
+    0,
+    1
+   ],
+   "focus": null,
+   "code": "d = m * z  # 分度圆\nrb, ra, rf = d / 2 * cos(ALPHA), d / 2 + m, d / 2 - 1.25 * m  # 基圆、齿顶圆、齿根圆\nroot = Circle(rf)"
+  },
+  {
+   "id": "ext1",
+   "op": "extrude",
+   "name": "拉伸1",
+   "title": "齿根圆柱",
+   "why": "先拉出齿根圆柱，相当于轮坯。齿是后面一个一个长上去的。",
+   "summary": "齿宽 8",
+   "summaryTemplate": "齿宽 {B}",
+   "pitfall": "",
+   "view": [
+    1.0,
+    -1.1,
+    0.85
+   ],
+   "focus": null,
+   "code": "gear = extrude(root, amount=B)"
+  },
+  {
+   "id": "sk2",
+   "op": "sketch",
+   "name": "草图2",
+   "title": "一个齿",
+   "why": "草图画在齿根圆柱的顶面上。齿面是渐开线：一根绳子绕在基圆上，拉直时绳端走过的轨迹。两齿啮合时，这条曲线让传动比始终不变。这里在基圆和齿顶圆之间取 8 个点画样条，另一侧镜像得到。",
+   "summary": "压力角 20° · 渐开线齿廓",
+   "summaryTemplate": "压力角 {alpha}° · 渐开线齿廓",
+   "pitfall": "齿数少于 17 时，真实加工会根切掉齿根的一部分。这里画的是理论齿形。",
+   "view": [
+    0,
+    0,
+    1
+   ],
+   "focus": [
+    [
+     10.5,
+     -3.0,
+     0
+    ],
+    [
+     16.5,
+     3.0,
+     8
+    ]
+   ],
+   "code": "half = pi / (2 * z) + inv(ALPHA)  # 半个齿在基圆上张开的角度\n\nr0 = max(rb, rf)  # 渐开线从基圆开始，到齿顶圆结束\nradii = [r0 + (ra - r0) * i / 7 for i in range(8)]\ntheta = [half - inv(acos(rb / q)) for q in radii]  # 渐开线上各点的极角\nupper = Spline(*[(q * cos(a), q * sin(a)) for q, a in zip(radii, theta)])\nlower = upper.mirror(Plane.XZ)\nfoot = (rf - 0.5 * m) / r0  # 齿脚伸进齿根圆\ntop = Plane.XY.offset(B)  # 画在齿根圆柱的顶面上\ntooth = top * make_face([\n    lower,\n    ThreePointArc(lower @ 1, (ra, 0), upper @ 1),  # 齿顶\n    upper,\n    Polyline(upper @ 0, (upper @ 0) * foot, (lower @ 0) * foot, lower @ 0),  # 齿根\n])"
+  },
+  {
+   "id": "ext2",
+   "op": "extrude",
+   "name": "拉伸2",
+   "title": "第一个齿",
+   "why": "把齿廓从顶面向下拉伸一个齿宽，同时和轮坯合并。齿脚特意伸进齿根圆里一点，两个实体有重叠，合并才可靠。",
+   "summary": "齿宽 8 · 合并",
+   "summaryTemplate": "齿宽 {B} · 合并",
+   "pitfall": "",
+   "view": [
+    1.0,
+    -1.1,
+    0.85
+   ],
+   "focus": [
+    [
+     10.5,
+     -3.0,
+     0
+    ],
+    [
+     16.5,
+     3.0,
+     8
+    ]
+   ],
+   "code": "tooth = extrude(tooth, amount=B, dir=(0, 0, -1))  # 向下拉到底面\ngear += tooth"
+  },
+  {
+   "id": "pat1",
+   "op": "pattern",
+   "name": "阵列1",
+   "title": "圆周阵列",
+   "why": "绕中心轴把第一个齿复制成 z 个，等角度分布。改齿数只需要改阵列的个数，齿廓和各个圆会跟着重算。",
+   "summary": "18 个 · 360° 等分",
+   "summaryTemplate": "{z} 个 · 360° 等分",
+   "pitfall": "",
+   "view": [
+    1.0,
+    -1.1,
+    0.85
+   ],
+   "focus": null,
+   "code": "gear += PolarLocations(0, z) * tooth"
+  },
+  {
+   "id": "hole1",
+   "op": "hole",
+   "name": "孔1",
+   "title": "轴孔",
+   "why": "轴孔直径取分度圆的 0.4 倍再取整，也是派生尺寸：齿轮变大，孔跟着变大，轮缘始终留得出足够的厚度。",
+   "summary": "Ø11 ≈ 0.4 × 分度圆 · 贯穿",
+   "summaryTemplate": "",
+   "pitfall": "孔太大会让齿根下面的轮缘太薄，受力时从齿根裂开。",
+   "view": [
+    0.8,
+    -0.9,
+    1.4
+   ],
+   "focus": null,
+   "code": "bore = round(0.4 * d)  # 孔径 ≈ 0.4 倍分度圆，取整\ngear -= Cylinder(bore / 2, B, align=UP)"
+  },
+  {
+   "id": "cha1",
+   "op": "chamfer",
+   "name": "倒角1",
+   "title": "孔口与齿顶倒角",
+   "why": "孔口倒角方便把齿轮压到轴上；齿顶两端倒角去掉锐边，装配时不会刮伤，也不容易崩齿。倒角放在最后，它只修饰，不改变任何尺寸关系。",
+   "summary": "孔口 C0.5 · 齿顶 C0.375",
+   "summaryTemplate": "",
+   "pitfall": "",
+   "view": [
+    0.8,
+    -0.9,
+    1.4
+   ],
+   "focus": null,
+   "code": "circles = gear.edges().filter_by(GeomType.CIRCLE)\ngear = chamfer(circles.filter_by(lambda e: abs(e.radius - bore / 2) < 1e-3), length=p[\"c\"])\ntips = gear.edges().filter_by(GeomType.CIRCLE).filter_by(lambda e: abs(e.radius - ra) < 1e-3)\ngear = chamfer(tips, length=0.25 * m)"
+  }
+ ],
+ "failures": {
+  "ext2": "齿没有和轮坯合并成一个实体。",
+  "pat1": "阵列后的齿没有和轮坯合并成一个实体。",
+  "cha1": "倒角失败：齿顶太窄，放不下这么大的倒角。"
+ },
+ "defaultVariant": "m-1.5_z-18",
+ "variants": {
+  "m-1_z-12": {
+   "ok": true,
+   "values": {
+    "m": 1,
+    "z": 12,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-1_z-12.glb",
+   "bytes": 271204,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 1 × 12 = 12",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "12 个 · 360° 等分",
+    "hole1": "Ø5 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.25"
+   },
+   "triangles": 4434,
+   "volume": 703.28,
+   "bbox": [
+    [
+     -7.0,
+     -7.0,
+     -0.0
+    ],
+    [
+     7.0,
+     7.0,
+     8.0
+    ]
+   ]
+  },
+  "m-1_z-18": {
+   "ok": true,
+   "values": {
+    "m": 1,
+    "z": 18,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-1_z-18.glb",
+   "bytes": 385120,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 1 × 18 = 18",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "18 个 · 360° 等分",
+    "hole1": "Ø7 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.25"
+   },
+   "triangles": 5862,
+   "volume": 1664.51,
+   "bbox": [
+    [
+     -10.0,
+     -9.9,
+     -0.0
+    ],
+    [
+     10.0,
+     9.9,
+     8.0
+    ]
+   ]
+  },
+  "m-1_z-24": {
+   "ok": true,
+   "values": {
+    "m": 1,
+    "z": 24,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-1_z-24.glb",
+   "bytes": 500592,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 1 × 24 = 24",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "24 个 · 360° 等分",
+    "hole1": "Ø10 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.25"
+   },
+   "triangles": 7238,
+   "volume": 2913.1,
+   "bbox": [
+    [
+     -13.0,
+     -13.0,
+     -0.0
+    ],
+    [
+     13.0,
+     13.0,
+     8.0
+    ]
+   ]
+  },
+  "m-1_z-36": {
+   "ok": true,
+   "values": {
+    "m": 1,
+    "z": 36,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-1_z-36.glb",
+   "bytes": 730264,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 1 × 36 = 36",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "36 个 · 360° 等分",
+    "hole1": "Ø14 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.25"
+   },
+   "triangles": 10146,
+   "volume": 6815.16,
+   "bbox": [
+    [
+     -19.0,
+     -19.0,
+     -0.0
+    ],
+    [
+     19.0,
+     19.0,
+     8.0
+    ]
+   ]
+  },
+  "m-1.5_z-12": {
+   "ok": true,
+   "values": {
+    "m": 1.5,
+    "z": 12,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-1.5_z-12.glb",
+   "bytes": 275628,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 1.5 × 12 = 18",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "12 个 · 360° 等分",
+    "hole1": "Ø7 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.375"
+   },
+   "triangles": 4434,
+   "volume": 1630.99,
+   "bbox": [
+    [
+     -10.5,
+     -10.5,
+     -0.0
+    ],
+    [
+     10.5,
+     10.5,
+     8.0
+    ]
+   ]
+  },
+  "m-1.5_z-18": {
+   "ok": true,
+   "values": {
+    "m": 1.5,
+    "z": 18,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-1.5_z-18.glb",
+   "bytes": 392588,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 1.5 × 18 = 27",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "18 个 · 360° 等分",
+    "hole1": "Ø11 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.375"
+   },
+   "triangles": 5862,
+   "volume": 3680.68,
+   "bbox": [
+    [
+     -15.0,
+     -14.85,
+     -0.0
+    ],
+    [
+     15.0,
+     14.85,
+     8.0
+    ]
+   ]
+  },
+  "m-1.5_z-24": {
+   "ok": true,
+   "values": {
+    "m": 1.5,
+    "z": 24,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-1.5_z-24.glb",
+   "bytes": 509788,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 1.5 × 24 = 36",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "24 个 · 360° 等分",
+    "hole1": "Ø14 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.375"
+   },
+   "triangles": 7238,
+   "volume": 6742.33,
+   "bbox": [
+    [
+     -19.5,
+     -19.5,
+     -0.0
+    ],
+    [
+     19.5,
+     19.5,
+     8.0
+    ]
+   ]
+  },
+  "m-1.5_z-36": {
+   "ok": true,
+   "values": {
+    "m": 1.5,
+    "z": 36,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-1.5_z-36.glb",
+   "bytes": 742620,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 1.5 × 36 = 54",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "36 个 · 360° 等分",
+    "hole1": "Ø22 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.375"
+   },
+   "triangles": 10434,
+   "volume": 15069.63,
+   "bbox": [
+    [
+     -28.5,
+     -28.5,
+     -0.0
+    ],
+    [
+     28.5,
+     28.5,
+     8.0
+    ]
+   ]
+  },
+  "m-2_z-12": {
+   "ok": true,
+   "values": {
+    "m": 2,
+    "z": 12,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-2_z-12.glb",
+   "bytes": 281544,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 2 × 12 = 24",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "12 个 · 360° 等分",
+    "hole1": "Ø10 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.5"
+   },
+   "triangles": 4530,
+   "volume": 2819.57,
+   "bbox": [
+    [
+     -14.0,
+     -14.0,
+     -0.0
+    ],
+    [
+     14.0,
+     14.0,
+     8.0
+    ]
+   ]
+  },
+  "m-2_z-18": {
+   "ok": true,
+   "values": {
+    "m": 2,
+    "z": 18,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-2_z-18.glb",
+   "bytes": 400956,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 2 × 18 = 36",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "18 个 · 360° 等分",
+    "hole1": "Ø14 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.5"
+   },
+   "triangles": 6006,
+   "volume": 6666.33,
+   "bbox": [
+    [
+     -20.0,
+     -19.8,
+     -0.0
+    ],
+    [
+     20.0,
+     19.8,
+     8.0
+    ]
+   ]
+  },
+  "m-2_z-24": {
+   "ok": true,
+   "values": {
+    "m": 2,
+    "z": 24,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-2_z-24.glb",
+   "bytes": 519180,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 2 × 24 = 48",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "24 个 · 360° 等分",
+    "hole1": "Ø19 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.5"
+   },
+   "triangles": 7430,
+   "volume": 11909.9,
+   "bbox": [
+    [
+     -26.0,
+     -26.0,
+     -0.0
+    ],
+    [
+     26.0,
+     26.0,
+     8.0
+    ]
+   ]
+  },
+  "m-2_z-36": {
+   "ok": true,
+   "values": {
+    "m": 2,
+    "z": 36,
+    "alpha": 20,
+    "B": 8,
+    "c": 0.5
+   },
+   "file": "m-2_z-36.glb",
+   "bytes": 748536,
+   "steps": 7,
+   "summaries": {
+    "sk1": "分度圆 d = m × z = 2 × 36 = 72",
+    "ext1": "齿宽 8",
+    "sk2": "压力角 20° · 渐开线齿廓",
+    "ext2": "齿宽 8 · 合并",
+    "pat1": "36 个 · 360° 等分",
+    "hole1": "Ø29 ≈ 0.4 × 分度圆 · 贯穿",
+    "cha1": "孔口 C0.5 · 齿顶 C0.5"
+   },
+   "triangles": 10722,
+   "volume": 26917.02,
+   "bbox": [
+    [
+     -38.0,
+     -38.0,
+     -0.0
+    ],
+    [
+     38.0,
+     38.0,
+     8.0
+    ]
+   ]
+  }
+ },
+ "source": "models/parts/gear.py"
+}

@@ -1,0 +1,10 @@
+@import "tailwindcss";
+@import "./styles/jim-theme.css";
+@import "./styles/featuretree-theme.css";
+
+@layer base {
+  html, body, #root { height: 100%; }
+  /* CSS2D labels sit above the canvas but only labels that opt in take the pointer. */
+  .scene-labels { pointer-events: none; }
+  .scene-labels .interactive { pointer-events: auto; }
+}

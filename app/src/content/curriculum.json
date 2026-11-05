@@ -1,0 +1,1134 @@
+{
+ "tracks": [
+  {
+   "id": "T0",
+   "title": "公共地基：空间、视图与几何表示",
+   "note": "所有人必修，约 6–8 小时",
+   "modules": [
+    {
+     "id": "M0.1",
+     "title": "三维空间与导航",
+     "note": "",
+     "lessons": [
+      {
+       "id": "0.1.1",
+       "title": "坐标系与右手定则",
+       "en": "Coordinate system",
+       "goal": "在任意视角下指出 X/Y/Z 正向，并知道不同软件的\"向上轴\"约定可能不同",
+       "prereq": "无",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "0.1.2",
+       "title": "视图操作与标准视图",
+       "en": "Orbit / Pan / Zoom、ViewCube、Look At",
+       "goal": "用标准视图快速定位模型的任意面",
+       "prereq": "0.1.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "0.1.3",
+       "title": "原点、基准面、基准轴",
+       "en": "Origin、datum planes/axes",
+       "goal": "理解\"每个几何都需要参照\"，会建偏移、角度、中面基准",
+       "prereq": "0.1.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "0.1.4",
+       "title": "构造平面与坐标输入",
+       "en": "CPlane；绝对/相对/极坐标",
+       "goal": "在自由曲面软件里精确放置点和线",
+       "prereq": "0.1.3",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M0.2",
+     "title": "正投影与读图",
+     "note": "",
+     "lessons": [
+      {
+       "id": "0.2.1",
+       "title": "正投影与三视图",
+       "en": "展开\"玻璃盒\"",
+       "goal": "能从 3D 推出三视图，也能由三视图还原 3D",
+       "prereq": "0.1.2",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "0.2.2",
+       "title": "第一角与第三角",
+       "en": "GB 优先第一角，英文教程多用第三角",
+       "goal": "识别图纸采用的投影法及其符号",
+       "prereq": "0.2.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "0.2.3",
+       "title": "剖视、局部、辅助、断裂视图",
+       "en": "Section / Detail / Auxiliary",
+       "goal": "理解剖切平面与剖面线的表达",
+       "prereq": "0.2.1",
+       "interactive": 2,
+       "interactiveNote": "可拖动的剖切平面"
+      },
+      {
+       "id": "0.2.4",
+       "title": "按图建模的读图法",
+       "en": null,
+       "goal": "从图纸找出基准、对称和建模顺序",
+       "prereq": "0.2.1–0.2.3",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M0.3",
+     "title": "几何表示与文件",
+     "note": "",
+     "lessons": [
+      {
+       "id": "0.3.1",
+       "title": "实体、曲面、网格",
+       "en": "B-rep 与 Mesh；NURBS 与多边形",
+       "goal": "区分三者及其用途（CAD、打印、渲染）",
+       "prereq": "无",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "0.3.2",
+       "title": "文件格式与交换",
+       "en": "STEP、IGES、STL、3MF、原生格式",
+       "goal": "知道导出什么格式会丢失参数与历史",
+       "prereq": "0.3.1",
+       "interactive": 0,
+       "interactiveNote": null
+      },
+      {
+       "id": "0.3.3",
+       "title": "单位、精度与材料设置",
+       "en": null,
+       "goal": "避免\"单位或材料设错，质量全错\"（CSWA 高频错误）",
+       "prereq": "无",
+       "interactive": 0,
+       "interactiveNote": null
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "T1",
+   "title": "参数化零件建模",
+   "note": "机械主干，约 25–35 小时",
+   "modules": [
+    {
+     "id": "M1.1",
+     "title": "草图与约束",
+     "note": "",
+     "lessons": [
+      {
+       "id": "1.1.1",
+       "title": "草图平面与锚定原点",
+       "en": null,
+       "goal": "让每个草图都挂在基准上并锚定原点",
+       "prereq": "0.1.3",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.1.2",
+       "title": "几何约束",
+       "en": "重合、水平/竖直、平行/垂直、相切、同心、对称、相等",
+       "goal": "用约束表达形状关系，而不是靠尺寸堆砌",
+       "prereq": "1.1.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.1.3",
+       "title": "尺寸约束与草图自由度",
+       "en": "DOF；欠定义、完全定义、过定义",
+       "goal": "读懂自由度计数，把草图做到完全定义且没有冗余",
+       "prereq": "1.1.2",
+       "interactive": 2,
+       "interactiveNote": "拖拽测试加 DOF 计数器"
+      },
+      {
+       "id": "1.1.4",
+       "title": "构造几何、投影/转换实体、偏移、修剪、镜像",
+       "en": null,
+       "goal": "复用已有几何，减少约束数量",
+       "prereq": "1.1.3",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.1.5",
+       "title": "设计意图入门",
+       "en": "Design intent",
+       "goal": "同一形状用三种约束方案，改尺寸后比较它们的行为",
+       "prereq": "1.1.3",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.1.6",
+       "title": "参数与方程",
+       "en": "命名参数、用户参数",
+       "goal": "用参数驱动关键尺寸",
+       "prereq": "1.1.5",
+       "interactive": 1,
+       "interactiveNote": "滑杆实时驱动"
+      }
+     ]
+    },
+    {
+     "id": "M1.2",
+     "title": "基础特征",
+     "note": "",
+     "lessons": [
+      {
+       "id": "1.2.1",
+       "title": "拉伸与终止条件",
+       "en": "给定深度、对称、到下一面、到指定面",
+       "goal": "选能表达意图的终止条件",
+       "prereq": "1.1.3",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.2.2",
+       "title": "旋转",
+       "en": "Revolve",
+       "goal": "回转体建模与旋转轴的选择",
+       "prereq": "1.1.3",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.2.3",
+       "title": "布尔与多实体",
+       "en": "Join / Cut / Intersect / New Body",
+       "goal": "理解\"特征就是对实体做布尔运算\"",
+       "prereq": "1.2.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.2.4",
+       "title": "孔与螺纹特征",
+       "en": "沉头、锪平、螺纹",
+       "goal": "用孔特征而不是画圆再切，保留制造语义",
+       "prereq": "1.2.1",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.2.5",
+       "title": "阵列与镜像",
+       "en": "线性、圆周、沿路径、填充",
+       "goal": "用阵列表达重复的设计意图",
+       "prereq": "1.2.1",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.2.6",
+       "title": "圆角与倒角",
+       "en": "含变半径、面圆角",
+       "goal": "掌握圆角的顺序与失败原因",
+       "prereq": "1.2.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.2.7",
+       "title": "抽壳、筋、拔模",
+       "en": "制造相关特征",
+       "goal": "做出可注塑薄壁件的雏形",
+       "prereq": "1.2.6",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.2.8",
+       "title": "扫掠与放样",
+       "en": "Sweep / Loft、引导线",
+       "goal": "由截面和路径生成复杂形体",
+       "prereq": "1.2.1",
+       "interactive": 2,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M1.3",
+     "title": "特征树与稳健建模",
+     "note": "官方课程把它当入门能力：ACU 1.2.e、SW L8–L9",
+     "lessons": [
+      {
+       "id": "1.3.1",
+       "title": "特征树、时间线与回滚",
+       "en": null,
+       "goal": "把模型看成\"按顺序执行的程序\"",
+       "prereq": "1.2.x",
+       "interactive": 2,
+       "interactiveNote": "时间线拖动"
+      },
+      {
+       "id": "1.3.2",
+       "title": "父子关系与参考选择",
+       "en": "优先引用基准面，而不是模型边",
+       "goal": "预测删改一个特征会影响哪些下游特征",
+       "prereq": "1.3.1",
+       "interactive": 2,
+       "interactiveNote": "依赖图可视化"
+      },
+      {
+       "id": "1.3.3",
+       "title": "拓扑命名问题",
+       "en": "TNP",
+       "goal": "解释\"为什么改了前面，后面会断\"，并掌握规避策略",
+       "prereq": "1.3.2",
+       "interactive": 2,
+       "interactiveNote": "演示边被重新命名"
+      },
+      {
+       "id": "1.3.4",
+       "title": "特征顺序策略",
+       "en": "主体 → 切除 → 抽壳 → 细节圆角；圆角放在抽壳前还是后",
+       "goal": "选择不容易失败的顺序",
+       "prereq": "1.3.2、1.2.7",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.3.5",
+       "title": "诊断与修复重建错误",
+       "en": "读报错、重选参考、重定义草图平面、FilletXpert 类工具",
+       "goal": "不重画也能把模型修好",
+       "prereq": "1.3.3",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.3.6",
+       "title": "设计变更演练",
+       "en": "Design changes",
+       "goal": "改关键尺寸后，模型仍按意图更新",
+       "prereq": "1.3.5",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M1.4",
+     "title": "直接建模与多实体",
+     "note": "",
+     "lessons": [
+      {
+       "id": "1.4.1",
+       "title": "直接建模",
+       "en": "Press/Pull、Move Face、Delete Face",
+       "goal": "判断什么时候用直接编辑，什么时候用历史建模",
+       "prereq": "1.3.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.4.2",
+       "title": "编辑导入几何",
+       "en": "没有历史的 STEP 文件",
+       "goal": "修改没有特征树的\"哑实体\"",
+       "prereq": "1.4.1、0.3.2",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.4.3",
+       "title": "多零件同场设计",
+       "en": "Multi-part Part Studio、多实体",
+       "goal": "在同一上下文里设计相互配合的零件",
+       "prereq": "1.3.2",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M1.5",
+     "title": "参数化进阶",
+     "note": "中级",
+     "lessons": [
+      {
+       "id": "1.5.1",
+       "title": "全局变量与方程",
+       "en": null,
+       "goal": "改一处，全局联动",
+       "prereq": "1.1.6",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.5.2",
+       "title": "配置、变体与设计表",
+       "en": "Configurations、design tables",
+       "goal": "用一个模型管理一个尺寸系列",
+       "prereq": "1.5.1",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.5.3",
+       "title": "质量属性、测量与截面分析",
+       "en": null,
+       "goal": "用体积、质心、截面自检模型（认证式判题）",
+       "prereq": "1.2.x",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "1.5.4",
+       "title": "可编程特征简介",
+       "en": "FeatureScript、API 的概念；选修，面向软件转硬件人群",
+       "goal": "把建模逻辑当作代码来理解",
+       "prereq": "1.5.2",
+       "interactive": 0,
+       "interactiveNote": null
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "T2",
+   "title": "装配与机构",
+   "note": "约 10–15 小时",
+   "modules": [
+    {
+     "id": "M2.1",
+     "title": "装配基础",
+     "note": "",
+     "lessons": [
+      {
+       "id": "2.1.1",
+       "title": "零件、组件、子装配与 BOM 结构",
+       "en": null,
+       "goal": "理解装配是\"引用\"零件，而不是复制",
+       "prereq": "T1 基础",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "2.1.2",
+       "title": "刚体的 6 个自由度与接地/固定",
+       "en": "Grounding",
+       "goal": "说出零件当前还剩哪些自由度",
+       "prereq": "2.1.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "2.1.3",
+       "title": "配合与关节类型",
+       "en": "重合、同心、距离、角度；Rigid / Revolute / Slider",
+       "goal": "用最少的配合表达真实运动",
+       "prereq": "2.1.2",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "2.1.4",
+       "title": "过定义、冗余配合与配合回路",
+       "en": null,
+       "goal": "识别并修复冗余配合（\"完全定义只是状态，正确定义才是目标\"）",
+       "prereq": "2.1.3",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "2.1.5",
+       "title": "干涉与碰撞检查",
+       "en": null,
+       "goal": "发现并量化干涉",
+       "prereq": "2.1.3",
+       "interactive": 2,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M2.2",
+     "title": "机构与运动",
+     "note": "",
+     "lessons": [
+      {
+       "id": "2.2.1",
+       "title": "驱动关节与运动研究",
+       "en": null,
+       "goal": "让机构按自由度运动，并检查极限位置",
+       "prereq": "2.1.3",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "2.2.2",
+       "title": "典型机构",
+       "en": "铰链、滑块、齿轮、连杆",
+       "goal": "用配合表达常见机械运动",
+       "prereq": "2.2.1",
+       "interactive": 2,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M2.3",
+     "title": "自顶向下设计",
+     "note": "中级",
+     "lessons": [
+      {
+       "id": "2.3.1",
+       "title": "装配上下文设计（in-context）与外部参考的风险",
+       "en": null,
+       "goal": "引用其他零件几何时控制好依赖",
+       "prereq": "2.1.x、1.3.2",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "2.3.2",
+       "title": "骨架模型与主模型",
+       "en": "Skeleton、master model、publish geometry",
+       "goal": "用布局驱动多个零件",
+       "prereq": "2.3.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "2.3.3",
+       "title": "标准件、紧固件与孔对齐",
+       "en": null,
+       "goal": "调用库零件，并与孔特征联动",
+       "prereq": "2.1.3",
+       "interactive": 0,
+       "interactiveNote": null
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "T3",
+   "title": "工程图与公差",
+   "note": "约 8–12 小时；3.1 也可以紧接 T1 学，SW Essentials 就是这么排的",
+   "modules": [
+    {
+     "id": "M3.1",
+     "title": "工程图",
+     "note": "",
+     "lessons": [
+      {
+       "id": "3.1.1",
+       "title": "图纸、图框与标题栏",
+       "en": "GB 图幅与比例",
+       "goal": "建立符合国标的图纸模板",
+       "prereq": "0.2.2",
+       "interactive": 0,
+       "interactiveNote": null
+      },
+      {
+       "id": "3.1.2",
+       "title": "由模型生成视图",
+       "en": "基本、投影、剖视、局部、断裂",
+       "goal": "选择合适的表达方案",
+       "prereq": "0.2.3",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "3.1.3",
+       "title": "尺寸标注原则",
+       "en": "功能尺寸、基准、避免封闭尺寸链",
+       "goal": "让图纸既能制造又能检验",
+       "prereq": "3.1.2",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "3.1.4",
+       "title": "装配图、零件序号与明细表",
+       "en": null,
+       "goal": "输出装配文档",
+       "prereq": "2.1.x",
+       "interactive": 0,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M3.2",
+     "title": "公差",
+     "note": "",
+     "lessons": [
+      {
+       "id": "3.2.1",
+       "title": "尺寸公差与配合",
+       "en": "间隙、过渡、过盈",
+       "goal": "为孔轴选择配合",
+       "prereq": "3.1.3",
+       "interactive": 2,
+       "interactiveNote": "配合动画"
+      },
+      {
+       "id": "3.2.2",
+       "title": "GD&T 入门：基准与公差带",
+       "en": "形状、方向、位置、跳动、轮廓",
+       "goal": "读懂常见形位公差符号",
+       "prereq": "3.2.1",
+       "interactive": 2,
+       "interactiveNote": "3D 公差带"
+      },
+      {
+       "id": "3.2.3",
+       "title": "标准对照：GB/T、ISO 与 ASME Y14.5",
+       "en": null,
+       "goal": "读懂中英文图纸的差异",
+       "prereq": "3.2.2",
+       "interactive": 0,
+       "interactiveNote": null
+      },
+      {
+       "id": "3.2.4",
+       "title": "表面粗糙度与技术要求",
+       "en": null,
+       "goal": "写出基本的技术要求",
+       "prereq": "3.1.3",
+       "interactive": 0,
+       "interactiveNote": null
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "T4",
+   "title": "面向制造的设计 DFM",
+   "note": "约 12–18 小时",
+   "modules": [
+    {
+     "id": "M4.0",
+     "title": "工艺选择",
+     "note": "",
+     "lessons": [
+      {
+       "id": "4.0.1",
+       "title": "增材、减材、钣金成形、注塑总览",
+       "en": null,
+       "goal": "按数量、材料、成本为零件选工艺",
+       "prereq": "T1 基础",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M4.1",
+     "title": "3D 打印",
+     "note": "",
+     "lessons": [
+      {
+       "id": "4.1.1",
+       "title": "悬垂与支撑",
+       "en": "FDM 约 45°；SLA 按设备指南",
+       "goal": "设计无需支撑的结构",
+       "prereq": "1.2.x",
+       "interactive": 2,
+       "interactiveNote": "悬垂着色"
+      },
+      {
+       "id": "4.1.2",
+       "title": "打印方向与各向异性强度",
+       "en": null,
+       "goal": "按受力方向选择打印方向",
+       "prereq": "4.1.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.1.3",
+       "title": "最小壁厚、细节与桥接",
+       "en": null,
+       "goal": "避免打不出来或容易断的特征",
+       "prereq": "4.1.1",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.1.4",
+       "title": "配合间隙与一体打印活动件",
+       "en": null,
+       "goal": "为卡扣、铰链、螺纹选间隙（常见 0.2–0.5 mm）",
+       "prereq": "4.1.3",
+       "interactive": 2,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M4.2",
+     "title": "CNC 加工",
+     "note": "",
+     "lessons": [
+      {
+       "id": "4.2.1",
+       "title": "刀具可达性与装夹方向",
+       "en": null,
+       "goal": "判断一个特征能否被刀具加工到",
+       "prereq": "1.2.x",
+       "interactive": 2,
+       "interactiveNote": "刀具扫掠演示"
+      },
+      {
+       "id": "4.2.2",
+       "title": "内角半径与狗骨/T 骨清角",
+       "en": null,
+       "goal": "内角半径大于 1/3 腔深",
+       "prereq": "4.2.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.2.3",
+       "title": "腔深、孔深、壁厚、螺纹长度的比例规则",
+       "en": null,
+       "goal": "用比例规则控制成本",
+       "prereq": "4.2.1",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.2.4",
+       "title": "公差、表面与成本",
+       "en": null,
+       "goal": "只在必要处标紧公差",
+       "prereq": "3.2.1",
+       "interactive": 0,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M4.3",
+     "title": "钣金",
+     "note": "",
+     "lessons": [
+      {
+       "id": "4.3.1",
+       "title": "钣金建模方式",
+       "en": "基体法兰、边线法兰、折弯",
+       "goal": "用钣金特征，而不是拿实体去切",
+       "prereq": "1.2.x",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.3.2",
+       "title": "折弯半径、中性层与 K 因子",
+       "en": null,
+       "goal": "理解展开长度为什么取决于 K 因子",
+       "prereq": "4.3.1",
+       "interactive": 2,
+       "interactiveNote": "折弯与展开动画"
+      },
+      {
+       "id": "4.3.3",
+       "title": "释放槽、最小法兰、孔到折弯的距离",
+       "en": null,
+       "goal": "避免撕裂和变形，并认识到各供应商数值不同",
+       "prereq": "4.3.2",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.3.4",
+       "title": "展开图与 DXF 输出",
+       "en": null,
+       "goal": "交付激光切割文件",
+       "prereq": "4.3.3",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M4.4",
+     "title": "注塑",
+     "note": "",
+     "lessons": [
+      {
+       "id": "4.4.1",
+       "title": "均匀壁厚、缩痕与翘曲",
+       "en": null,
+       "goal": "把实心件改成均匀壁厚",
+       "prereq": "1.2.7",
+       "interactive": 2,
+       "interactiveNote": "壁厚热力图"
+      },
+      {
+       "id": "4.4.2",
+       "title": "开模方向与拔模",
+       "en": "含纹理对拔模的影响",
+       "goal": "做拔模分析并修正",
+       "prereq": "4.4.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.4.3",
+       "title": "分型线",
+       "en": null,
+       "goal": "选择分型线的位置",
+       "prereq": "4.4.2",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.4.4",
+       "title": "倒扣、侧抽、拾件",
+       "en": "pickout）与强脱（bumpoff",
+       "goal": "识别倒扣并选择解决方案",
+       "prereq": "4.4.3",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.4.5",
+       "title": "筋与螺丝柱",
+       "en": "40–60% 规则",
+       "goal": "用筋加强，而不是加厚壁",
+       "prereq": "4.4.1",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.4.6",
+       "title": "卡扣",
+       "en": "cantilever snap fit",
+       "goal": "设计能脱模的卡扣",
+       "prereq": "4.4.4",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "4.4.7",
+       "title": "圆角与应力集中",
+       "en": null,
+       "goal": "理解内外圆角与壁厚的关系",
+       "prereq": "4.4.1",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "T5",
+   "title": "曲线、曲面与造型",
+   "note": "工业设计轨，约 25–40 小时",
+   "modules": [
+    {
+     "id": "M5.1",
+     "title": "曲线",
+     "note": "",
+     "lessons": [
+      {
+       "id": "5.1.1",
+       "title": "NURBS 曲线：控制点、阶数、节点、编辑点",
+       "en": null,
+       "goal": "解释阶数与控制点数量的关系",
+       "prereq": "0.3.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.1.2",
+       "title": "曲线质量与重建",
+       "en": "Rebuild、控制点分布",
+       "goal": "用最少的控制点得到光顺曲线",
+       "prereq": "5.1.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.1.3",
+       "title": "曲率梳与曲率图",
+       "en": null,
+       "goal": "读出拐点和曲率突变",
+       "prereq": "5.1.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.1.4",
+       "title": "曲线连续性 G0 / G1 / G2 / G3",
+       "en": null,
+       "goal": "判断并构造指定的连续性",
+       "prereq": "5.1.3",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.1.5",
+       "title": "混接与匹配曲线",
+       "en": "Blend / Match",
+       "goal": "把圆角矩形从 G1 改造成 G2",
+       "prereq": "5.1.4",
+       "interactive": 2,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M5.2",
+     "title": "曲面构建",
+     "note": "",
+     "lessons": [
+      {
+       "id": "5.2.1",
+       "title": "由曲线生成曲面",
+       "en": "拉伸、旋转、放样、单轨/双轨扫掠、网格面、Patch",
+       "goal": "为形状选择合适的建面方法",
+       "prereq": "5.1.2",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.2.2",
+       "title": "曲面连续性与匹配",
+       "en": "MatchSrf / BlendSrf；各命令能达到的连续性",
+       "goal": "让相邻曲面达到 G1/G2",
+       "prereq": "5.2.1、5.1.4",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.2.3",
+       "title": "修剪、分割、缝合与封闭",
+       "en": "Trim / Split / Join / Knit / Cap",
+       "goal": "把曲面做成水密实体",
+       "prereq": "5.2.1",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.2.4",
+       "title": "偏移与加厚",
+       "en": null,
+       "goal": "从外观面得到有壁厚的零件",
+       "prereq": "5.2.3",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M5.3",
+     "title": "曲面质量分析",
+     "note": "",
+     "lessons": [
+      {
+       "id": "5.3.1",
+       "title": "斑马纹与环境反射",
+       "en": "Zebra / Highlight / Light tunnel",
+       "goal": "用斑马纹判断 G0/G1/G2",
+       "prereq": "5.2.2",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.3.2",
+       "title": "曲率分析（高斯曲率、平均曲率）与拔模分析",
+       "en": null,
+       "goal": "找出局部凹陷和无法脱模的区域",
+       "prereq": "5.3.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.3.3",
+       "title": "圆角",
+       "en": "rolling-ball，G1）与曲率连续圆角或混接（G2",
+       "goal": "看见高光差异并做出选择",
+       "prereq": "5.3.1",
+       "interactive": 2,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M5.4",
+     "title": "布面与 Class-A 入门",
+     "note": "",
+     "lessons": [
+      {
+       "id": "5.4.1",
+       "title": "分面/布面（patch layout）：主面、过渡面、圆角面的层级",
+       "en": null,
+       "goal": "为产品规划面片结构",
+       "prereq": "5.2.x",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.4.2",
+       "title": "四边面、奇点与收敛点的处理",
+       "en": null,
+       "goal": "避免三角面和退化点",
+       "prereq": "5.4.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.4.3",
+       "title": "Bezier 与 NURBS、单跨度面与升阶",
+       "en": null,
+       "goal": "理解 Class-A 为什么偏好 Bezier",
+       "prereq": "5.1.1",
+       "interactive": 1,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.4.4",
+       "title": "Class-A 的概念与质量标准",
+       "en": "G2/G3、公差、高光",
+       "goal": "知道 Class-A 的要求和适用行业",
+       "prereq": "5.4.1–5.4.3",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M5.5",
+     "title": "自由形态",
+     "note": "",
+     "lessons": [
+      {
+       "id": "5.5.1",
+       "title": "SubD、T-Splines、Fusion Form 推拉造型",
+       "en": null,
+       "goal": "快速做出有机形体",
+       "prereq": "0.3.1",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.5.2",
+       "title": "SubD 转 NURBS，回到工程流程",
+       "en": null,
+       "goal": "把自由形态交给工程",
+       "prereq": "5.5.1、5.2.3",
+       "interactive": 1,
+       "interactiveNote": null
+      }
+     ]
+    },
+    {
+     "id": "M5.6",
+     "title": "从造型到工程",
+     "note": "",
+     "lessons": [
+      {
+       "id": "5.6.1",
+       "title": "外观件拆件与结构化",
+       "en": "分模线、装配关系",
+       "goal": "把一体的外观拆成可制造的零件",
+       "prereq": "5.2.4、M4.4",
+       "interactive": 2,
+       "interactiveNote": null
+      },
+      {
+       "id": "5.6.2",
+       "title": "造型件的 DFM 回检",
+       "en": "拔模、壁厚、圆角",
+       "goal": "在不破坏造型的前提下满足注塑要求",
+       "prereq": "5.6.1",
+       "interactive": 2,
+       "interactiveNote": null
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "projects": [
+  {
+   "id": "P1",
+   "title": "3D 打印收纳盒或手机支架（makers 入门）",
+   "prereq": "T0、M1.1–1.3、M4.1",
+   "interactive": 1
+  },
+  {
+   "id": "P2",
+   "title": "钣金机箱或支架（硬件工程师）",
+   "prereq": "T1、M4.3、T3",
+   "interactive": 2
+  },
+  {
+   "id": "P3",
+   "title": "手持小家电外壳：造型 → 抽壳 → 卡扣与螺丝柱 → 拔模检查（ID 与工程结合）",
+   "prereq": "T5、M4.4",
+   "interactive": 2
+  },
+  {
+   "id": "P4",
+   "title": "简单机构：铰链盒、齿轮或连杆",
+   "prereq": "T2",
+   "interactive": 2
+  },
+  {
+   "id": "P5",
+   "title": "参数化系列件（多尺寸配置）",
+   "prereq": "M1.5",
+   "interactive": 1
+  },
+  {
+   "id": "P6",
+   "title": "按图建模挑战：认证式判分，回填体积或质心",
+   "prereq": "M0.2、T1",
+   "interactive": 1
+  }
+ ],
+ "personas": [
+  {
+   "name": "产品/工业设计师",
+   "path": "T0 → M5.1–5.3 → M1.1–1.3（精简版）→ M5.4–5.6 → M4.4 → P3"
+  },
+  {
+   "name": "Makers",
+   "path": "T0 → M1.1–1.3 → M4.1 → M2.1 → P1 / P4"
+  },
+  {
+   "name": "硬件工程师",
+   "path": "T0 → T1 全部 → T2 → T3 → M4.2–4.4 → P2 / P4"
+  },
+  {
+   "name": "软件转硬件",
+   "path": "T0 → T1（重点是 1.3 依赖图与 TNP、1.5 参数化与可编程特征）→ M4.1 → T2 → T3 基础 → P1 / P5"
+  }
+ ]
+}

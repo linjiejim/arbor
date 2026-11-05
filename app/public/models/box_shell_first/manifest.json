@@ -1,0 +1,446 @@
+{
+ "kind": "part",
+ "id": "box_shell_first",
+ "title": "小盒子 B：先抽壳后圆角",
+ "subtitle": "圆角先后对比 · 同一个盒子的两种做法",
+ "level": "入门",
+ "teaches": [
+  "特征顺序决定结果",
+  "后倒圆角只圆外面",
+  "转角处壁厚变薄"
+ ],
+ "params": [
+  {
+   "id": "L",
+   "label": "长",
+   "unit": "mm",
+   "default": 60.0,
+   "values": [],
+   "feature": "sk1"
+  },
+  {
+   "id": "W",
+   "label": "宽",
+   "unit": "mm",
+   "default": 40.0,
+   "values": [],
+   "feature": "sk1"
+  },
+  {
+   "id": "H",
+   "label": "高",
+   "unit": "mm",
+   "default": 30.0,
+   "values": [],
+   "feature": "ext1"
+  },
+  {
+   "id": "r",
+   "label": "外圆角",
+   "unit": "mm",
+   "default": 4,
+   "values": [
+    2,
+    4,
+    6,
+    8
+   ],
+   "feature": "fil1"
+  },
+  {
+   "id": "t",
+   "label": "壁厚",
+   "unit": "mm",
+   "default": 2.5,
+   "values": [
+    1.5,
+    2.5,
+    4
+   ],
+   "feature": "shell1"
+  }
+ ],
+ "features": [
+  {
+   "id": "sk1",
+   "op": "sketch",
+   "name": "草图1",
+   "title": "底面矩形",
+   "why": "两种做法从同一张草图开始：一个 60 × 40 的矩形，画在上视基准面上，中心在原点。",
+   "summary": "上视基准面 · 60.0 × 40.0",
+   "summaryTemplate": "上视基准面 · {L} × {W}",
+   "pitfall": "",
+   "view": [
+    0,
+    0,
+    1
+   ],
+   "focus": null,
+   "code": "outline = Rectangle(p[\"L\"], p[\"W\"])"
+  },
+  {
+   "id": "ext1",
+   "op": "extrude",
+   "name": "拉伸1",
+   "title": "实心盒体",
+   "why": "拉伸成一块实心的料。到这里 A 和 B 完全一样，分歧从下一步开始。",
+   "summary": "高 30.0",
+   "summaryTemplate": "高 {H}",
+   "pitfall": "",
+   "view": [
+    1.0,
+    -1.1,
+    0.85
+   ],
+   "focus": null,
+   "code": "box = extrude(outline, amount=p[\"H\"])"
+  },
+  {
+   "id": "shell1",
+   "op": "shell",
+   "name": "抽壳1",
+   "title": "掏空盒体",
+   "why": "做法 B 先抽壳。这时盒子的边都是尖的，所以内腔的角也是尖的。对比做法 A：A 先倒了圆角，抽壳后内角是同心的圆角。",
+   "summary": "壁厚 2.5 · 移除顶面",
+   "summaryTemplate": "壁厚 {t} · 移除顶面",
+   "pitfall": "",
+   "view": [
+    0.8,
+    -1,
+    1.6
+   ],
+   "focus": null,
+   "code": "top = box.faces().sort_by(Axis.Z)[-1]\nbox = offset(box, amount=-p[\"t\"], openings=top)"
+  },
+  {
+   "id": "fil1",
+   "op": "fillet",
+   "name": "圆角1",
+   "title": "外圆角",
+   "why": "再给外面的四条竖边和底面四条边倒圆角。内角还是尖的，转角处的壁比平面处薄：竖边处只剩「r − 1.41 × (r − t)」，底部三边交汇的角只剩「r − 1.73 × (r − t)」。A 没有这个问题，它的壁厚处处相同。",
+   "summary": "R4 · 外侧竖边 + 底边，共 8 条",
+   "summaryTemplate": "R{r} · 外侧竖边 + 底边，共 8 条",
+   "pitfall": "圆角越大、壁越薄，转角越容易被吃穿。注塑件转角变薄还会缩水、开裂，所以外圆角通常放在抽壳之前。",
+   "view": [
+    1,
+    -1.1,
+    -0.6
+   ],
+   "focus": null,
+   "code": "bottom = box.edges().group_by(Axis.Z)[0]  # 外底面的四条边\ncorners = box.edges().filter_by(Axis.Z).group_by(SortBy.DISTANCE)[-1]  # 最外侧的四条竖边\nbox = fillet(bottom + corners, radius=p[\"r\"])"
+  }
+ ],
+ "failures": {
+  "fil1": "外圆角把转角处的壁吃穿了。壁很薄时内核直接拒绝；差一点点吃穿时，内核会给出一个看起来正常、其实内外表面互相穿过的实体，只有自相交检查能发现。减小圆角，加厚壁，或者改用做法 A：先圆角再抽壳。"
+ },
+ "defaultVariant": "r-4_t-2.5",
+ "variants": {
+  "r-2_t-1.5": {
+   "ok": true,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 2,
+    "t": 1.5
+   },
+   "file": "r-2_t-1.5.glb",
+   "bytes": 36780,
+   "steps": 4,
+   "summaries": {
+    "sk1": "上视基准面 · 60.0 × 40.0",
+    "ext1": "高 30.0",
+    "shell1": "壁厚 1.5 · 移除顶面",
+    "fil1": "R2 · 外侧竖边 + 底边，共 8 条"
+   },
+   "triangles": 820,
+   "volume": 11624.17,
+   "bbox": [
+    [
+     -30.0,
+     -20.0,
+     -0.0
+    ],
+    [
+     30.0,
+     20.0,
+     30.0
+    ]
+   ]
+  },
+  "r-2_t-2.5": {
+   "ok": true,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 2,
+    "t": 2.5
+   },
+   "file": "r-2_t-2.5.glb",
+   "bytes": 36780,
+   "steps": 4,
+   "summaries": {
+    "sk1": "上视基准面 · 60.0 × 40.0",
+    "ext1": "高 30.0",
+    "shell1": "壁厚 2.5 · 移除顶面",
+    "fil1": "R2 · 外侧竖边 + 底边，共 8 条"
+   },
+   "triangles": 820,
+   "volume": 18793.17,
+   "bbox": [
+    [
+     -30.0,
+     -20.0,
+     -0.0
+    ],
+    [
+     30.0,
+     20.0,
+     30.0
+    ]
+   ]
+  },
+  "r-2_t-4": {
+   "ok": true,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 2,
+    "t": 4
+   },
+   "file": "r-2_t-4.glb",
+   "bytes": 36780,
+   "steps": 4,
+   "summaries": {
+    "sk1": "上视基准面 · 60.0 × 40.0",
+    "ext1": "高 30.0",
+    "shell1": "壁厚 4 · 移除顶面",
+    "fil1": "R2 · 外侧竖边 + 底边，共 8 条"
+   },
+   "triangles": 820,
+   "volume": 28466.67,
+   "bbox": [
+    [
+     -30.0,
+     -20.0,
+     -0.0
+    ],
+    [
+     30.0,
+     20.0,
+     30.0
+    ]
+   ]
+  },
+  "r-4_t-1.5": {
+   "ok": false,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 4,
+    "t": 1.5
+   },
+   "failedAt": "fil1",
+   "reason": "转角处的壁被圆角吃穿：内核给出了自相交的实体",
+   "file": "r-4_t-1.5.glb",
+   "bytes": 10056,
+   "steps": 3
+  },
+  "r-4_t-2.5": {
+   "ok": true,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 4,
+    "t": 2.5
+   },
+   "file": "r-4_t-2.5.glb",
+   "bytes": 36780,
+   "steps": 4,
+   "summaries": {
+    "sk1": "上视基准面 · 60.0 × 40.0",
+    "ext1": "高 30.0",
+    "shell1": "壁厚 2.5 · 移除顶面",
+    "fil1": "R4 · 外侧竖边 + 底边，共 8 条"
+   },
+   "triangles": 820,
+   "volume": 18006.59,
+   "bbox": [
+    [
+     -30.0,
+     -20.0,
+     -0.0
+    ],
+    [
+     30.0,
+     20.0,
+     30.0
+    ]
+   ]
+  },
+  "r-4_t-4": {
+   "ok": true,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 4,
+    "t": 4
+   },
+   "file": "r-4_t-4.glb",
+   "bytes": 36780,
+   "steps": 4,
+   "summaries": {
+    "sk1": "上视基准面 · 60.0 × 40.0",
+    "ext1": "高 30.0",
+    "shell1": "壁厚 4 · 移除顶面",
+    "fil1": "R4 · 外侧竖边 + 底边，共 8 条"
+   },
+   "triangles": 820,
+   "volume": 27680.09,
+   "bbox": [
+    [
+     -30.0,
+     -20.0,
+     -0.0
+    ],
+    [
+     30.0,
+     20.0,
+     30.0
+    ]
+   ]
+  },
+  "r-6_t-1.5": {
+   "ok": false,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 6,
+    "t": 1.5
+   },
+   "failedAt": "fil1",
+   "reason": "Failed creating a fillet with radius of 6, try a smaller value or use max_fillet() to find the largest valid fillet radius",
+   "file": "r-6_t-1.5.glb",
+   "bytes": 10056,
+   "steps": 3
+  },
+  "r-6_t-2.5": {
+   "ok": false,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 6,
+    "t": 2.5
+   },
+   "failedAt": "fil1",
+   "reason": "转角处的壁被圆角吃穿：内核给出了自相交的实体",
+   "file": "r-6_t-2.5.glb",
+   "bytes": 10056,
+   "steps": 3
+  },
+  "r-6_t-4": {
+   "ok": true,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 6,
+    "t": 4
+   },
+   "file": "r-6_t-4.glb",
+   "bytes": 36780,
+   "steps": 4,
+   "summaries": {
+    "sk1": "上视基准面 · 60.0 × 40.0",
+    "ext1": "高 30.0",
+    "shell1": "壁厚 4 · 移除顶面",
+    "fil1": "R6 · 外侧竖边 + 底边，共 8 条"
+   },
+   "triangles": 820,
+   "volume": 26408.42,
+   "bbox": [
+    [
+     -30.0,
+     -20.0,
+     -0.0
+    ],
+    [
+     30.0,
+     20.0,
+     30.0
+    ]
+   ]
+  },
+  "r-8_t-1.5": {
+   "ok": false,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 8,
+    "t": 1.5
+   },
+   "failedAt": "fil1",
+   "reason": "Failed creating a fillet with radius of 8, try a smaller value or use max_fillet() to find the largest valid fillet radius",
+   "file": "r-8_t-1.5.glb",
+   "bytes": 10056,
+   "steps": 3
+  },
+  "r-8_t-2.5": {
+   "ok": false,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 8,
+    "t": 2.5
+   },
+   "failedAt": "fil1",
+   "reason": "转角处的壁被圆角吃穿：内核给出了自相交的实体",
+   "file": "r-8_t-2.5.glb",
+   "bytes": 10056,
+   "steps": 3
+  },
+  "r-8_t-4": {
+   "ok": true,
+   "values": {
+    "L": 60.0,
+    "W": 40.0,
+    "H": 30.0,
+    "r": 8,
+    "t": 4
+   },
+   "file": "r-8_t-4.glb",
+   "bytes": 36780,
+   "steps": 4,
+   "summaries": {
+    "sk1": "上视基准面 · 60.0 × 40.0",
+    "ext1": "高 30.0",
+    "shell1": "壁厚 4 · 移除顶面",
+    "fil1": "R8 · 外侧竖边 + 底边，共 8 条"
+   },
+   "triangles": 820,
+   "volume": 24683.8,
+   "bbox": [
+    [
+     -30.0,
+     -20.0,
+     -0.0
+    ],
+    [
+     30.0,
+     20.0,
+     30.0
+    ]
+   ]
+  }
+ },
+ "source": "models/parts/box_shell_first.py"
+}

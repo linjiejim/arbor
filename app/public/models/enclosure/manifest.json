@@ -1,0 +1,152 @@
+{
+ "kind": "assembly",
+ "id": "enclosure",
+ "title": "桌面温湿度计",
+ "subtitle": "上下壳 · 螺丝柱 · 爆炸图",
+ "level": "进阶",
+ "teaches": [
+  "上下壳在分型面对齐",
+  "螺丝柱夹住主板",
+  "外购件只建包络",
+  "爆炸方向就是拆卸方向"
+ ],
+ "parts": [
+  {
+   "id": "bottom",
+   "name": "底壳",
+   "qty": 1,
+   "material": "ABS",
+   "process": "注塑",
+   "role": "model",
+   "explode": [
+    0,
+    0,
+    0
+   ],
+   "order": 1,
+   "note": "壁厚 1.8 处处一致。螺丝柱外径约为孔径的 2.5 倍，两侧加筋连到侧壁，筋厚取壁厚的 60%，背面不会缩痕。",
+   "model": "enclosure_bottom"
+  },
+  {
+   "id": "battery",
+   "name": "纽扣电池 CR2032",
+   "qty": 1,
+   "material": "—",
+   "process": "外购",
+   "role": "metal",
+   "explode": [
+    0,
+    0,
+    12
+   ],
+   "order": 2,
+   "note": "装在主板背面的电池座里。尺寸是标准件，直接引用厂商的 STEP，不自己画。",
+   "model": null
+  },
+  {
+   "id": "pcb",
+   "name": "主板 PCBA",
+   "qty": 1,
+   "material": "FR-4",
+   "process": "SMT 贴片",
+   "role": "modelDark",
+   "explode": [
+    0,
+    0,
+    24
+   ],
+   "order": 3,
+   "note": "板子被上下两组螺丝柱夹住，四个孔和螺丝柱同心。外形比壳体内腔每边小 1.2，留出装配间隙。",
+   "model": null
+  },
+  {
+   "id": "display",
+   "name": "屏幕模组",
+   "qty": 1,
+   "material": "—",
+   "process": "外购",
+   "role": "metal",
+   "explode": [
+    0,
+    0,
+    36
+   ],
+   "order": 4,
+   "note": "外购件按规格书建一个包络体即可：外形、厚度、FPC 出线位置是结构设计真正关心的。",
+   "model": null
+  },
+  {
+   "id": "lens",
+   "name": "镜片",
+   "qty": 1,
+   "material": "PMMA",
+   "process": "注塑 / 激光切割",
+   "role": "glass",
+   "explode": [
+    0,
+    0,
+    50
+   ],
+   "order": 5,
+   "note": "从上盖内侧贴上，比视窗每边大 2 mm，压边用来点胶。外观面朝外，不能有顶针印。",
+   "model": null
+  },
+  {
+   "id": "top",
+   "name": "上盖",
+   "qty": 1,
+   "material": "ABS",
+   "process": "注塑",
+   "role": "model",
+   "explode": [
+    0,
+    0,
+    64
+   ],
+   "order": 6,
+   "note": "分型线放在上下壳的接缝处（z = 11），外观面没有分模痕。螺丝柱从顶板向下长，自攻螺丝从底部拧进来。",
+   "model": null
+  },
+  {
+   "id": "screws",
+   "name": "自攻螺丝 M2×15",
+   "qty": 4,
+   "material": "不锈钢",
+   "process": "标准件",
+   "role": "metal",
+   "explode": [
+    0,
+    0,
+    -22
+   ],
+   "order": 7,
+   "note": "从底部穿过底壳和主板，拧进上盖的螺丝柱。上盖柱里只有 Ø1.8 的底孔，比螺丝细，拧进去时自己攻出螺纹，啮合长度约 3 mm。",
+   "model": null
+  },
+  {
+   "id": "feet",
+   "name": "硅胶脚垫",
+   "qty": 4,
+   "material": "硅胶",
+   "process": "模压",
+   "role": "modelDark",
+   "explode": [
+    0,
+    0,
+    -38
+   ],
+   "order": 8,
+   "note": "脚垫正好盖住螺丝头：一个零件同时解决防滑和遮挡两件事。脚垫上面留一个浅坑，让开螺丝头。",
+   "model": null
+  }
+ ],
+ "notes": [
+  "上下壳在分型面 z = 11 对齐，两边的拔模都从这个面开始：底壳往下收，上盖往上收，接缝处的外形完全一样。",
+  "螺丝从底部拧入，再被脚垫盖住，外观面上看不到螺丝。",
+  "主板不靠卡扣，而是被上下两组螺丝柱夹住：底壳柱顶托住，上盖柱底压住，一颗螺丝同时锁住三个零件。",
+  "外购件（电池、屏幕）只建包络体，关心外形、厚度和出线位置就够了。"
+ ],
+ "file": "assembly.glb",
+ "bytes": 514080,
+ "source": "models/assemblies/enclosure.py"
+}
