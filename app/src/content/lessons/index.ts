@@ -144,6 +144,15 @@ export const LESSONS: LessonMeta[] = [
     gist: "公差带图、IT 等级与基本偏差，H7 配 g6 / h6 / k6 / p6 在 3D 里试装：间隙、过渡、过盈，以及基孔制与基轴制。",
     load: () => import("./tolerance-fits"),
   },
+  {
+    id: "gdt-basics",
+    codes: ["3.2.2"],
+    title: "GD&T 入门：基准与公差带",
+    track: "T3",
+    minutes: 9,
+    gist: "读框格；平面度、垂直度、位置度的 3D 公差带，拖动实际要素看合格与超差；基准 A/B/C 的 3-2-1 装夹顺序，以及国标独立原则与 ASME Rule #1。",
+    load: () => import("./gdt-basics"),
+  },
   // ---------------------------------------------------------------- T4 DFM
   {
     id: "print-overhang",
