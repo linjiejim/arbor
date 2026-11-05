@@ -4,8 +4,10 @@ import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { AppearanceMenu } from "@/components/appearance-menu"
+import { GithubMark } from "@/components/github-mark"
 import { Brand } from "@/components/brand"
 import { useContinue } from "@/lib/progress"
+import { REPO_URL } from "@/lib/site"
 
 export const NAV = [
   { to: "/learn", label: "学习路径" },
@@ -44,6 +46,13 @@ export function SiteHeader() {
           ))}
         </nav>
         <div className="ml-auto flex items-center gap-1">
+          {REPO_URL && (
+            <IconButton label="GitHub 源码" asChild>
+              <a href={REPO_URL} target="_blank" rel="noreferrer">
+                <GithubMark className="size-4" />
+              </a>
+            </IconButton>
+          )}
           <AppearanceMenu />
           <Button asChild variant="primary" className="max-sm:hidden">
             <Link to={next.to}>{next.label}</Link>
