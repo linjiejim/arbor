@@ -2,6 +2,8 @@
 # Static site: built here, rsynced to /srv/featuretree/releases/<sha7> on jim-server,
 # then /srv/featuretree/current is flipped atomically. Last 5 releases kept for rollback:
 #   ssh jim-server 'ls -t /srv/featuretree/releases'  → ln -sfn <release> /srv/featuretree/current
+# Studio API (app/server): bundled here, uploaded to /root/featuretree/api/releases/<sha7>,
+# `current` flipped, PM2 process `featuretree-api` reloaded. Secrets: /root/featuretree/shared/.env.
 # Requires environment `jim-server` with DEV_SERVER_HOST / PORT / USERNAME / SSH_KEY.
 name: Deploy
 
@@ -29,9 +31,16 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: app/package-lock.json
+      # Brotli for the 23 MB OpenCascade wasm takes a minute; reuse it across runs.
+      - uses: actions/cache@v4
+        with:
+          path: app/node_modules/.cache/precompress
+          key: precompress-${{ hashFiles('app/package-lock.json', 'app/public/models/**/*.glb') }}
+          restore-keys: precompress-
       - run: npm ci
       - run: npm run check
       - run: npm run build
+      - run: npm run build:api
 
       - name: Ship
         env:
@@ -43,15 +52,25 @@ jobs:
           set -euo pipefail
           mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
           SSH="ssh -i $HOME/.ssh/deploy -p $PORT -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes"
-          REL="/srv/featuretree/releases/${GITHUB_SHA::7}"
-          $SSH "$USER@$HOST" "mkdir -p $REL"
-          rsync -az --delete -e "$SSH" dist/ "$USER@$HOST:$REL/"
-          $SSH "$USER@$HOST" "ln -sfn $REL /srv/featuretree/current.tmp && mv -Tf /srv/featuretree/current.tmp /srv/featuretree/current && cd /srv/featuretree/releases && ls -1t | tail -n +6 | xargs -r rm -rf"
+          SHA=${GITHUB_SHA::7}
+          REL="/srv/featuretree/releases/$SHA"
+          API="/root/featuretree/api/releases/$SHA"
+          $SSH "$USER@$HOST" "mkdir -p $REL $API"
+          # Hard-link files unchanged since the live release: only what changed crosses the wire.
+          rsync -az --delete --link-dest=/srv/featuretree/current/ -e "$SSH" dist/ "$USER@$HOST:$REL/"
+          rsync -az -e "$SSH" dist-server/index.mjs server/ecosystem.config.cjs "$USER@$HOST:$API/"
+          $SSH "$USER@$HOST" "set -e
+            ln -sfn $API /root/featuretree/api/current.tmp && mv -Tf /root/featuretree/api/current.tmp /root/featuretree/api/current
+            mkdir -p /root/featuretree/api/logs /root/featuretree/api/data
+            source ~/.nvm/nvm.sh >/dev/null && pm2 startOrReload $API/ecosystem.config.cjs --update-env && pm2 save >/dev/null
+            ln -sfn $REL /srv/featuretree/current.tmp && mv -Tf /srv/featuretree/current.tmp /srv/featuretree/current
+            cd /srv/featuretree/releases && ls -1t | tail -n +6 | xargs -r rm -rf
+            cd /root/featuretree/api/releases && ls -1t | tail -n +6 | xargs -r rm -rf"
 
       - name: Verify
         run: |
-          for url in / /lesson/revolve /models/index.json; do
-            for i in 1 2 3; do
+          for url in / /lesson/revolve /models/index.json /api/health; do
+            for i in 1 2 3 4 5; do
               S=$(curl -s -o /dev/null -w '%{http_code}' "https://featuretree.linjiejim.com$url")
               echo "$url attempt $i: HTTP $S"; [ "$S" = "200" ] && continue 2; sleep 3
             done
