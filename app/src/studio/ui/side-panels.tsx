@@ -3,8 +3,10 @@ import { CircleAlert, CircleDashed } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { CodeBlock } from "@/components/code-block"
 import { OpIcon } from "@/components/op-icon"
 import type { OpId } from "@/content/ops"
+import { toBuild123d } from "../codegen"
 import { displayName, type Feature } from "../dsl"
 import type { Studio } from "../use-studio"
 
@@ -132,5 +134,17 @@ function ParamRow({ name, value, computed, onCommit }: { name: string; value: nu
       />
       {error && <span className="mt-1 block text-small text-destructive">{error}</span>}
     </label>
+  )
+}
+
+/** The same model as build123d code: what the teardowns show, for the learner's own part. */
+export function CodePanel({ studio }: { studio: Studio }) {
+  const code = React.useMemo(() => toBuild123d(studio.tree, { body: true }), [studio.tree])
+  if (!studio.tree.features.length) return <p className="px-4 py-4 text-body text-muted-foreground">建出特征后，这里会显示等价的 build123d 代码。</p>
+  return (
+    <div className="px-3 py-3">
+      <p className="mb-2 px-1 text-small text-muted-foreground">同一棵特征树写成 build123d 代码。能直接运行的完整文件（含辅助函数）在右上角「导出」里。</p>
+      <CodeBlock code={code} className="text-caption" />
+    </div>
   )
 }

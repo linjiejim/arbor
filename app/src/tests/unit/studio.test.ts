@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import type { UIMessage } from "ai"
 import { applyEdit, executeTool, type KernelPort } from "@/studio/apply"
+import { toBuild123d } from "@/studio/codegen"
 import { EMPTY_TREE, type Tree } from "@/studio/dsl"
 import { evaluate, resolveParams } from "@/studio/expr"
 import { Kernel } from "@/studio/kernel/build"
@@ -105,5 +106,25 @@ describe("trimMessages", () => {
     const out = trimMessages([{ id: "u", role: "user", parts: [{ type: "text", text: "hi" }] }, look("a"), look("b")])
     const imgs = out.map((m) => ((m.parts[0] as { output?: { images?: string[] } }).output?.images ?? null))
     expect(imgs).toEqual([null, null, ["data:image/png;base64,AA"]])
+  })
+})
+
+describe("build123d export", () => {
+  it("writes parameters in dependency order and one block per feature", () => {
+    const code = toBuild123d(
+      {
+        params: { inner: "L - 2*t", L: 80, t: 2 },
+        features: [
+          { id: "sk", op: "sketch", on: { plane: "XZ", offset: 5 }, shapes: [{ type: "rect", w: "inner", h: 10 }] },
+          { id: "b", op: "extrude", sketch: "sk", distance: 3, direction: "both" },
+          { id: "f", op: "fillet", edges: { of: "b", parallel: "Z", extreme: "+X" }, r: 1 },
+        ],
+      },
+      { body: true },
+    )
+    expect(code.indexOf("L = 80")).toBeLessThan(code.indexOf("inner = (L - 2*t)"))
+    expect(code).toContain("Plane.XZ.offset(-5) * (Rectangle(inner, 10))")
+    expect(code).toContain("extrude(sk_sk, amount=3 / 2, both=True)")
+    expect(code).toContain("fillet(on_feature(part.edges(), tool_b).filter_by(Axis.Z).group_by(Axis.X)[-1], radius=1)")
   })
 })

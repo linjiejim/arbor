@@ -15,7 +15,8 @@ import { Viewport } from "@/components/viewport"
 import type { Viewer } from "@/three/viewer"
 import { modelObject, repaint } from "@/studio/scene"
 import { ChatPanel } from "@/studio/ui/chat-panel"
-import { ParamsPanel, TreePanel } from "@/studio/ui/side-panels"
+import { toBuild123d } from "@/studio/codegen"
+import { CodePanel, ParamsPanel, TreePanel } from "@/studio/ui/side-panels"
 import { useStudio, type Studio } from "@/studio/use-studio"
 import { KEY_STORE, useStudioChat } from "@/studio/use-studio-chat"
 
@@ -38,13 +39,17 @@ export function StudioPage() {
       .catch(() => setStatus(null))
   }, [])
 
-  const download = async (format: "step" | "stl" | "json") => {
+  const download = async (format: "step" | "stl" | "json" | "py") => {
     const blob =
-      format === "json" ? new Blob([JSON.stringify(studio.tree, null, 2)], { type: "application/json" }) : await studio.exportBody(format)
+      format === "json"
+        ? new Blob([JSON.stringify(studio.tree, null, 2)], { type: "application/json" })
+        : format === "py"
+          ? new Blob([toBuild123d(studio.tree)], { type: "text/x-python" })
+          : await studio.exportBody(format)
     if (!blob) return notify("还没有实体可以导出")
     const a = document.createElement("a")
     a.href = URL.createObjectURL(blob)
-    a.download = `featuretree-model.${format === "json" ? "json" : format}`
+    a.download = `featuretree-model.${format}`
     a.click()
     setTimeout(() => URL.revokeObjectURL(a.href), 1000)
   }
@@ -56,6 +61,9 @@ export function StudioPage() {
       </TabsContent>
       <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
         <ParamsPanel studio={studio} />
+      </TabsContent>
+      <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
+        <CodePanel studio={studio} />
       </TabsContent>
     </>
   )
@@ -85,6 +93,7 @@ export function StudioPage() {
             <DropdownMenuContent>
               <DropdownMenuItem onSelect={() => void download("step")}>导出 STEP</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void download("stl")}>导出 STL</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void download("py")}>导出 build123d 代码</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void download("json")}>导出特征树（JSON）</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -100,6 +109,7 @@ export function StudioPage() {
             <TabsTrigger value="chat">对话</TabsTrigger>
             <TabsTrigger value="tree">特征树</TabsTrigger>
             <TabsTrigger value="params">参数</TabsTrigger>
+            <TabsTrigger value="code">代码</TabsTrigger>
           </TabsList>
           <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden" forceMount>
             {status && !status.hostedKey && !hasOwnKey() && (
@@ -114,10 +124,11 @@ export function StudioPage() {
           <StudioViewport studio={studio} hover={hover} />
         </main>
 
-        <Tabs defaultValue="tree" className="flex w-[300px] shrink-0 flex-col border-l max-lg:hidden">
+        <Tabs defaultValue="tree" className="flex w-[340px] shrink-0 flex-col border-l max-lg:hidden">
           <TabsList className="shrink-0 px-3">
             <TabsTrigger value="tree">特征树</TabsTrigger>
             <TabsTrigger value="params">参数</TabsTrigger>
+            <TabsTrigger value="code">代码</TabsTrigger>
           </TabsList>
           {side}
         </Tabs>
