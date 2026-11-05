@@ -79,7 +79,7 @@ export class PrintScene extends LessonScene<PrintState> {
     this.mat.customProgramCacheKey = () => "ft-print-cut"
     this.own(() => this.mat.dispose())
     this.root.add(this.part, this.extras)
-    this.root.add(label("打印平台", new THREE.Vector3(48, -40, 0), "border-transparent bg-transparent font-sans text-faint-foreground"))
+    this.root.add(label("打印平台", new THREE.Vector3(42, -26, 0), "border-transparent bg-transparent font-sans text-faint-foreground"))
   }
 
   enter(step: number) {
@@ -93,7 +93,9 @@ export class PrintScene extends LessonScene<PrintState> {
     if (step === 4) Object.assign(patch, { ...PRESETS.upright, chamferLeft: false })
     this.set(patch)
     // Layer steps look down on the layers; overhang steps look from just below the arms, so faces that point down show.
-    if (step === 0 || step === 3) this.v.flyTo(new THREE.Vector3(120, -215, 135), new THREE.Vector3(-6, 0, 22), 800)
+    // Step 0 frames the whole 50 mm part closely, so the layers being printed read at a glance.
+    if (step === 0) this.v.flyTo(new THREE.Vector3(92, -162, 108), new THREE.Vector3(-2, 0, 22), 800)
+    else if (step === 3) this.v.flyTo(new THREE.Vector3(120, -215, 135), new THREE.Vector3(-6, 0, 22), 800)
     else this.v.flyTo(new THREE.Vector3(35, -245, 6), new THREE.Vector3(-4, 0, 28), 800)
   }
 
