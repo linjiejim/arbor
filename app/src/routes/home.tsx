@@ -1,7 +1,7 @@
 import * as React from "react"
 import * as THREE from "three"
 import { Link } from "react-router"
-import { ArrowRight, BookOpen, Box, Dumbbell, Layers, RotateCcw } from "lucide-react"
+import { ArrowRight, BookOpen, Box, Dumbbell, Layers, MessageSquareText, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Viewport } from "@/components/viewport"
 import { OpIcon } from "@/components/op-icon"
@@ -72,6 +72,24 @@ export function HomePage() {
           />
           <Way icon={<Dumbbell />} title="练习" to="/practice" link="去练习" text="把打乱的特征树排回去；猜一个参数改了会不会失败，再看内核的答案。小测按 1 天、1 周、3 周提醒复习。" />
           <Way icon={<Box />} title="工具图鉴" to="/atlas" link="翻图鉴" text={`${OPS.length} 个建模命令各一张卡：它做什么、要什么输入、常见的坑，以及在 8 个软件里分别叫什么。`} />
+        </div>
+        <div className="mx-auto max-w-[1200px] px-6 pb-12 max-sm:px-4">
+          <div className="flex items-center gap-5 rounded-lg border bg-background p-5 max-md:flex-col max-md:items-start">
+            <div className="text-primary [&_svg]:size-6">
+              <MessageSquareText />
+            </div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 text-heading font-semibold">
+                AI 建模工作台 <span className="rounded-sm border px-1.5 text-caption font-medium text-muted-foreground">Beta</span>
+              </div>
+              <p className="mt-1 text-body text-muted-foreground">
+                用中文描述一个零件，AI 助教调用建模工具一步步建出参数化特征树：每一步讲清设计意图，可以回滚、直接改参数、导出 STEP。几何在你的浏览器里由 OpenCascade 算出。
+              </p>
+            </div>
+            <Button asChild variant="secondary">
+              <Link to="/studio">打开工作台</Link>
+            </Button>
+          </div>
         </div>
       </section>
 

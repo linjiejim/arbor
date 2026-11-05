@@ -2,6 +2,7 @@ import type * as React from "react"
 import { createBrowserRouter, Outlet, RouterProvider, ScrollRestoration } from "react-router"
 import { SiteHeader } from "@/components/site-header"
 import { HomePage } from "@/routes/home"
+import { syncDocumentTitle } from "@/lib/document-title"
 
 /** Pages other than home load on demand: each brings only its own code. */
 const lazy =
@@ -34,7 +35,12 @@ const router = createBrowserRouter([
   // Immersive pages: their own header, the viewport takes the screen.
   { path: "/lesson/:id", lazy: lazy(() => import("@/routes/lesson"), "LessonPage") },
   { path: "/teardown/:id", lazy: lazy(() => import("@/routes/teardown"), "TeardownPage") },
+  { path: "/studio", lazy: lazy(() => import("@/routes/studio"), "StudioPage") },
 ])
+
+// Per-route <title>, matching the prerendered HTML (lib/page-meta.ts).
+syncDocumentTitle(router.state.location.pathname)
+router.subscribe((s) => syncDocumentTitle(s.location.pathname))
 
 export function App() {
   return <RouterProvider router={router} />

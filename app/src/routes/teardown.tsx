@@ -1,7 +1,7 @@
 import * as React from "react"
 import * as THREE from "three"
 import { Link, useNavigate, useParams } from "react-router"
-import { ArrowLeft, ChevronLeft, ChevronRight, CircleX, ExternalLink, Pause, Play, SquareDashed, TriangleAlert } from "lucide-react"
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, CircleX, ExternalLink, Pause, Play, SquareDashed, TriangleAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,10 +17,11 @@ import { CodeBlock } from "@/components/code-block"
 import { useBakedThumbnail } from "@/components/thumbnail"
 import { markDone, markVisited } from "@/lib/progress"
 import { PLANNED_MODELS } from "@/content/teardowns"
+import { starterFor } from "@/studio/starters"
 import { sourceUrl } from "@/lib/site"
 import { useAsync } from "@/lib/use-async"
 import { loadGlb, loadIndex, loadManifest, type AssemblyManifest, type Manifest, type ModelIndexEntry, type PartManifest } from "@/three/baked"
-import { BakedAssemblyScene, BakedPartScene, type BakedState } from "@/three/teardown-scene"
+import { BakedAssemblyScene, BakedPartScene, type BakedState, type FaceStats } from "@/three/teardown-scene"
 import type { Viewer } from "@/three/viewer"
 
 
@@ -181,6 +182,7 @@ function PartTeardown({ manifest: m }: { manifest: PartManifest }) {
   const [values, setValues] = React.useState<Record<string, number>>(defaults)
   const [upto, setUpto] = React.useState(m.features.length - 1)
   const [state, setState] = React.useState<BakedState>({ loading: true, error: null, variant: null, available: 0 })
+  const [stats, setStats] = React.useState<FaceStats | null>(null)
   const [showFuture, setShowFuture] = React.useState(true)
   const [autoCam, setAutoCam] = React.useState(true)
   const [section, setSection] = React.useState(false)
@@ -199,6 +201,7 @@ function PartTeardown({ manifest: m }: { manifest: PartManifest }) {
         setState(st)
         setUpto(s.upto)
       }
+      s.onStats = setStats
       scene.current = s
       s.setValues(defaults, { frame: true })
       return () => {
@@ -254,8 +257,6 @@ function PartTeardown({ manifest: m }: { manifest: PartManifest }) {
 
   const f = m.features[upto]
   const summary = state.variant?.summaries?.[f.id] ?? (f.summaryTemplate ? f.summaryTemplate.replace(/\{(\w+)\}/g, (_, k) => String(values[k] ?? "")) : f.summary)
-  const stats = scene.current?.stats()
-
   return (
     <Shell
       title={m.title}
@@ -367,6 +368,10 @@ function PartTeardown({ manifest: m }: { manifest: PartManifest }) {
                 <span className="size-2.5 rounded-xs border bg-muted" />
                 <span>没有变化的面</span>
                 <span className="tabular text-muted-foreground">{stats.kept}</span>
+                {/* A big orange area reads as "this step reshaped it"; it only means the edges moved. */}
+                {stats.modifiedShare >= 0.2 && (
+                  <p className="col-span-3 mt-1 text-caption text-muted-foreground">「被修改」只是边界变了：面还在原来的曲面上，被这一步裁剪或延伸。</p>
+                )}
               </div>
             )}
             <div className="mt-4">
@@ -392,6 +397,18 @@ function PartTeardown({ manifest: m }: { manifest: PartManifest }) {
             <p className="text-small text-muted-foreground">
               这些组合都在内核里实际算过。失败的组合不隐藏：它们说明了特征之间的约束。
             </p>
+            {starterFor(m.id) && (
+              <Link
+                to={`/studio?start=${starterFor(m.id)!.id}`}
+                className="mt-3 flex items-center gap-2 rounded-md border p-3 text-small transition-colors duration-(--duration-fast) hover:bg-accent"
+              >
+                <span className="flex-1">
+                  <span className="font-medium text-foreground">在 AI 工作台里打开</span>
+                  <span className="block text-muted-foreground">同一棵特征树，参数可以取任意值，还能接着加特征。</span>
+                </span>
+                <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+              </Link>
+            )}
             {failedAt && (
               <div className="mt-3 rounded-lg bg-destructive-subtle p-3">
                 <div className="flex items-center gap-2 text-body font-medium text-destructive">
@@ -404,7 +421,7 @@ function PartTeardown({ manifest: m }: { manifest: PartManifest }) {
             )}
             <div className="mt-4 space-y-4">
               {grid.map((p) => (
-                <div key={p.id}>
+                <div key={p.id} data-testid={`param-${p.id}`}>
                   <div className="flex items-baseline gap-2">
                     <span className="text-small font-medium">{p.label}</span>
                     <span className="text-caption text-faint-foreground">在 {m.features.find((x) => x.id === p.feature)?.name} 里生效</span>
@@ -543,11 +560,11 @@ function AssemblyTeardown({ manifest: m }: { manifest: AssemblyManifest }) {
 
   const onReady = React.useCallback(
     (v: Viewer) => {
-      let alive = true
-      let cleanup = () => {}
+      // Disposal happens long after this render: keep it in an object instead of reassigning locals.
+      const life = { alive: true, cleanup: () => {} }
       loadGlb(m.id, m.file).then(
         (glb) => {
-          if (!alive) return
+          if (!life.alive) return
           const s = new BakedAssemblyScene(v, m, glb as THREE.Group)
           scene.current = s
           setRange(s.sectionRange())
@@ -572,19 +589,19 @@ function AssemblyTeardown({ manifest: m }: { manifest: AssemblyManifest }) {
           el.addEventListener("pointermove", move)
           el.addEventListener("pointerdown", press)
           el.addEventListener("pointerup", click)
-          cleanup = () => {
+          life.cleanup = () => {
             el.removeEventListener("pointermove", move)
             el.removeEventListener("pointerdown", press)
             el.removeEventListener("pointerup", click)
             s.dispose()
           }
         },
-        (e) => alive && setError(e instanceof Error ? e.message : String(e)),
+        (e) => life.alive && setError(e instanceof Error ? e.message : String(e)),
       )
       return () => {
-        alive = false
+        life.alive = false
         cancel.current = true
-        cleanup()
+        life.cleanup()
         scene.current = null
       }
     },

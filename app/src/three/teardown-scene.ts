@@ -159,11 +159,37 @@ export type BakedState = {
   available: number
 }
 
+/** Faces of the shown step by status, and how much of the surface the modified ones cover. */
+export type FaceStats = { new: number; modified: number; kept: number; /** 0–1, by area. */ modifiedShare: number }
+
+/** Surface area of a face mesh, cached on the (shared) geometry. */
+function areaOf(geo: THREE.BufferGeometry) {
+  if (typeof geo.userData.area === "number") return geo.userData.area as number
+  const pos = geo.getAttribute("position")
+  const idx = geo.getIndex()
+  const n = idx ? idx.count : pos.count
+  const a = new THREE.Vector3()
+  const b = new THREE.Vector3()
+  const c = new THREE.Vector3()
+  let area = 0
+  for (let i = 0; i + 2 < n; i += 3) {
+    const [i0, i1, i2] = idx ? [idx.getX(i), idx.getX(i + 1), idx.getX(i + 2)] : [i, i + 1, i + 2]
+    a.fromBufferAttribute(pos, i0)
+    b.fromBufferAttribute(pos, i1).sub(a)
+    c.fromBufferAttribute(pos, i2).sub(a)
+    area += b.cross(c).length() / 2
+  }
+  geo.userData.area = area
+  return area
+}
+
 export class BakedPartScene {
   upto = 0
   hover: string | null = null
   showFuture = true
   onState?: (s: BakedState) => void
+  /** Called whenever the shown step changes. */
+  onStats?: (s: FaceStats) => void
   private steps: THREE.Object3D[] = []
   private current: THREE.Group | null = null
   private ghost: THREE.Group | null = null
@@ -269,6 +295,7 @@ export class BakedPartScene {
       disposeObject(g)
     }
     this.current = this.ghost = null
+    this.onStats?.(this.stats())
     this.v.invalidate()
   }
 
@@ -281,6 +308,7 @@ export class BakedPartScene {
     this.v.content.add(this.current)
     this.paint()
     this.updateGhost()
+    this.onStats?.(this.stats())
     if (animate) {
       // The new and changed faces flare, then settle: "this is what the step did".
       const kit = this.v.kit
@@ -337,16 +365,23 @@ export class BakedPartScene {
   }
 
   /** Count faces by status in the current step (for the panel). */
-  stats() {
+  stats(): FaceStats {
     const s = { new: 0, modified: 0, kept: 0 }
+    let total = 0
+    let modified = 0
     this.current?.traverse((o) => {
       const st = o.userData.status as FaceStatus | undefined
-      if (o.userData.kind === "face" && st) s[st]++
+      if (o.userData.kind !== "face" || !st) return
+      s[st]++
+      const a = areaOf((o as THREE.Mesh).geometry)
+      total += a
+      if (st === "modified") modified += a
     })
-    return s
+    return { ...s, modifiedShare: total ? modified / total : 0 }
   }
 
   dispose() {
+    this.onState = this.onStats = undefined
     this.v.tweens.cancel("flare")
     this.v.kit.setSection(null)
     this.clear()

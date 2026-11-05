@@ -74,7 +74,16 @@ cd app
 npx tsc -p tsconfig.app.json --noEmit
 npx oxlint src/content/lessons
 npx vitest run src/tests/design   # 设计守卫：不许写颜色值等
+npx playwright test -g <id>       # 这节课的冒烟测试
 ```
+
+注册到 `lessons/index.ts` 的课会自动进冒烟测试（`app/e2e/lessons.e2e.ts`），不通过就不能合并、不能部署。测试用页脚的「下一步 / 先跳过」走完每一步，每题选第一个选项交卷，再点「完成本课」。所以：
+
+- 每一步不做任务也要能走下去：点「先跳过」后，下一步的 `enter(step)` 照常进入。
+- 视口每一步都要画出东西（不能整块空白），整个过程不能有未捕获的异常或 `console.error`。
+- 小测用标准的 `quiz` 字段，不要另做答题控件。
+
+怎么跑见根目录 `README.md` 的「开发」一节。
 
 # 写一张图文卡
 

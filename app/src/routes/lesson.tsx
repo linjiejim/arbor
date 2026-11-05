@@ -29,16 +29,22 @@ export function LessonPage() {
     const devFile = import.meta.env.DEV ? lessonFiles[`../content/lessons/${id}.tsx`] : undefined
     return devFile ? { id: id!, codes: [], title: id!, track: "T1" as const, minutes: 5, gist: "", load: devFile } : undefined
   }, [id])
-  const [def, setDef] = React.useState<LessonDef<any, any> | null>(null) // eslint-disable-line @typescript-eslint/no-explicit-any
-  const [error, setError] = React.useState(false)
+  // The result remembers which lesson it belongs to, so a new id shows the spinner without resetting state in the effect.
+  const [loaded, setLoaded] = React.useState<{ meta: typeof meta; def: LessonDef<any, any> | null; error: boolean } | null>(null) // eslint-disable-line @typescript-eslint/no-explicit-any
   React.useEffect(() => {
-    setDef(null)
-    setError(false)
-    meta?.load().then(
-      (m) => setDef(m.default),
-      () => setError(true),
+    if (!meta) return
+    let alive = true
+    meta.load().then(
+      (m) => alive && setLoaded({ meta, def: m.default, error: false }),
+      () => alive && setLoaded({ meta, def: null, error: true }),
     )
+    return () => {
+      alive = false
+    }
   }, [meta])
+  const current = loaded?.meta === meta ? loaded : null
+  const def = current?.def ?? null
+  const error = current?.error ?? false
   if (!meta)
     return (
       <div className="grid h-dvh place-items-center">
