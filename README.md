@@ -2,6 +2,8 @@
 
 看懂每一个特征是怎么长出来的。
 
+线上：<https://featuretree.linjiejim.com>（部署见 `docs/deploy.md`）
+
 FeatureTree 是一个中文、讲概念、不绑定软件的 3D 工业建模学习网站。每个建模概念配一个能亲手操作的 3D 场景；真实零件按特征树一步步重建，几何由 OpenCascade 内核算出，每个面都标明是哪一步生成或修改的。
 
 ## 有什么
