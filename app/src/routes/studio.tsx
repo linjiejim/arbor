@@ -20,7 +20,7 @@ import { CodePanel, ParamsPanel, TreePanel } from "@/studio/ui/side-panels"
 import { useStudio, type Studio } from "@/studio/use-studio"
 import { KEY_STORE, useStudioChat } from "@/studio/use-studio-chat"
 
-type Status = { model: string; hostedKey: boolean; budgetExhausted: boolean }
+type Status = { model: string; via?: "deepseek" | "openrouter" | "mock"; hostedKey: boolean; budgetExhausted: boolean }
 
 export function StudioPage() {
   const navigate = useNavigate()
@@ -30,6 +30,9 @@ export function StudioPage() {
   const [confirmNew, setConfirmNew] = React.useState(false)
   const [status, setStatus] = React.useState<Status | null>(null)
   const ready = studio.kernel.phase === "ready"
+  const panel = usePanelWidth()
+  // Arriving with ?start=… (from a teardown) means "let me play with this tree".
+  const [tab, setTab] = React.useState(() => (new URLSearchParams(window.location.search).has("start") ? "tree" : "chat"))
 
   React.useEffect(() => {
     fetch("/api/studio/status")
@@ -52,20 +55,6 @@ export function StudioPage() {
     a.click()
     setTimeout(() => URL.revokeObjectURL(a.href), 1000)
   }
-
-  const side = (
-    <>
-      <TabsContent value="tree" className="min-h-0 flex-1 overflow-y-auto">
-        <TreePanel studio={studio} onHover={setHover} />
-      </TabsContent>
-      <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
-        <ParamsPanel studio={studio} />
-      </TabsContent>
-      <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
-        <CodePanel studio={studio} />
-      </TabsContent>
-    </>
-  )
 
   return (
     <div className="flex h-dvh flex-col bg-background">
@@ -102,9 +91,19 @@ export function StudioPage() {
         </div>
       </header>
 
-      <div className="flex min-h-0 flex-1 max-lg:flex-col-reverse">
-        <Tabs defaultValue="chat" className="flex w-[400px] shrink-0 flex-col border-r max-lg:h-[55dvh] max-lg:w-full max-lg:border-r-0 max-lg:border-t">
-          <TabsList className="shrink-0 px-3 lg:hidden">
+      <div className="flex min-h-0 flex-1 max-lg:flex-col">
+        <main className="relative min-h-0 min-w-0 flex-1">
+          <StudioViewport studio={studio} hover={hover} />
+        </main>
+
+        <Tabs
+          value={tab}
+          onValueChange={setTab}
+          style={{ "--panel-w": `${panel.width}px` } as React.CSSProperties}
+          className="relative flex shrink-0 flex-col border-l lg:w-(--panel-w) max-lg:h-[55dvh] max-lg:w-full max-lg:border-t max-lg:border-l-0"
+        >
+          <PanelResizer {...panel} />
+          <TabsList className="shrink-0 px-3">
             <TabsTrigger value="chat">对话</TabsTrigger>
             <TabsTrigger value="tree">特征树</TabsTrigger>
             <TabsTrigger value="params">参数</TabsTrigger>
@@ -114,22 +113,25 @@ export function StudioPage() {
             {status && !status.hostedKey && !hasOwnKey() && (
               <div className="shrink-0 border-b px-4 py-2 text-small text-muted-foreground">服务器没有配置公共额度：点右上角钥匙图标，填自己的 DeepSeek key。</div>
             )}
-            <ChatPanel chat={chat} ready={ready} onSelectFeature={studio.showFeature} onLoad={studio.load} />
+            <ChatPanel
+              chat={chat}
+              ready={ready}
+              onSelectFeature={studio.showFeature}
+              onLoad={(t) => {
+                studio.load(t)
+                setTab("tree")
+              }}
+            />
           </TabsContent>
-          <div className="contents lg:hidden">{side}</div>
-        </Tabs>
-
-        <main className="relative min-h-0 min-w-0 flex-1">
-          <StudioViewport studio={studio} hover={hover} />
-        </main>
-
-        <Tabs defaultValue="tree" className="flex w-[340px] shrink-0 flex-col border-l max-lg:hidden">
-          <TabsList className="shrink-0 px-3">
-            <TabsTrigger value="tree">特征树</TabsTrigger>
-            <TabsTrigger value="params">参数</TabsTrigger>
-            <TabsTrigger value="code">代码</TabsTrigger>
-          </TabsList>
-          {side}
+          <TabsContent value="tree" className="min-h-0 flex-1 overflow-y-auto">
+            <TreePanel studio={studio} onHover={setHover} />
+          </TabsContent>
+          <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
+            <ParamsPanel studio={studio} />
+          </TabsContent>
+          <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
+            <CodePanel studio={studio} />
+          </TabsContent>
         </Tabs>
       </div>
 
@@ -151,6 +153,65 @@ export function StudioPage() {
 
 const hasOwnKey = () => Boolean(localStorage.getItem(KEY_STORE))
 
+const PANEL_STORE = "ft-studio-panel-w"
+const PANEL_DEFAULT = 420
+const PANEL_MIN = 320
+/** Leave the 3D view at least 360 px. */
+const panelMax = () => Math.max(PANEL_MIN, Math.min(960, window.innerWidth - 360))
+const clampPanel = (w: number) => Math.round(Math.min(panelMax(), Math.max(PANEL_MIN, w)))
+
+function usePanelWidth() {
+  const [width, setWidth] = React.useState(() => {
+    const saved = Number(localStorage.getItem(PANEL_STORE))
+    return saved ? clampPanel(saved) : PANEL_DEFAULT
+  })
+  const resize = React.useCallback((w: number, save = false) => {
+    const next = clampPanel(w)
+    setWidth(next)
+    if (save) localStorage.setItem(PANEL_STORE, String(next))
+  }, [])
+  return { width, resize }
+}
+
+/** The side panel's left edge: drag to resize, arrow keys for steps, double-click to reset. */
+function PanelResizer({ width, resize }: { width: number; resize: (w: number, save?: boolean) => void }) {
+  const drag = React.useRef<{ x: number; w: number } | null>(null)
+  const end = () => {
+    if (!drag.current) return
+    drag.current = null
+    document.documentElement.style.removeProperty("cursor")
+    resize(width, true)
+  }
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="拖动调整面板宽度"
+      aria-valuenow={width}
+      aria-valuemin={PANEL_MIN}
+      tabIndex={0}
+      className="group absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none max-lg:hidden"
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId)
+        drag.current = { x: e.clientX, w: width }
+        document.documentElement.style.cursor = "col-resize"
+      }}
+      onPointerMove={(e) => drag.current && resize(drag.current.w + drag.current.x - e.clientX)}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onDoubleClick={() => resize(PANEL_DEFAULT, true)}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft") resize(width + 24, true)
+        else if (e.key === "ArrowRight") resize(width - 24, true)
+        else return
+        e.preventDefault()
+      }}
+    >
+      <div className="mx-auto h-full w-px transition-colors duration-(--duration-fast) group-hover:bg-primary group-focus-visible:bg-primary group-active:bg-primary" />
+    </div>
+  )
+}
+
 function KeySettings({ status }: { status: Status | null }) {
   const [key, setKey] = React.useState(() => localStorage.getItem(KEY_STORE) ?? "")
   const save = () => {
@@ -169,7 +230,9 @@ function KeySettings({ status }: { status: Status | null }) {
       <PopoverContent align="end" className="w-80">
         <div className="text-body font-medium">用自己的 DeepSeek key</div>
         <p className="mt-1 text-small text-muted-foreground">
-          {status?.hostedKey ? "不填就用本站的公共额度（每天有上限）。" : "本站没有配置公共额度，需要填自己的 key。"}
+          {status?.hostedKey
+            ? `不填就用本站的公共额度（${status.via === "openrouter" ? "经 OpenRouter 调用同一个模型，" : ""}每天有上限）。`
+            : "本站没有配置公共额度，需要填自己的 key。"}
           key 只保存在这个浏览器里，随请求经本站服务器转发给 DeepSeek，服务器不保存。
         </p>
         <Input className="mt-3 font-mono" type="password" autoComplete="off" placeholder="sk-…" value={key} onChange={(e) => setKey(e.target.value)} aria-label="DeepSeek API key" />
