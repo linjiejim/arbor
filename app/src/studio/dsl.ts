@@ -9,11 +9,11 @@ import { z } from "zod"
  * at the centre of the part's base.
  */
 
-export const Num = z
-  .union([z.number(), z.string()])
-  .describe('数值（毫米或度），或参数表达式，例如 "L/2+3"')
-export const Vec2 = z.tuple([Num, Num])
-export const Vec3 = z.tuple([Num, Num, Num])
+/** A number (mm or degrees) or a parameter expression such as "L/2+3" (rule stated once in the system prompt). */
+export const Num = z.union([z.number(), z.string()])
+// Plain fixed-length arrays rather than tuples: simpler JSON Schema for every provider.
+export const Vec2 = z.array(Num).length(2).describe("[x, y]")
+export const Vec3 = z.array(Num).length(3).describe("[x, y, z]")
 export const Axis = z.enum(["X", "Y", "Z"])
 export const Dir = z.enum(["+X", "-X", "+Y", "-Y", "+Z", "-Z"])
 export const SurfaceKind = z.enum(["plane", "cylinder", "cone", "sphere", "torus", "freeform"])
