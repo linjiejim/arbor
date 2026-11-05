@@ -32,6 +32,17 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
+      # Smoke tests gate the deploy: a failing lesson or teardown never ships.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            app/playwright-report/
+            app/test-results/
+          retention-days: 14
 
       - name: Ship
         env:
