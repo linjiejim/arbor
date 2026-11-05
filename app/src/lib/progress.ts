@@ -1,9 +1,12 @@
 import { useSyncExternalStore } from "react"
-import { LESSONS } from "@/content/lessons"
+import { lessonForCode } from "@/content/lessons"
+import { CARDS } from "@/content/cards"
+import { ALL_LESSONS } from "@/content/curriculum"
 
 /**
  * Learning progress, kept locally (no account in the prototype).
- * Lessons are keyed by curriculum id ("1.1.3"); teardowns by model id.
+ * Lessons and 图文卡 are marked done by curriculum id ("1.1.3"); teardowns by
+ * model id. Quiz records are keyed by lesson id, or `card:<code>` for cards.
  */
 type QuizRecord = { score: number; total: number; at: number }
 type Progress = { done: string[]; last?: string; quiz?: Record<string, QuizRecord[]> }
@@ -58,13 +61,39 @@ export function recordQuiz(lessonId: string, score: number, total: number) {
   write({ ...p, quiz })
 }
 
-/** The next lesson to open: the first one in curriculum order not yet finished. */
+/** Quiz-record key of a 图文卡. */
+export const cardQuizKey = (code: string) => `card:${code}`
+
+/**
+ * The learning path in curriculum order: interactive lessons and 图文卡.
+ * A lesson that covers several codes appears once, at its first code.
+ * Teardowns are references, not steps, so they stay out.
+ */
+const PATH: { to: string; codes: string[] }[] = (() => {
+  const out: { to: string; codes: string[] }[] = []
+  const seen = new Set<string>()
+  for (const { id } of ALL_LESSONS) {
+    const lesson = lessonForCode(id)
+    const step = lesson
+      ? { to: `/lesson/${lesson.id}`, codes: lesson.codes }
+      : CARDS.some((c) => c.code === id)
+        ? { to: `/card/${id}`, codes: [id] }
+        : null
+    if (step && !seen.has(step.to)) {
+      seen.add(step.to)
+      out.push(step)
+    }
+  }
+  return out
+})()
+
+/** The next step to open: the first lesson or card in curriculum order not yet finished. */
 export function useContinue(): { to: string; label: string } {
   const p = useProgress()
   const started = p.done.length > 0
-  const next = LESSONS.find((l) => !l.codes.every((c) => p.done.includes(c)))
+  const next = PATH.find((step) => !step.codes.every((c) => p.done.includes(c)))
   if (!next) return { to: "/learn", label: "复习" }
-  return { to: `/lesson/${next.id}`, label: started ? "继续学习" : "开始第一课" }
+  return { to: next.to, label: started ? "继续学习" : "开始第一课" }
 }
 
 const DAY = 24 * 3600 * 1000

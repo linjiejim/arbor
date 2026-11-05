@@ -1,15 +1,16 @@
 import * as React from "react"
 import { Link, useLocation } from "react-router"
-import { Box, CircleCheck, Circle } from "lucide-react"
+import { Box, CircleCheck, Circle, FileText } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Page, PageHeader, Section } from "@/components/ui/page"
 import { Tooltip } from "@/components/ui/tooltip"
 import { useProgress } from "@/lib/progress"
-import { availableFor, PERSONAS, PROJECTS, TRACKS, type Lesson } from "@/content/curriculum"
-import { reviewDue, useContinue } from "@/lib/progress"
+import { availableFor, lessonById, PERSONAS, PROJECTS, TRACKS, type Lesson } from "@/content/curriculum"
+import { cardQuizKey, reviewDue, useContinue, type ReviewItem } from "@/lib/progress"
 import { LESSONS } from "@/content/lessons"
+import { CARDS } from "@/content/cards"
 
 export function LearnPage() {
   const progress = useProgress()
@@ -28,7 +29,7 @@ export function LearnPage() {
     <Page width="wide" className="mx-auto">
       <PageHeader
         title="学习路径"
-        info="一条公共地基加五条主轨。每节课一个概念、一个可以亲手试的 3D 场景，学完有小测。课程大纲依据各厂商官方课程、认证考纲和 DFM 设计指南整理。"
+        info="一条公共地基加五条主轨。每节课一个概念：要动手的做成 3D 互动课，读懂就够的做成图文卡，学完都有小测。课程大纲依据各厂商官方课程、认证考纲和 DFM 设计指南整理。"
         actions={
           <Button asChild variant="primary">
             <Link to={next.to}>{next.label}</Link>
@@ -43,6 +44,10 @@ export function LearnPage() {
         <span className="flex items-center gap-1.5">
           <Box className="size-3.5" />
           标 3D 的课，交互是必需的：自由度、特征依赖、剖视这类概念看视频学不会
+        </span>
+        <span className="flex items-center gap-1.5">
+          <FileText className="size-3.5" />
+          图文卡：读 3–5 分钟，配示意图和小测，共 <span className="tabular">{CARDS.length}</span> 张
         </span>
       </div>
 
@@ -110,7 +115,7 @@ function LessonRow({ lesson: l, done, current }: { lesson: Lesson; done: boolean
     <>
       {done ? <CircleCheck className="size-4 shrink-0 text-success" /> : <Circle className="size-4 shrink-0 text-input" />}
       <span className="w-10 shrink-0 font-mono text-caption tabular text-faint-foreground">{l.id}</span>
-      <span className="min-w-0 shrink-0 text-body">{l.title}</span>
+      <span className="min-w-0 shrink-0 text-body max-md:flex-1 max-md:shrink max-md:truncate">{l.title}</span>
       <span className="min-w-0 flex-1 truncate text-small text-muted-foreground max-md:hidden">{l.goal}</span>
       {l.interactive === 2 && (
         <Tooltip content={l.interactiveNote ? `3D 交互：${l.interactiveNote}` : "3D 交互是这节课的核心"}>
@@ -141,17 +146,24 @@ function LessonRow({ lesson: l, done, current }: { lesson: Lesson; done: boolean
   )
 }
 
-function ReviewList({ due }: { due: { lessonId: string; reason: string }[] }) {
-  const items = due.map((d) => ({ ...d, lesson: LESSONS.find((l) => l.id === d.lessonId) })).filter((d) => d.lesson)
+function ReviewList({ due }: { due: ReviewItem[] }) {
+  const items = due.flatMap((d) => {
+    const lesson = LESSONS.find((l) => l.id === d.lessonId)
+    if (lesson) return [{ ...d, title: lesson.title, to: `/lesson/${lesson.id}?quiz=1` }]
+    const card = CARDS.find((c) => cardQuizKey(c.code) === d.lessonId)
+    const entry = card && lessonById(card.code)
+    if (entry) return [{ ...d, title: entry.title, to: `/card/${entry.id}?quiz=1` }]
+    return []
+  })
   if (!items.length) return null
   return (
     <Section title="该复习了" className="mt-8">
       <div className="overflow-hidden rounded-lg border">
         {items.map((d) => (
-          <Link key={d.lessonId} to={`/lesson/${d.lessonId}?quiz=1`} className="flex h-10 items-center gap-3 border-t px-3 first:border-t-0 hover:bg-accent">
-            <span className="text-body">{d.lesson!.title}</span>
-            <span className="text-small text-muted-foreground">{d.reason}</span>
-            <span className="ml-auto text-small font-medium">重做小测</span>
+          <Link key={d.lessonId} to={d.to} className="flex h-10 items-center gap-3 border-t px-3 first:border-t-0 hover:bg-accent">
+            <span className="min-w-0 truncate text-body">{d.title}</span>
+            <span className="shrink-0 text-small text-muted-foreground max-sm:hidden">{d.reason}</span>
+            <span className="ml-auto shrink-0 text-small font-medium">重做小测</span>
           </Link>
         ))}
       </div>
