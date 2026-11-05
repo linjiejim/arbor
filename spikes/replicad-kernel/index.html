@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>replicad kernel spike — 马克杯特征拆解</title>
+    <style>
+      html, body { margin: 0; height: 100%; font: 13px/1.4 system-ui, -apple-system, "PingFang SC", sans-serif; }
+      body { display: flex; }
+      #panel { width: 340px; padding: 10px 12px; box-sizing: border-box; overflow-y: auto; border-right: 1px solid #ddd; background: #fafafa; }
+      #view { flex: 1; position: relative; }
+      #view canvas { display: block; }
+      label { display: block; margin-top: 6px; }
+      input[type="range"] { width: 100%; }
+      .row { display: flex; justify-content: space-between; gap: 8px; }
+      .muted { color: #777; }
+      .err { color: #b00020; white-space: pre-wrap; }
+      pre { white-space: pre-wrap; font-size: 11px; background: #fff; border: 1px solid #e5e5e5; padding: 6px; margin: 6px 0; }
+      .legend span { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 10px; vertical-align: middle; }
+      button { margin: 6px 6px 0 0; }
+      table { border-collapse: collapse; width: 100%; font-size: 11px; }
+      td { padding: 1px 3px; border-bottom: 1px solid #eee; }
+    </style>
+  </head>
+  <body>
+    <div id="panel">
+      <b>replicad + OpenCascade.wasm 技术验证</b>
+      <div class="muted" id="initInfo">正在加载内核…</div>
+      <h4 style="margin: 10px 0 2px">特征时间线</h4>
+      <input type="range" id="timeline" min="0" max="6" step="1" value="6" />
+      <div class="row"><span id="stepLabel">-</span><span class="muted" id="stepMs"></span></div>
+      <div class="legend muted">
+        <span style="background: #2f7bf6"></span>新建<span style="background: #f2b14a"></span>修改<span style="background: #cfcfcf"></span>未变
+      </div>
+      <label>新面判定方式
+        <select id="statusMode">
+          <option value="statusHistory">OCCT 历史（Modified/Generated）</option>
+          <option value="statusSignature">几何签名（类型+面积+质心+点在面上）</option>
+        </select>
+      </label>
+      <h4 style="margin: 10px 0 2px">参数</h4>
+      <div id="sliders"></div>
+      <div id="error" class="err"></div>
+      <h4 style="margin: 10px 0 2px">耗时</h4>
+      <pre id="stats">-</pre>
+      <div>
+        <button id="benchBtn">跑 10 次再生成基准</button>
+        <button id="extrasBtn">放样 / 拔模 测试</button>
+        <button id="mugBtn">回到马克杯</button>
+      </div>
+      <pre id="benchOut" class="muted"></pre>
+      <h4 style="margin: 10px 0 2px">当前步骤的面</h4>
+      <table id="faces"></table>
+    </div>
+    <div id="view"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
