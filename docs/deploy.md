@@ -29,13 +29,26 @@ ssh jim-server 'ls -t /srv/featuretree/releases'
 ssh jim-server 'ln -sfn /srv/featuretree/releases/<sha7> /srv/featuretree/current'
 ```
 
-服务器上的 Caddy 配置（`/etc/caddy/Caddyfile`）：单页应用的路由回落到 `index.html`；带哈希的资源长期缓存；模型文件名不带哈希，重新烘焙后最多缓存 1 小时。
+服务器上的 Caddy 配置（`/etc/caddy/Caddyfile`）：单页应用的路由回落到 `index.html`；带哈希的资源长期缓存；模型文件名不带哈希，重新烘焙后最多缓存 1 小时；页面本身不缓存（`header` 在 `try_files` 改写路径之前执行，所以按「不是 assets / models」匹配，而不是按 `/index.html`）。
 
 ```caddyfile
 featuretree.linjiejim.com {
 	import logging
-	encode zstd gzip
+	encode {
+		zstd
+		gzip
+		match {
+			header Content-Type text/*
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+			header Content-Type application/wasm*
+			header Content-Type image/svg+xml*
+			header Content-Type model/gltf-binary*
+		}
+	}
 	root * /srv/featuretree/current
+	@glb path *.glb
+	header @glb Content-Type model/gltf-binary
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
 	@models path /models/*
@@ -47,7 +60,7 @@ featuretree.linjiejim.com {
 }
 ```
 
-GLB 是二进制几何，gzip / zstd 压缩后大约是原来的 40%–60%。
+Caddy 默认不认识 `.glb`，不给 Content-Type 也就不压缩；上面显式设了 `model/gltf-binary` 并加进压缩列表。网格数据压缩率很高，例如一个 276 KB 的齿轮 GLB 用 zstd 传输只有 45 KB。
 
 ## 体积参考
 
