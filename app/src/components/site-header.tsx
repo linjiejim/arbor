@@ -9,7 +9,7 @@ import { Brand } from "@/components/brand"
 import { useContinue } from "@/lib/progress"
 import { REPO_URL } from "@/lib/site"
 
-export const NAV = [
+const NAV = [
   { to: "/learn", label: "学习路径" },
   { to: "/teardown", label: "案例拆解" },
   { to: "/practice", label: "练习" },

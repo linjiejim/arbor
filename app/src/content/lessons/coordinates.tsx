@@ -166,7 +166,7 @@ const lesson: LessonDef<CoordState, CoordinatesScene> = {
       title: "Z 朝上，还是 Y 朝上",
       body: (
         <>
-          <p>零件放在桌上，「上」是哪根轴，各家软件的约定不同。Onshape、Rhino、NX、build123d 用 Z 朝上；SOLIDWORKS 默认 Y 朝上。</p>
+          <p>零件放在桌上，「上」是哪根轴，各家软件的约定不同。Onshape、Fusion、Rhino、NX、build123d 默认 Z 朝上；SOLIDWORKS 默认 Y 朝上。</p>
           <p>切换看看：零件没动，坐标轴转了 90°。水平的那块「上视基准面」从 XY 变成了 XZ。</p>
         </>
       ),
@@ -183,7 +183,7 @@ const lesson: LessonDef<CoordState, CoordinatesScene> = {
           {s.topInY && <Hint>Y 朝上时，从上往下看到的是 XZ 平面。教程说「在上视基准面上画草图」，换一个软件，可能是另一对轴。</Hint>}
         </>
       ),
-      note: "Fusion 可以在首选项的「默认建模方向」里选 Y 朝上或 Z 朝上。导入别的软件的模型时，零件如果「躺倒」了，多半是两边的向上轴不一样。",
+      note: "Fusion 新建设计默认 Z 朝上，可以在首选项「常规 › 默认建模方向」里改成 Y 朝上，只影响之后新建的设计。早期的 Fusion 默认 Y 朝上，跟老教程做时先对一下。导入别的软件的模型时，零件如果「躺倒」了，多半是两边的向上轴不一样。",
     },
   ],
   quiz: [
@@ -217,7 +217,7 @@ const lesson: LessonDef<CoordState, CoordinatesScene> = {
     <>
       {s.step === 4 && (
         <div className="pointer-events-none absolute left-3 top-3 flex gap-2">
-          <SceneChip tone="primary">{s.up === "z" ? "Z 朝上 · Onshape、Rhino、NX" : "Y 朝上 · SOLIDWORKS 默认"}</SceneChip>
+          <SceneChip tone="primary">{s.up === "z" ? "Z 朝上 · Onshape、Fusion、NX" : "Y 朝上 · SOLIDWORKS 默认"}</SceneChip>
         </div>
       )}
       <ModelTriad c={c} />
