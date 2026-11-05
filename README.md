@@ -45,7 +45,15 @@ npm install --registry=https://registry.npmmirror.com   # 本机代理慢时 npm
 npm run dev        # http://localhost:5287
 npm run check      # 类型检查 + lint + 设计守卫 + 单元测试
 npm run build
+npm run e2e        # 冒烟测试：构建后在 http://127.0.0.1:4391 起 vite preview，用 Playwright 跑
 ```
+
+冒烟测试（`app/e2e/`）走一遍每节课（逐步点「下一步」、交小测、完成本课）和每个拆解（逐步回滚、切参数、装配爆炸和播放），再看首页、学习路径、练习、图鉴和术语表。课程从 `src/content/lessons/index.ts`、模型从 `public/models/index.json` 自动发现，新增内容不用改测试。任何页面报错、`console.error` 或画布空白都算失败，失败截图按路由命名，在 `test-results/` 和 `npx playwright show-report` 里看。
+
+- 第一次跑先装浏览器：`npx playwright install chromium`。本机下载慢时加 `PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright`；还是装不上，用本机的 Google Chrome：`E2E_CHANNEL=chrome npm run e2e`。
+- 只跑一部分：`npx playwright test -g revolve`；看着跑：`npm run e2e:ui`。端口被占用时设 `E2E_PORT`。
+- WebGL 用 SwiftShader 软件渲染，不需要显卡。
+- CI（`.github/workflows/ci.yml`）在每个 PR 和非 main 分支的推送上跑 check、build 和 e2e；部署（`deploy.yml`）也先跑 e2e，不通过不发布。失败时报告作为 `playwright-report` 制品上传。
 
 改了 `models/` 才需要 Python：
 
