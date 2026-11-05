@@ -34,10 +34,6 @@ export const STATIC_PAGES: Record<string, PageMeta> = {
     title: "案例拆解",
     description: "真实零件按特征树一步步重建：几何由 build123d 和 OpenCascade 内核算出，每个面都标明是哪一步生成或修改的。",
   },
-  "/practice": {
-    title: "练习",
-    description: "把打乱的特征树排回能重建、设计意图最好的顺序；先猜改一个参数会不会失败，再看内核算出的结果。",
-  },
   "/atlas": {
     title: "工具图鉴",
     description: "每个建模命令一张卡：它做什么、要什么输入、常见的坑，以及在 SOLIDWORKS、Fusion、Onshape 等软件里分别叫什么。",

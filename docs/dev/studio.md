@@ -23,9 +23,10 @@ app/src/studio/
   look.ts          离屏渲染四视图（look 工具）
   use-studio.ts    页面状态：特征树、撤销、回滚、参数
   use-studio-chat.ts  useChat：客户端执行工具、自动续发、每轮最多 30 次调用
-  ui/              对话面板、特征树、参数面板
+  ui/              对话面板（Markdown 渲染）、特征树、参数面板
   evals.ts         10 道评测题和自动检查
 app/server/        对话 API（Hono + AI SDK 7），只转发对话，不碰几何
+  models.ts        走哪条路调模型（OpenRouter / DeepSeek 直连）以及每次花了多少钱
 app/routes/studio.tsx
 ```
 
@@ -54,9 +55,10 @@ npm run dev                       # 网站，http://localhost:5287（/api 代理
 STUDIO_MOCK=1 npm run dev:api     # 对话 API，用脚本模型，不需要 key
 ```
 
-真模型：
+真模型（和线上一样走 OpenRouter，或者直连 DeepSeek）：
 
 ```bash
+node --env-file=$HOME/.config/featuretree/openrouter.env node_modules/.bin/tsx server/index.ts
 DEEPSEEK_API_KEY=sk-… npm run dev:api
 ```
 
@@ -96,6 +98,7 @@ node --env-file=$HOME/.config/featuretree/deepseek.env node_modules/.bin/tsx scr
 node --env-file=… node_modules/.bin/tsx scripts/studio-eval.ts flange mug --thinking=disabled
 ```
 
+- 评测走和线上一样的路：有 `OPENROUTER_API_KEY` 就走 OpenRouter，否则直连 DeepSeek。
 - 评测里工具直接调内核执行，没有浏览器，所以没有 `look`（模型调用它会得到「不能渲染」，这不算失败）。
 - 同一步里的多个工具调用按顺序一个个执行，和浏览器一致（AI SDK 默认并发执行，会互相覆盖特征树）。
 - 每题检查这几项：
@@ -118,12 +121,29 @@ node --env-file=… node_modules/.bin/tsx scripts/studio-eval.ts flange mug --th
 - 密钥和限额：`/root/featuretree/shared/.env`（权限 600，不进仓库）。
 
   ```
-  DEEPSEEK_API_KEY=…        # 留空 = 只能自带 key
+  OPENROUTER_API_KEY=…      # 公共额度走 OpenRouter（优先）
+  OPENROUTER_MODEL=deepseek/deepseek-v4.1-flash-1017
+  OPENROUTER_ROUTING={"quantizations":["fp8","fp16","bf16"],"sort":"price"}   # 可选，OpenRouter 的 provider 路由
+  DEEPSEEK_API_KEY=…        # 不用 OpenRouter 时直连 DeepSeek；两个都留空 = 只能自带 key
   STUDIO_MODEL=deepseek-flash
-  DAILY_BUDGET_USD=3        # 公共额度每天的上限（按北京时间换日）
+  DAILY_BUDGET_USD=0.14     # 公共额度每天的上限（按北京时间换日）
   TURNS_PER_HOUR=30         # 每个 IP 每小时能发的消息数（自带 key 不限）
   ```
 
+  学习者自己填的 key 永远直连 DeepSeek。
+
   改完执行 `pm2 restart featuretree-api --update-env`。
-- 花费：服务端日志每次请求记一行用量和估算成本（不记内容），`/root/featuretree/api/data/budget.json` 是当天累计。
+- 花费：服务端日志每次请求记一行用量和成本（不记内容）。走 OpenRouter 时用它返回的实际花费，直连 DeepSeek 时按价目表估算。`/root/featuretree/api/data/budget.json` 是当天累计。
+
+### OpenRouter 的路由
+
+同一个模型在 OpenRouter 上有几十家服务商，有的跑 fp4 量化版。默认只用 fp8 及以上、按价格选，这样每一步大多落在同一家，缓存也能连着命中。哪些服务商能用，还要看账户的数据政策：现在的设置排除了「可能用数据训练」的服务商，DeepSeek 官方因此不在其中。
+
+2026-11-06 实测（10 道评测）：
+
+| | 通过 | 10 题花费 | 中位耗时 | 落到的服务商 |
+| --- | --- | --- | --- | --- |
+| fp8+，按价格（默认） | 10/10 | $0.013 | 30 秒 | Morph |
+| fp8+，按吞吐（5 题） | 4/5 | $0.036 | 25 秒 | Parasail、Morph 混着，缓存常断 |
+| 直连 DeepSeek（对照） | 10/10 | $0.019 | 15 秒 | DeepSeek |
 - Caddy：`/api/*` 反代到 18914，其余是静态文件。事件流（text/event-stream）不在压缩列表里，避免缓冲。wasm 等大文件构建时预压缩成 `.br` / `.gz`，由 `file_server { precompressed br gzip }` 直接发。

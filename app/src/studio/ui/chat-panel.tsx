@@ -1,5 +1,4 @@
 import * as React from "react"
-import { Link } from "react-router"
 import { Check, ChevronRight, Eye, ImagePlus, Pencil, Search, SlidersHorizontal, Square, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react"
 import type { FileUIPart, UIMessage } from "ai"
 import { cn } from "@/lib/utils"
@@ -13,6 +12,7 @@ import { STARTERS } from "../starters"
 import type { Tree } from "../dsl"
 import type { ToolOutput } from "../tools"
 import { errorText, MAX_CALLS_PER_TURN, type StudioChat } from "../use-studio-chat"
+import { Markdown } from "./markdown"
 
 const EXAMPLES = [
   "做一个 80×50×30 的小盒子，顶部开口，壁厚 2，竖边 R6 圆角",
@@ -239,11 +239,13 @@ function Message({ m, onSelectFeature }: { m: UIMessage; onSelectFeature: (id: s
       </div>
     )
   }
+  // One turn spans many steps, each with its own bit of thinking; show it as one block.
+  const thoughts = m.parts.flatMap((p) => (p.type === "reasoning" && p.text.trim() ? [p.text.trim()] : []))
   return (
     <div className="space-y-2">
+      {thoughts.length > 0 && <Reasoning parts={thoughts} />}
       {m.parts.map((p, i) => {
-        if (p.type === "text") return <RichText key={i} text={p.text} />
-        if (p.type === "reasoning") return p.text.trim() ? <Reasoning key={i} text={p.text} /> : null
+        if (p.type === "text") return p.text.trim() ? <Markdown key={i} text={p.text} /> : null
         if (p.type.startsWith("tool-")) return <ToolCard key={i} part={p as ToolPart} onSelectFeature={onSelectFeature} />
         return null
       })}
@@ -251,32 +253,18 @@ function Message({ m, onSelectFeature }: { m: UIMessage; onSelectFeature: (id: s
   )
 }
 
-/** Plain text with paragraphs; site paths like /lesson/x become links. */
-function RichText({ text }: { text: string }) {
-  const nodes: React.ReactNode[] = []
-  const re = /(\/(?:lesson|teardown|card|atlas|glossary)\/[A-Za-z0-9._-]+)/g
-  let last = 0
-  for (const m of text.matchAll(re)) {
-    nodes.push(text.slice(last, m.index))
-    nodes.push(
-      <Link key={m.index} to={m[0]} target="_blank" className="font-medium text-primary underline decoration-primary/40 underline-offset-4">
-        {m[0]}
-      </Link>,
-    )
-    last = (m.index ?? 0) + m[0].length
-  }
-  nodes.push(text.slice(last))
-  return <div className="text-reading whitespace-pre-wrap">{nodes}</div>
-}
-
-function Reasoning({ text }: { text: string }) {
+function Reasoning({ parts }: { parts: string[] }) {
   return (
     <details className="group text-small text-faint-foreground">
       <summary className="flex cursor-pointer list-none items-center gap-1 select-none">
         <ChevronRight className="size-3.5 transition-transform duration-(--duration-fast) group-open:rotate-90" />
         思考过程
       </summary>
-      <div className="mt-1 border-l pl-3 whitespace-pre-wrap">{text}</div>
+      <div className="mt-1 space-y-3 border-l pl-3 whitespace-pre-wrap">
+        {parts.map((t, i) => (
+          <p key={i}>{t}</p>
+        ))}
+      </div>
     </details>
   )
 }

@@ -5,11 +5,13 @@
 //   GET  /api/studio/status  model, whether a hosted key is available
 //   GET  /api/health
 //
-// Env: DEEPSEEK_API_KEY (hosted key, optional), STUDIO_MODEL (deepseek-flash),
-// DEEPSEEK_BASE_URL, DAILY_BUDGET_USD (3), STUDIO_THINKING (enabled|disabled),
-// STUDIO_DATA_DIR (./data), PORT (18914), HOST (127.0.0.1).
+// Env (hosted quota, both optional; OpenRouter wins when both are set):
+//   OPENROUTER_API_KEY, OPENROUTER_MODEL (deepseek/deepseek-v4.1-flash-1017)
+//   DEEPSEEK_API_KEY, STUDIO_MODEL (deepseek-flash), DEEPSEEK_BASE_URL
+// DAILY_BUDGET_USD (3), STUDIO_THINKING (enabled|disabled), STUDIO_DATA_DIR
+// (./data), PORT (18914), HOST (127.0.0.1). A learner's own key always goes
+// to DeepSeek directly.
 import { serve } from "@hono/node-server"
-import { createDeepSeek } from "@ai-sdk/deepseek"
 import { convertToModelMessages, streamText, type UIMessage } from "ai"
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
@@ -17,14 +19,15 @@ import { Tree } from "../src/studio/dsl"
 import { SYSTEM_PROMPT, TEACH_PROMPT, statePrompt, withState } from "../src/studio/prompt"
 import { STUDIO_TOOLS } from "../src/studio/tools"
 import { trimMessages } from "../src/studio/trim"
-import { Budget, costUSD, RateLimiter } from "./limits"
+import { Budget, RateLimiter } from "./limits"
 import { mockModel } from "./mock"
+import { deepseekRoute, hostedRoute } from "./models"
 
 const env = process.env
-const MODEL = env.STUDIO_MODEL ?? "deepseek-flash"
-const HOSTED_KEY = env.DEEPSEEK_API_KEY
 const MOCK = env.STUDIO_MOCK === "1"
 const THINKING = env.STUDIO_THINKING === "disabled" ? "disabled" : "enabled"
+const HOSTED = hostedRoute(env, THINKING)
+const BYOK_MODEL = env.STUDIO_MODEL ?? "deepseek-flash"
 const budget = new Budget(env.STUDIO_DATA_DIR ?? "./data", Number(env.DAILY_BUDGET_USD ?? 3))
 // A user message starts a turn; each tool round-trip is another request.
 const turns = new RateLimiter(Number(env.TURNS_PER_HOUR ?? 30), 3600_000)
@@ -35,7 +38,12 @@ const app = new Hono()
 app.get("/api/health", (c) => c.json({ ok: true }))
 
 app.get("/api/studio/status", (c) =>
-  c.json({ model: MOCK ? "mock" : MODEL, hostedKey: MOCK || Boolean(HOSTED_KEY), budgetExhausted: MOCK ? false : HOSTED_KEY ? budget.exhausted() : true }),
+  c.json({
+    model: MOCK ? "mock" : (HOSTED?.label ?? BYOK_MODEL),
+    via: MOCK ? "mock" : (HOSTED?.via ?? "deepseek"),
+    hostedKey: MOCK || Boolean(HOSTED),
+    budgetExhausted: MOCK ? false : HOSTED ? budget.exhausted() : true,
+  }),
 )
 
 app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) => {
@@ -52,12 +60,11 @@ app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) 
   const wait = requests.take(ip) || (startsTurn && !userKey ? turns.take(ip) : 0)
   if (wait) return c.json({ error: "rate-limit", message: `请求太频繁了，${Math.ceil(wait / 60)} 分钟后再试，或者填自己的 DeepSeek key。` }, 429)
 
-  const apiKey = userKey ?? HOSTED_KEY
-  if (!apiKey && !MOCK) return c.json({ error: "no-key", message: "服务器没有配置模型 key：请在设置里填自己的 DeepSeek key。" }, 503)
+  const route = userKey ? deepseekRoute(userKey, BYOK_MODEL, THINKING, env.DEEPSEEK_BASE_URL) : HOSTED
+  if (!route && !MOCK) return c.json({ error: "no-key", message: "服务器没有配置模型 key：请在设置里填自己的 DeepSeek key。" }, 503)
   if (!userKey && !MOCK && budget.exhausted())
     return c.json({ error: "budget", message: "今天的公共额度用完了：明天再来，或者填自己的 DeepSeek key。" }, 429)
 
-  const deepseek = createDeepSeek({ apiKey, baseURL: env.DEEPSEEK_BASE_URL })
   // The state the learner saw when they sent the message (snapshot in its
   // metadata); older clients only send the live tree.
   const lastUser = [...body.messages].reverse().find((m) => m.role === "user")
@@ -68,23 +75,23 @@ app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) 
     : statePrompt(tree.data, summary)
   const messages = await convertToModelMessages(trimMessages(body.messages), { tools: STUDIO_TOOLS, ignoreIncompleteToolCalls: true })
   const result = streamText({
-    model: MOCK ? mockModel() : deepseek(MODEL),
+    model: MOCK ? mockModel() : route!.model,
     system: `${SYSTEM_PROMPT}${body.mode === "teach" ? `\n\n${TEACH_PROMPT}` : ""}`,
     messages: withState(messages, state),
     tools: STUDIO_TOOLS,
     maxOutputTokens: 8000,
     abortSignal: c.req.raw.signal,
-    providerOptions: { deepseek: { thinking: { type: THINKING }, ...(THINKING === "enabled" ? { reasoningEffort: "low" } : {}) } },
-    onFinish: ({ totalUsage }) => {
+    providerOptions: MOCK ? undefined : route!.providerOptions,
+    onFinish: ({ totalUsage, providerMetadata }) => {
       const usage = {
         inputTokens: totalUsage.inputTokens,
         cacheReadTokens: totalUsage.inputTokenDetails?.cacheReadTokens,
         outputTokens: totalUsage.outputTokens,
       }
-      const usd = costUSD(MODEL, usage)
+      const usd = MOCK ? 0 : route!.cost(usage, providerMetadata)
       if (!userKey) budget.add(usd)
       console.log(
-        JSON.stringify({ t: new Date().toISOString(), turn: startsTurn, byok: Boolean(userKey), ...usage, usd: Math.round(usd * 1e5) / 1e5 }),
+        JSON.stringify({ t: new Date().toISOString(), turn: startsTurn, byok: Boolean(userKey), via: route?.via, ...usage, usd: Math.round(usd * 1e6) / 1e6 }),
       )
     },
     onError: ({ error }) => console.error("[studio] model error:", (error as Error)?.message ?? error),
@@ -102,5 +109,5 @@ app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) 
 
 const port = Number(env.PORT ?? 18914)
 serve({ fetch: app.fetch, port, hostname: env.HOST ?? "127.0.0.1" }, () => {
-  console.log(`[studio] listening on ${env.HOST ?? "127.0.0.1"}:${port} · model ${MOCK ? "mock" : MODEL} · hosted key ${HOSTED_KEY ? "yes" : "no"}`)
+  console.log(`[studio] listening on ${env.HOST ?? "127.0.0.1"}:${port} · ${MOCK ? "mock model" : HOSTED ? `hosted ${HOSTED.label} via ${HOSTED.via}` : "no hosted key"}`)
 })

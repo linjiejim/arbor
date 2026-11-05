@@ -12,7 +12,6 @@ import { REPO_URL } from "@/lib/site"
 const NAV = [
   { to: "/learn", label: "学习路径" },
   { to: "/teardown", label: "案例拆解" },
-  { to: "/practice", label: "练习" },
   { to: "/atlas", label: "工具图鉴" },
   { to: "/glossary", label: "术语表" },
   { to: "/studio", label: "AI 工作台" },

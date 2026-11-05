@@ -13,7 +13,6 @@ FeatureTree 是一个中文、讲概念、不绑定软件的 3D 工业建模学�
 | 互动课 `/lesson/:id` | 21 节，覆盖坐标与视图、基准面、三视图、剖视、尺寸标注、公差与配合、GD&T、草图约束、旋转、阵列、圆角、扫掠放样、特征树、装配自由度、3D 打印、钣金、注塑拔模、曲率连续和斑马纹。一步一个概念：视角自动转到该看的地方，任务在 3D 里完成（点平面、拖角点、拉箭头、拖剖切面），关键处先猜再看，最后是带解释的小测。 |
 | 图文卡 `/card/:code` | 17 张，覆盖 T0–T2 里不需要 3D 的课：文件格式、单位与材料、孔与螺纹、重建报错、配置、外部参考等。几段短文、一张示意图或对照表、2–3 道小测，每张卡列出参考来源。 |
 | 案例拆解 `/teardown/:id` | 7 个零件（马克杯、积木砖、两种做法的小盒子、键帽、直齿轮、温湿度计底壳）和 2 个装配（桌面温湿度计、带铰链盒子）。零件按特征树回滚、播放；新生成的面蓝色、被修改的面橙色；每一步的 build123d 代码；参数沙盒里每组参数都在内核里算过，失败的组合不隐藏，并解释为什么失败。装配可以爆炸、按装配顺序播放、剖切，保留自由度的零件可以拖动。 |
-| 练习 `/practice` | 特征树排序（检查哪里会重建失败、哪里伤了设计意图）；改参预测（先猜，再看内核的结果）。 |
 | 学习路径 `/learn` | 6 条轨、96 节课的大纲，按人群给入口，已有互动课、拆解或图文卡的课可以直接进入；到期复习（1 天 / 1 周 / 3 周）。 |
 | 工具图鉴 `/atlas` | 18 个建模命令：悬停回放生成过程，抽屉里调参数，8 个软件的官方中文叫法。 |
 | 术语表 `/glossary` | 命令对照表和 28 张概念卡。 |
@@ -26,7 +25,7 @@ FeatureTree 是一个中文、讲概念、不绑定软件的 3D 工业建模学�
 ```
 app/                 网站：React 19 + Vite 8 + TypeScript + Tailwind v4 + three.js r187
   src/three/         轻量 CAD 视口引擎：按需渲染、主题配色、视图方块、剖切、烘焙模型加载
-  src/content/       课程（lessons/）、命令与术语、课程大纲、练习规则
+  src/content/       课程（lessons/）、命令与术语、课程大纲
   src/studio/        AI 建模工作台：特征树格式、浏览器内核（Worker）、工具、提示词
   server/            工作台的对话 API（Hono + AI SDK，只转发对话）
   e2e/               Playwright 冒烟测试
@@ -54,7 +53,7 @@ npm run build
 npm run e2e        # 冒烟测试：构建后在 http://127.0.0.1:4391 起 vite preview，用 Playwright 跑
 ```
 
-冒烟测试（`app/e2e/`）走一遍每节课（逐步点「下一步」、交小测、完成本课）和每个拆解（逐步回滚、切参数、装配爆炸和播放），再看首页、学习路径、练习、图鉴和术语表。课程从 `src/content/lessons/index.ts`、模型从 `public/models/index.json` 自动发现，新增内容不用改测试。任何页面报错、`console.error` 或画布空白都算失败，失败截图按路由命名，在 `test-results/` 和 `npx playwright show-report` 里看。
+冒烟测试（`app/e2e/`）走一遍每节课（逐步点「下一步」、交小测、完成本课）和每个拆解（逐步回滚、切参数、装配爆炸和播放），再看首页、学习路径、图鉴和术语表。课程从 `src/content/lessons/index.ts`、模型从 `public/models/index.json` 自动发现，新增内容不用改测试。任何页面报错、`console.error` 或画布空白都算失败，失败截图按路由命名，在 `test-results/` 和 `npx playwright show-report` 里看。
 
 - 第一次跑先装浏览器：`npx playwright install chromium`。本机下载慢时加 `PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright`；还是装不上，用本机的 Google Chrome：`E2E_CHANNEL=chrome npm run e2e`。
 - 只跑一部分：`npx playwright test -g revolve`；看着跑：`npm run e2e:ui`。端口被占用时设 `E2E_PORT`。
