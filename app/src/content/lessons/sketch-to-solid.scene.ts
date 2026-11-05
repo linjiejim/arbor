@@ -366,7 +366,7 @@ export class SketchToSolid {
       this.corner.element.className =
         s.dof === 0
           ? "interactive size-3 rounded-full border-2 border-foreground bg-background cursor-not-allowed"
-          : "interactive size-3.5 rounded-full border-2 border-primary bg-background cursor-grab transition-[scale] hover:scale-125"
+          : "interactive size-3.5 rounded-full border-2 border-primary bg-background cursor-grab transition-shadow hover:ring-4 hover:ring-primary/25"
       this.corner.element.title = s.dof === 0 ? "已完全定义：拖不动" : "拖动这个点"
     }
 

@@ -125,6 +125,34 @@ export const LESSONS: LessonMeta[] = [
     gist: "刚体的 6 个自由度，同心、重合、角度配合各去掉哪些，以及冗余配合为什么会变成过定义。",
     load: () => import("./assembly-dof"),
   },
+  // ---------------------------------------------------------------- T3 工程图与公差
+  {
+    id: "dimensioning",
+    codes: ["3.1.3"],
+    title: "尺寸标注原则",
+    track: "T3",
+    minutes: 8,
+    gist: "在三视图上点边加尺寸：漏标、重复、封闭尺寸链实时检出，链式与基准标注的误差累积，尺寸标在哪个视图。",
+    load: () => import("./dimensioning"),
+  },
+  {
+    id: "tolerance-fits",
+    codes: ["3.2.1"],
+    title: "尺寸公差与配合",
+    track: "T3",
+    minutes: 8,
+    gist: "公差带图、IT 等级与基本偏差，H7 配 g6 / h6 / k6 / p6 在 3D 里试装：间隙、过渡、过盈，以及基孔制与基轴制。",
+    load: () => import("./tolerance-fits"),
+  },
+  {
+    id: "gdt-basics",
+    codes: ["3.2.2"],
+    title: "GD&T 入门：基准与公差带",
+    track: "T3",
+    minutes: 9,
+    gist: "读框格；平面度、垂直度、位置度的 3D 公差带，拖动实际要素看合格与超差；基准 A/B/C 的 3-2-1 装夹顺序，以及国标独立原则与 ASME Rule #1。",
+    load: () => import("./gdt-basics"),
+  },
   // ---------------------------------------------------------------- T4 DFM
   {
     id: "print-overhang",
