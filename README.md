@@ -16,6 +16,7 @@ FeatureTree 是一个中文、讲概念、不绑定软件的 3D 工业建模学�
 | 学习路径 `/learn` | 6 条轨、96 节课的大纲，按人群给入口，已有互动内容的课可以直接进入；到期复习（1 天 / 1 周 / 3 周）。 |
 | 工具图鉴 `/atlas` | 18 个建模命令：悬停回放生成过程，抽屉里调参数，8 个软件的官方中文叫法。 |
 | 术语表 `/glossary` | 命令对照表和 24 张概念卡。 |
+| AI 建模工作台 `/studio`（Beta） | 用中文描述零件，AI 助教（默认 DeepSeek `deepseek-flash`）调用 13 种建模特征和查询工具，一步步建出参数化特征树，并讲清每一步的设计意图。几何在浏览器里由 OpenCascade（replicad）算出：每一步可以回滚，面按「新生成 / 被修改」着色并能看出来自哪个特征，参数直接改，导出 STEP、STL 和等价的 build123d 代码。可以附参考图，也有「边做边学」模式（关键步骤先让你预测）。不用 AI 也能从现成的特征树开始。 |
 
 当前进度、验证结果、已知局限和开源前清单见 [`docs/report.md`](docs/report.md)。
 
@@ -25,6 +26,9 @@ FeatureTree 是一个中文、讲概念、不绑定软件的 3D 工业建模学�
 app/                 网站：React 19 + Vite 8 + TypeScript + Tailwind v4 + three.js r187
   src/three/         轻量 CAD 视口引擎：按需渲染、主题配色、视图方块、剖切、烘焙模型加载
   src/content/       课程（lessons/）、命令与术语、课程大纲、练习规则
+  src/studio/        AI 建模工作台：特征树格式、浏览器内核（Worker）、工具、提示词
+  server/            工作台的对话 API（Hono + AI SDK，只转发对话）
+  e2e/               Playwright 冒烟测试
   public/models/     烘焙好的模型（manifest.json + 每组参数一个 GLB）
 models/              build123d 模型源码和烘焙器 ftbake
 docs/
@@ -43,6 +47,7 @@ spikes/              浏览器内 OCCT 内核（replicad）实测
 cd app
 npm install --registry=https://registry.npmmirror.com   # 本机代理慢时 npmjs 会卡住
 npm run dev        # http://localhost:5287
+STUDIO_MOCK=1 npm run dev:api   # 工作台的对话 API（脚本模型，不需要 key；真模型见 docs/dev/studio.md）
 npm run check      # 类型检查 + lint + 设计守卫 + 单元测试
 npm run build
 npm run e2e        # 冒烟测试：构建后在 http://127.0.0.1:4391 起 vite preview，用 Playwright 跑
@@ -64,10 +69,12 @@ cd app && npm run bake
 
 - 写一节课：`docs/dev/lesson-authoring.md`
 - 写一个拆解模型：`docs/dev/models.md`
+- AI 建模工作台：`docs/dev/studio.md`
 
 ## 技术取舍
 
-- **几何离线烘焙，不在浏览器里跑内核。** 实测 replicad（OpenCascade 的 WebAssembly 版）压缩后 4.6 MB，内存会涨到约 1 GB，随机参数下约 30% 的组合会失败（`docs/research/notes/kernel_spike.md`）。所以模型用 build123d 写一份，离线把每个特征、每组沙盒参数都算好，网页只下载看到的那一份 GLB。
+- **拆解的几何离线烘焙。** 实测 replicad（OpenCascade 的 WebAssembly 版）压缩后约 4.8 MB（brotli），内存会涨到约 1 GB，随机参数下约 30% 的组合会失败（`docs/research/notes/kernel_spike.md`）。所以拆解模型用 build123d 写一份，离线把每个特征、每组沙盒参数都算好，网页只下载看到的那一份 GLB。
+- **只有工作台在浏览器里跑内核。** 对话建模需要即时重算，内核放在 Web Worker 里，只在 `/studio` 加载；服务器只转发对话，不碰几何。特征树是 JSON，AI 只能通过有 schema 的工具改它，不执行模型写的代码；选面选边用语义选择器，每次重建重新解析，避开拓扑命名问题。
 - **课程里的示意几何是程序化的。** 拉伸、旋转、圆角这些演示用 three.js 直接生成，参数一拖就变；草图约束课用 FreeCAD 的求解器 planegcs（WebAssembly）。
 - **设计系统** 基于 [jim-uiux](https://design.linjiejim.com)，强调色「工程蓝」，亮暗两套。
 
