@@ -1,6 +1,11 @@
+import type { ModelMessage } from "ai"
 import type { Tree } from "./dsl"
 
-/** Stable part first (cached by DeepSeek's prefix cache), per-request state last. */
+/**
+ * Stable for every request: DeepSeek caches the prefix (system + tools +
+ * history), so nothing that changes per step may live here. The model state
+ * rides on the user's message instead (see withState).
+ */
 export const SYSTEM_PROMPT = `你是 FeatureTree 工作台里的建模助教。学习者用中文描述想做的零件，你调用建模工具，在浏览器里的 OpenCascade 内核上一步步建出一棵参数化特征树。学习者能看到每一步、能回滚、能拖参数。
 
 ## 怎么做
@@ -31,7 +36,8 @@ export const SYSTEM_PROMPT = `你是 FeatureTree 工作台里的建模助教。�
 ## 建模习惯
 - 先草图后特征；草图图形都是闭合的，多个图形会合并，cut = true 的图形从前面的图形里挖掉。
 - 外观圆角、倒角放在后面。抽壳时外圆角半径要大于壁厚，否则内侧出尖角或失败；常见顺序是 拉伸 → 外圆角 → 抽壳。
-- 重复的结构用阵列或镜像，不要一个个画。
+- 重复的结构用阵列或镜像，不要一个个画。阵列个数也可以是参数（count: "n"），学习者就能拖着改个数。
+- 轴、杯子、法兰这类回转体，优先在 XZ 上画一个半截面再旋转，而不是叠几段拉伸。
 
 ## 选择器
 选面和选边都用语义条件（全部同时满足），不要用编号。每次重建都会重新解析，所以改参数后依然选得对。
@@ -39,6 +45,7 @@ export const SYSTEM_PROMPT = `你是 FeatureTree 工作台里的建模助教。�
 - 竖直的棱：{"parallel":"Z"}；某个特征的竖直棱：{"of":"base","parallel":"Z"}
 - 顶面一圈边：{"faces":{"normal":"+Z","extreme":"+Z"}}
 - 孔口的圆边：{"kind":"circle","of":"h1","extreme":"+Z"}
+- 圆柱底面那一整圈边是一条边：{"kind":"circle","extreme":"-Z"}；接缝线不算边，不会被选中
 - 除了顶面一圈以外的所有边：{"not":{"extreme":"+Z"}}
 - 只要一个：加 "near":[x,y,z]；确认数量：加 "expect": n
 选中的数量不符时会报错并列出候选，照着候选改选择器。
@@ -68,13 +75,31 @@ export const TEACH_PROMPT = `## 模式：边做边学
 - 旋转之前：问轮廓为什么只画一半。
 问题要短，最好给 2–3 个选项。一个零件里最多问 3 次，别每一步都问。简单零件（只有一两个特征）不用问。`
 
+/** The model as it was when the learner sent their message. */
 export function statePrompt(tree: Tree, summary: string) {
   const json = JSON.stringify(tree)
-  return `## 当前模型
+  return `## 发这条消息时的模型状态
+（工作台自动附上，不是学习者写的。之后你用工具做的改动以工具结果为准；要看最新的完整特征树就用 inspect。）
 特征树（JSON）：
 \`\`\`json
 ${json}
 \`\`\`
 重建结果：
 ${summary || "（还没有建模）"}`
+}
+
+/**
+ * Attach the state to the latest user message. Within a turn that message
+ * doesn't change, so every step re-reads system + tools + history from cache;
+ * the tree's progress is already in the tool results.
+ */
+export function withState(messages: ModelMessage[], state: string): ModelMessage[] {
+  let i = messages.length - 1
+  while (i >= 0 && messages[i].role !== "user") i--
+  if (i < 0) return messages
+  const m = messages[i] as Extract<ModelMessage, { role: "user" }>
+  const parts = typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content
+  const out = [...messages]
+  out[i] = { ...m, content: [...parts, { type: "text", text: state }] }
+  return out
 }

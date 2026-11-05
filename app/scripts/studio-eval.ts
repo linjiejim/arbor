@@ -9,7 +9,7 @@ import { EMPTY_TREE, type Tree } from "../src/studio/dsl"
 import { EVALS, checkCase } from "../src/studio/evals"
 import { Kernel } from "../src/studio/kernel/build"
 import { initNodeKernel } from "../src/studio/kernel/node"
-import { SYSTEM_PROMPT, statePrompt } from "../src/studio/prompt"
+import { SYSTEM_PROMPT, statePrompt, withState } from "../src/studio/prompt"
 import { STUDIO_TOOLS } from "../src/studio/tools"
 import { costUSD } from "../server/limits"
 
@@ -36,24 +36,34 @@ for (const c of cases) {
   let summary = ""
   let calls = 0
   let failedCalls = 0
+  const log: { name: string; input: unknown; ok: boolean; text: string }[] = []
+  // The SDK runs a step's tool calls concurrently; the browser runs them one
+  // at a time in order (use-studio's queue), so do the same here.
+  let queue: Promise<unknown> = Promise.resolve()
   const tools = Object.fromEntries(
     Object.entries(STUDIO_TOOLS).map(([name, def]) => [
       name,
       tool({
         ...(def as object),
-        execute: async (input: Record<string, unknown>) => {
-          calls++
-          const run = await executeTool(port, tree, name, input)
-          if (!run.output.ok) failedCalls++
-          tree = run.tree
-          if (run.report) summary = treeText(tree, run.report)
-          return run.output
+        execute: (input: Record<string, unknown>) => {
+          const job = queue.then(async () => {
+            calls++
+            const run = await executeTool(port, tree, name, input)
+            if (!run.output.ok) failedCalls++
+            log.push({ name, input, ok: run.output.ok, text: run.output.text })
+            tree = run.tree
+            if (run.report) summary = treeText(tree, run.report)
+            return run.output
+          })
+          queue = job.catch(() => {})
+          return job
         },
       } as never),
     ]),
   ) as ToolSet
   const t0 = performance.now()
-  const messages: ModelMessage[] = [{ role: "user", content: c.prompt }]
+  // Same shape as the server: state on the user message, stable system prompt.
+  const messages: ModelMessage[] = withState([{ role: "user", content: c.prompt }], statePrompt(tree, summary))
   let text = ""
   let usage = { inputTokens: 0, cacheReadTokens: 0, outputTokens: 0 }
   let error: string | undefined
@@ -66,7 +76,6 @@ for (const c of cases) {
       stopWhen: isStepCount(16),
       maxOutputTokens: 8000,
       providerOptions: { deepseek: { thinking: { type: THINKING }, ...(THINKING === "enabled" ? { reasoningEffort: "low" } : {}) } },
-      prepareStep: () => ({ system: `${SYSTEM_PROMPT}\n\n${statePrompt(tree, summary)}` }),
     })
     text = res.text
     usage = {
@@ -82,8 +91,9 @@ for (const c of cases) {
   const pass = !error && checks.every((x) => x.pass)
   const sec = (performance.now() - t0) / 1000
   const usd = costUSD(MODEL, usage)
-  results.push({ id: c.id, pass, checks, calls, failedCalls, sec, usage, usd, error, tree, text })
-  console.log(`${pass ? "PASS" : "FAIL"} ${c.id.padEnd(14)} ${calls} calls (${failedCalls} failed) ${sec.toFixed(1)}s $${usd.toFixed(4)}`)
+  results.push({ id: c.id, pass, checks, calls, failedCalls, sec, usage, usd, error, tree, text, log })
+  const hit = usage.inputTokens ? Math.round((100 * usage.cacheReadTokens) / usage.inputTokens) : 0
+  console.log(`${pass ? "PASS" : "FAIL"} ${c.id.padEnd(14)} ${calls} calls (${failedCalls} failed) ${sec.toFixed(1)}s $${usd.toFixed(4)} cache ${hit}%`)
   for (const x of checks.filter((k) => !k.pass)) console.log(`     ✗ ${x.name}: ${x.detail}`)
   if (error) console.log(`     error: ${error}`)
   kernel.dispose()
