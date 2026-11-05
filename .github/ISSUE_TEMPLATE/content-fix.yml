@@ -1,0 +1,52 @@
+name: 内容纠错
+description: 课程、术语、拆解里的说法有误或不准确（必须附出处）
+title: "[内容纠错] "
+labels: ["content"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        谢谢帮忙核对。课程里的说法会被当成标准答案学，所以每处纠错都要有出处。
+        出处按可信度：标准原文（GB/T、ISO、ASME，写明标准号、年份、条款）> 软件官方帮助（写明版本和界面语言）> 正式出版的教材手册 > 论坛和博客（只能作旁证）。
+  - type: input
+    id: where
+    attributes:
+      label: 在哪里
+      description: 页面链接，以及第几步、哪道题或哪张卡。
+      placeholder: https://featuretree.linjiejim.com/lesson/projection 第 5 步
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: 原文
+      description: 现在是怎么写的，直接复制过来。
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: 应该怎么写
+      description: 你的改法。也可以只说哪里不对。
+    validations:
+      required: true
+  - type: textarea
+    id: source
+    attributes:
+      label: 出处
+      description: 标准号和条款、官方帮助的链接（注明软件版本和语言）、教材的书名版次页码。没有出处的纠错会先挂起，等找到依据再改。
+      placeholder: |
+        GB/T 4457.5-2013《机械制图 剖面区域的表示法》第 4.1 条
+        SOLIDWORKS 2022 帮助（简体中文）· 图纸属性：https://help.solidworks.com/...
+    validations:
+      required: true
+  - type: dropdown
+    id: version
+    attributes:
+      label: 这个说法会不会因软件版本、语言或地区而异
+      options:
+        - 不会，是通用的规定
+        - 会，我在「出处」里写了版本
+        - 不确定
+    validations:
+      required: true

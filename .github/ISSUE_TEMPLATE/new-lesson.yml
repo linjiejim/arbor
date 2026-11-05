@@ -1,0 +1,55 @@
+name: 新课建议
+description: 想学但还没有的概念、命令或案例
+title: "[新课建议] "
+labels: ["lesson"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        学习路径（/learn）里有 96 节课的大纲，「规划中」的课也欢迎在这里催更或补充想法。
+  - type: input
+    id: topic
+    attributes:
+      label: 想学什么
+      placeholder: 尺寸公差与配合；卡扣怎么设计；带螺纹的瓶盖拆解
+    validations:
+      required: true
+  - type: input
+    id: code
+    attributes:
+      label: 对应大纲里的课号（有的话）
+      placeholder: 3.2.1
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 形式
+      options:
+        - 互动课（在 3D 里动手）
+        - 图文卡（讲清楚就行）
+        - 案例拆解（真实零件按特征树重建）
+        - 练习
+        - 不确定
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: 卡在哪里
+      description: 你在实际建模时遇到了什么问题，现有的教程哪里没讲清楚。
+    validations:
+      required: true
+  - type: textarea
+    id: interaction
+    attributes:
+      label: 想怎么学
+      description: 希望在 3D 里拖什么、看什么。可选。
+  - type: dropdown
+    id: role
+    attributes:
+      label: 你是
+      options:
+        - 学生
+        - 工程师或设计师
+        - 做 3D 打印或硬件的爱好者
+        - 老师
+        - 其他
