@@ -87,13 +87,20 @@ export function edgeInfos(shape: Shape3D, faces: FaceInfo[]): EdgeInfo[] {
       fe.delete()
     }
   }
-  return edges.map((edge, index) => {
+  // A seam (where a cylinder or a revolved face closes on itself) borders one
+  // face on both sides. It isn't an edge anyone means, and filleting it fails.
+  const real = edges.flatMap((edge, i) => {
+    if (adjacent[i].length >= 2) return [{ edge, faces: adjacent[i] }]
+    edge.delete()
+    return []
+  })
+  return real.map(({ edge, faces: adj }, index) => {
     const t = edge.geomType
     const kind: EdgeInfo["kind"] = t === "LINE" ? "line" : t === "CIRCLE" ? "circle" : "freeform"
     const start = v3(edge.startPoint)
     const end = v3(edge.endPoint)
     const mid = v3(edge.pointAt(0.5))
-    const info: EdgeInfo = { index, edge, kind, start, mid, end, length: edge.length, faces: adjacent[index] }
+    const info: EdgeInfo = { index, edge, kind, start, mid, end, length: edge.length, faces: adj }
     if (kind === "line") {
       const d: V3 = [end[0] - start[0], end[1] - start[1], end[2] - start[2]]
       const n = Math.hypot(...d) || 1

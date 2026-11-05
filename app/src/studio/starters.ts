@@ -26,12 +26,12 @@ export const STARTERS: { id: string; title: string; note: string; teardown?: str
     title: "法兰盘",
     note: "孔先做一个，再用圆周阵列复制；改 n 和 pcd 看阵列怎么跟着变。",
     tree: {
-      params: { D: 120, T: 10, d0: 40, pcd: 90, bolt: 8 },
+      params: { D: 120, T: 10, d0: 40, pcd: 90, bolt: 8, n: 6 },
       features: [
         { id: "sk", op: "sketch", name: "盘面草图", on: { plane: "XY" }, shapes: [{ type: "circle", d: "D" }, { type: "circle", d: "d0", cut: true }], intent: "外圆和中心孔一起画，拉伸一次就有通孔" },
         { id: "disc", op: "extrude", name: "盘体", sketch: "sk", distance: "T" },
         { id: "h1", op: "hole", name: "螺栓孔", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, at: [["pcd/2", 0]], d: "bolt", intent: "只做一个孔作为阵列的种子" },
-        { id: "ring", op: "circular_pattern", name: "孔阵列", features: ["h1"], axis: "Z", count: 6, intent: "绕中心等分 6 个，改种子孔径所有孔一起变" },
+        { id: "ring", op: "circular_pattern", name: "孔阵列", features: ["h1"], axis: "Z", count: "n", intent: "绕中心等分 n 个，改种子孔径所有孔一起变" },
         { id: "ch", op: "chamfer", name: "外缘倒角", edges: { kind: "circle", radius: "D/2" }, d: 1, intent: "去掉外缘锐边" },
       ],
     },

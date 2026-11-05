@@ -88,7 +88,7 @@ export const SketchShape = z.discriminatedUnion("type", [
   z.object({ type: z.literal("circle"), d: Num.describe("直径"), center: Center, cut: Cut }),
   z.object({
     type: z.literal("polygon"),
-    sides: z.number().int().min(3),
+    sides: Num.describe("边数（≥3 的整数，可以写参数）"),
     d: Num.describe("外接圆直径"),
     center: Center,
     rotate: Num.optional(),
@@ -162,10 +162,10 @@ export const Feature = z.discriminatedUnion("op", [
     op: z.literal("linear_pattern"),
     features: z.array(z.string()).min(1).describe("要复制的加料/切除/孔特征 id"),
     dir: Dir,
-    count: z.number().int().min(2).describe("总个数（含原来那个）"),
+    count: Num.describe("总个数（含原来那个），≥2 的整数，可以写参数"),
     spacing: Num,
     dir2: Dir.optional(),
-    count2: z.number().int().min(2).optional(),
+    count2: Num.optional().describe("第二方向的个数"),
     spacing2: Num.optional(),
   }),
   z.object({
@@ -173,7 +173,7 @@ export const Feature = z.discriminatedUnion("op", [
     op: z.literal("circular_pattern"),
     features: z.array(z.string()).min(1),
     axis: Axis.describe("绕过原点的这根轴"),
-    count: z.number().int().min(2).describe("总个数（含原来那个）"),
+    count: Num.describe("总个数（含原来那个），≥2 的整数，可以写参数"),
     angle: Num.optional().describe("总角度，缺省 360（等分整圈）"),
   }),
   z.object({

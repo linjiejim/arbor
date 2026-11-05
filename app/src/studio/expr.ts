@@ -52,14 +52,18 @@ function lex(src: string): Tok[] {
   return out
 }
 
+/** Models sometimes double-encode a name as "\"d\""; the quotes carry no meaning. */
+export const unquote = (src: string) => src.replace(/^\s*(["'])(.*)\1\s*$/, "$2")
+
 /** Names referenced by an expression (for dependency order and "unknown parameter" errors). */
 export function namesIn(src: string): string[] {
-  return lex(src)
+  return lex(unquote(src))
     .filter((t): t is { t: "id"; v: string } => t.t === "id" && !(t.v in FUNCS) && !(t.v in CONSTS))
     .map((t) => t.v)
 }
 
-export function evaluate(src: string, scope: Scope): number {
+export function evaluate(raw: string, scope: Scope): number {
+  const src = unquote(raw)
   const toks = lex(src)
   let p = 0
   const peek = () => toks[p]
