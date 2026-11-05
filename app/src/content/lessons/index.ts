@@ -135,6 +135,15 @@ export const LESSONS: LessonMeta[] = [
     gist: "在三视图上点边加尺寸：漏标、重复、封闭尺寸链实时检出，链式与基准标注的误差累积，尺寸标在哪个视图。",
     load: () => import("./dimensioning"),
   },
+  {
+    id: "tolerance-fits",
+    codes: ["3.2.1"],
+    title: "尺寸公差与配合",
+    track: "T3",
+    minutes: 8,
+    gist: "公差带图、IT 等级与基本偏差，H7 配 g6 / h6 / k6 / p6 在 3D 里试装：间隙、过渡、过盈，以及基孔制与基轴制。",
+    load: () => import("./tolerance-fits"),
+  },
   // ---------------------------------------------------------------- T4 DFM
   {
     id: "print-overhang",
