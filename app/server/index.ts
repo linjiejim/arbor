@@ -14,7 +14,7 @@ import { convertToModelMessages, streamText, type UIMessage } from "ai"
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { Tree } from "../src/studio/dsl"
-import { SYSTEM_PROMPT, statePrompt } from "../src/studio/prompt"
+import { SYSTEM_PROMPT, TEACH_PROMPT, statePrompt } from "../src/studio/prompt"
 import { STUDIO_TOOLS } from "../src/studio/tools"
 import { trimMessages } from "../src/studio/trim"
 import { Budget, costUSD, RateLimiter } from "./limits"
@@ -41,7 +41,7 @@ app.get("/api/studio/status", (c) =>
 app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) => {
   const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "local"
   const userKey = c.req.header("x-deepseek-key")?.trim() || undefined
-  const body = (await c.req.json().catch(() => null)) as { messages?: UIMessage[]; tree?: unknown; summary?: unknown } | null
+  const body = (await c.req.json().catch(() => null)) as { messages?: UIMessage[]; tree?: unknown; summary?: unknown; mode?: unknown } | null
   if (!body || !Array.isArray(body.messages) || !body.messages.length) return c.json({ error: "bad-request", message: "请求格式不对" }, 400)
   const tree = Tree.safeParse(body.tree ?? { params: {}, features: [] })
   if (!tree.success) return c.json({ error: "bad-request", message: "特征树格式不对" }, 400)
@@ -61,7 +61,7 @@ app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) 
   const messages = await convertToModelMessages(trimMessages(body.messages), { tools: STUDIO_TOOLS, ignoreIncompleteToolCalls: true })
   const result = streamText({
     model: MOCK ? mockModel() : deepseek(MODEL),
-    system: `${SYSTEM_PROMPT}\n\n${statePrompt(tree.data, summary)}`,
+    system: `${SYSTEM_PROMPT}${body.mode === "teach" ? `\n\n${TEACH_PROMPT}` : ""}\n\n${statePrompt(tree.data, summary)}`,
     messages,
     tools: STUDIO_TOOLS,
     maxOutputTokens: 8000,

@@ -1,9 +1,10 @@
 import * as React from "react"
 import { Link } from "react-router"
-import { Check, ChevronRight, Eye, Pencil, Search, SlidersHorizontal, Square, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react"
-import type { UIMessage } from "ai"
+import { Check, ChevronRight, Eye, ImagePlus, Pencil, Search, SlidersHorizontal, Square, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react"
+import type { FileUIPart, UIMessage } from "ai"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { Button, IconButton } from "@/components/ui/button"
+import { Segmented } from "@/components/ui/segmented"
 import { Textarea } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { OpIcon } from "@/components/op-icon"
@@ -38,6 +39,9 @@ const TOOL_LABEL: Record<string, { label: string; op?: OpId; icon?: LucideIcon }
 
 export function ChatPanel({ chat, onSelectFeature, ready }: { chat: StudioChat; onSelectFeature: (id: string) => void; ready: boolean }) {
   const [text, setText] = React.useState("")
+  const [files, setFiles] = React.useState<FileUIPart[]>([])
+  const [fileError, setFileError] = React.useState<string | null>(null)
+  const picker = React.useRef<HTMLInputElement>(null)
   const scroller = React.useRef<HTMLDivElement>(null)
   const err = errorText(chat.error)
 
@@ -47,9 +51,21 @@ export function ChatPanel({ chat, onSelectFeature, ready }: { chat: StudioChat; 
   }, [chat.messages, chat.status])
 
   const submit = () => {
-    if (!text.trim() || chat.busy || !ready) return
-    chat.send(text)
+    if ((!text.trim() && !files.length) || chat.busy || !ready) return
+    chat.send(text, files.length ? files : undefined)
     setText("")
+    setFiles([])
+  }
+
+  const attach = async (list: FileList | null) => {
+    setFileError(null)
+    const picked = [...(list ?? [])].filter((f) => f.type.startsWith("image/")).slice(0, 2 - files.length)
+    try {
+      const parts = await Promise.all(picked.map(toImagePart))
+      setFiles((f) => [...f, ...parts].slice(0, 2))
+    } catch {
+      setFileError("这张图读不出来，换一张 JPG 或 PNG 试试。")
+    }
   }
 
   return (
@@ -87,10 +103,28 @@ export function ChatPanel({ chat, onSelectFeature, ready }: { chat: StudioChat; 
         )}
       </div>
       <div className="shrink-0 border-t p-3">
+        {files.length > 0 && (
+          <div className="mb-2 flex gap-2">
+            {files.map((f, i) => (
+              <div key={i} className="relative">
+                <img src={f.url} alt="参考图" className="size-14 rounded-md border object-cover" />
+                <button
+                  type="button"
+                  aria-label="移除这张图"
+                  onClick={() => setFiles((x) => x.filter((_, k) => k !== i))}
+                  className="absolute -top-1.5 -right-1.5 grid size-5 place-items-center rounded-full border bg-background text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {fileError && <p className="mb-2 text-small text-destructive">{fileError}</p>}
         <Textarea
           rows={2}
           value={text}
-          placeholder={ready ? "描述你想做的零件，或者说要改哪里…" : "建模内核加载中…"}
+          placeholder={ready ? "描述你想做的零件，或者说要改哪里… Enter 发送" : "建模内核加载中…"}
           disabled={!ready}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -103,14 +137,27 @@ export function ChatPanel({ chat, onSelectFeature, ready }: { chat: StudioChat; 
           aria-label="给建模助教的消息"
         />
         <div className="mt-2 flex items-center gap-2">
-          <span className="text-caption text-faint-foreground">Enter 发送，Shift + Enter 换行</span>
+          <input ref={picker} type="file" accept="image/*" multiple hidden onChange={(e) => void attach(e.target.files).finally(() => (e.target.value = ""))} />
+          <IconButton label="附参考图（照片或草图）" size="icon-sm" disabled={!ready || files.length >= 2} onClick={() => picker.current?.click()}>
+            <ImagePlus />
+          </IconButton>
+          <Segmented
+            size="sm"
+            aria-label="对话模式"
+            value={chat.mode}
+            onValueChange={chat.setMode}
+            options={[
+              { value: "build", label: "直接做" },
+              { value: "teach", label: "边做边学" },
+            ]}
+          />
           {chat.busy ? (
             <Button size="sm" variant="secondary" className="ml-auto" onClick={() => void chat.stop()}>
               <Square />
               停止
             </Button>
           ) : (
-            <Button size="sm" variant="primary" className="ml-auto" disabled={!text.trim() || !ready} onClick={submit}>
+            <Button size="sm" variant="primary" className="ml-auto" disabled={(!text.trim() && !files.length) || !ready} onClick={submit}>
               发送
             </Button>
           )}
@@ -148,7 +195,19 @@ function Intro({ onPick, disabled }: { onPick: (t: string) => void; disabled: bo
 function Message({ m, onSelectFeature }: { m: UIMessage; onSelectFeature: (id: string) => void }) {
   if (m.role === "user") {
     const text = m.parts.map((p) => (p.type === "text" ? p.text : "")).join("")
-    return <div className="ml-8 rounded-lg bg-muted px-3 py-2 text-body whitespace-pre-wrap">{text}</div>
+    const images = m.parts.filter((p): p is FileUIPart => p.type === "file" && p.mediaType.startsWith("image/"))
+    return (
+      <div className="ml-8 rounded-lg bg-muted px-3 py-2 text-body whitespace-pre-wrap">
+        {images.length > 0 && (
+          <div className="mb-2 flex gap-2">
+            {images.map((f, i) => (
+              <img key={i} src={f.url} alt="参考图" className="max-h-28 rounded-md border" />
+            ))}
+          </div>
+        )}
+        {text}
+      </div>
+    )
   }
   return (
     <div className="space-y-2">
@@ -242,4 +301,22 @@ function ToolCard({ part, onSelectFeature }: { part: ToolPart; onSelectFeature: 
       ) : null}
     </div>
   )
+}
+
+/** Read an image, shrink it to at most 1024 px, return it as a data-URL file part. */
+async function toImagePart(file: File): Promise<FileUIPart> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = new Image()
+    img.src = url
+    await img.decode()
+    const scale = Math.min(1, 1024 / Math.max(img.naturalWidth, img.naturalHeight))
+    const canvas = document.createElement("canvas")
+    canvas.width = Math.round(img.naturalWidth * scale)
+    canvas.height = Math.round(img.naturalHeight * scale)
+    canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height)
+    return { type: "file", mediaType: "image/jpeg", filename: file.name, url: canvas.toDataURL("image/jpeg", 0.85) }
+  } finally {
+    URL.revokeObjectURL(url)
+  }
 }

@@ -1,11 +1,13 @@
 import * as React from "react"
 import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type UIMessage } from "ai"
+import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type FileUIPart, type UIMessage } from "ai"
 import { trimMessages } from "./trim"
 import type { Studio } from "./use-studio"
 
 const STORE = "ft-studio-chat-v1"
 export const KEY_STORE = "ft-studio-deepseek-key"
+const MODE_STORE = "ft-studio-mode"
+export type ChatMode = "build" | "teach"
 /** Tool calls allowed per user turn before the loop pauses. */
 export const MAX_CALLS_PER_TURN = 30
 
@@ -19,10 +21,14 @@ function loadMessages(): UIMessage[] {
 }
 
 /** Images are big and only matter to the model once; don't keep them in storage. */
-function forStorage(messages: UIMessage[]) {
+function forStorage(messages: UIMessage[]): UIMessage[] {
   return messages.map((m) => ({
     ...m,
-    parts: m.parts.map((p) => (p.type === "tool-look" && "output" in p && p.output ? { ...p, output: { ...(p.output as object), images: undefined } } : p)),
+    parts: m.parts.flatMap((p): UIMessage["parts"] => {
+      if (p.type === "file") return [{ type: "text" as const, text: "（参考图未保存）" }]
+      if (p.type === "tool-look" && "output" in p && p.output) return [{ ...p, output: { ...(p.output as object), images: undefined } } as UIMessage["parts"][number]]
+      return [p]
+    }),
   }))
 }
 
@@ -48,7 +54,11 @@ export function errorText(e: Error | undefined) {
  * The chat transport and tool callback outlive renders; they read the latest
  * studio state through this bridge (one studio page at a time).
  */
-const bridge: { studio: Studio | null; addOutput: ReturnType<typeof useChat>["addToolOutput"] | null } = { studio: null, addOutput: null }
+const bridge: { studio: Studio | null; addOutput: ReturnType<typeof useChat>["addToolOutput"] | null; mode: ChatMode } = {
+  studio: null,
+  addOutput: null,
+  mode: "build",
+}
 
 export function useStudioChat(studio: Studio) {
   React.useEffect(() => {
@@ -56,6 +66,11 @@ export function useStudioChat(studio: Studio) {
   }, [studio])
   const [initial] = React.useState(loadMessages)
   const [paused, setPaused] = React.useState(false)
+  const [mode, setModeState] = React.useState<ChatMode>(() => (localStorage.getItem(MODE_STORE) === "teach" ? "teach" : "build"))
+  React.useEffect(() => {
+    bridge.mode = mode
+    localStorage.setItem(MODE_STORE, mode)
+  }, [mode])
 
   const transport = React.useMemo(
     () =>
@@ -65,7 +80,7 @@ export function useStudioChat(studio: Studio) {
           const key = localStorage.getItem(KEY_STORE)
           const s = bridge.studio
           return {
-            body: { messages: trimMessages(messages), tree: s?.treeRef.current, summary: s?.summary ?? "" },
+            body: { messages: trimMessages(messages), tree: s?.treeRef.current, summary: s?.summary ?? "", mode: bridge.mode },
             headers: key ? { "x-deepseek-key": key } : undefined,
           }
         },
@@ -106,12 +121,12 @@ export function useStudioChat(studio: Studio) {
   }, [chat.messages, chat.status])
 
   const send = React.useCallback(
-    (text: string) => {
+    (text: string, files?: FileUIPart[]) => {
       const t = text.trim()
-      if (!t) return
+      if (!t && !files?.length) return
       setPaused(false)
       bridge.studio?.checkpoint()
-      void chat.sendMessage({ text: t })
+      void chat.sendMessage({ text: t || "照着这张图建模", files })
     },
     [chat],
   )
@@ -123,7 +138,7 @@ export function useStudioChat(studio: Studio) {
     localStorage.removeItem(STORE)
   }, [chat])
 
-  return { ...chat, send, clear, paused, busy: chat.status === "submitted" || chat.status === "streaming" }
+  return { ...chat, send, clear, paused, mode, setMode: setModeState, busy: chat.status === "submitted" || chat.status === "streaming" }
 }
 
 export type StudioChat = ReturnType<typeof useStudioChat>

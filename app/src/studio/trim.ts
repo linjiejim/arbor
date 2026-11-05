@@ -5,7 +5,8 @@ import type { UIMessage } from "ai"
  * travels in the system prompt anyway.
  *  - only the last `keepTurns` user turns;
  *  - images only from the most recent `look`;
- *  - reasoning only within the current turn (DeepSeek needs it there for tool calls).
+ *  - reasoning only within the current turn (DeepSeek needs it there for tool calls);
+ *  - reference images only from the last two user turns.
  */
 export function trimMessages(messages: UIMessage[], keepTurns = 8): UIMessage[] {
   const userIdx = messages.map((m, i) => (m.role === "user" ? i : -1)).filter((i) => i >= 0)
@@ -20,8 +21,12 @@ export function trimMessages(messages: UIMessage[], keepTurns = 8): UIMessage[] 
     }),
   )
 
+  const recentUser = userIdx.length > 2 ? userIdx[userIdx.length - 2] : 0
   return kept.map((m, mi) => {
     const before = start + mi < lastUser
+    if (m.role === "user" && start + mi < recentUser && m.parts.some((p) => p.type === "file")) {
+      return { ...m, parts: [...m.parts.filter((p) => p.type !== "file"), { type: "text", text: "（之前附的参考图已省略）" }] } as UIMessage
+    }
     const parts = m.parts
       .filter((p) => !(before && p.type === "reasoning"))
       .map((p, pi) => {
