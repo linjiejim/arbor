@@ -34,6 +34,7 @@ FeatureTree 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和�
 | **replicad-opencascadejs** | 1.1.0 | **LGPL-2.1-only**，见下 | 工作台的几何内核：OpenCascade 编译成的 WebAssembly | <https://github.com/sgenoud/replicad> |
 | AI SDK（`ai`、`@ai-sdk/react`） | 7.0 / 4.0 | Apache-2.0 | 工作台的对话与工具调用 | <https://github.com/vercel/ai> |
 | Zod | 4.6.7 | MIT | 工作台特征树和工具参数的 schema | <https://github.com/colinhacks/zod> |
+| react-markdown、remark-gfm | 10.1.0 / 4.0.1 | MIT | 工作台对话里的 Markdown 渲染 | <https://github.com/remarkjs/react-markdown> |
 
 `package.json` 里还有 cmdk 和 vaul（都是 MIT），目前没有页面用到，构建时被摇树去掉了，不在产物里。
 
@@ -71,6 +72,7 @@ FeatureTree 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和�
 | --- | --- | --- | --- |
 | Hono、`@hono/node-server` | 4.13 / 2.1 | MIT | <https://github.com/honojs/hono> |
 | `@ai-sdk/deepseek` | 3.0.80 | Apache-2.0 | <https://github.com/vercel/ai> |
+| `@openrouter/ai-sdk-provider` | 3.1.0 | Apache-2.0 | <https://github.com/OpenRouterTeam/ai-sdk-provider> |
 | AI SDK（`ai`）、Zod | 同上 | Apache-2.0 / MIT | 同上 |
 
 ### jim-uiux 组件（待确认）
