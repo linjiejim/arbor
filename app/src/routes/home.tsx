@@ -1,7 +1,7 @@
 import * as React from "react"
 import * as THREE from "three"
 import { Link } from "react-router"
-import { ArrowRight, BookOpen, Box, Dumbbell, Layers, MessageSquareText, RotateCcw } from "lucide-react"
+import { ArrowRight, BookOpen, Box, Layers, MessageSquareText, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Viewport } from "@/components/viewport"
 import { OpIcon } from "@/components/op-icon"
@@ -55,7 +55,7 @@ export function HomePage() {
       </section>
 
       <section className="bg-sunken">
-        <div className="mx-auto grid max-w-[1200px] grid-cols-4 gap-4 px-6 py-12 max-lg:grid-cols-2 max-sm:grid-cols-1 max-sm:px-4">
+        <div className="mx-auto grid max-w-[1200px] grid-cols-3 gap-4 px-6 py-12 max-md:grid-cols-1 max-sm:px-4">
           <Way
             icon={<BookOpen />}
             title="互动课"
@@ -70,7 +70,6 @@ export function HomePage() {
             link="看拆解"
             text="真实零件按特征树重建，几何由 OpenCascade 内核算出。每个面都标着是哪一步生成或修改的，还能看每一步的 build123d 代码。"
           />
-          <Way icon={<Dumbbell />} title="练习" to="/practice" link="去练习" text="把打乱的特征树排回去；猜一个参数改了会不会失败，再看内核的答案。小测按 1 天、1 周、3 周提醒复习。" />
           <Way icon={<Box />} title="工具图鉴" to="/atlas" link="翻图鉴" text={`${OPS.length} 个建模命令各一张卡：它做什么、要什么输入、常见的坑，以及在 8 个软件里分别叫什么。`} />
         </div>
         <div className="mx-auto max-w-[1200px] px-6 pb-12 max-sm:px-4">

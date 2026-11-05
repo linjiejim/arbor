@@ -24,22 +24,6 @@ test.describe("页面", () => {
     await expect(page.locator(`a[href="/teardown/${MODELS[0].id}"] img`)).toBeVisible()
   })
 
-  test("/practice 练习", async ({ page }) => {
-    await page.goto("/practice")
-    await expect(page.getByRole("heading", { name: "练习" })).toBeVisible()
-    await page.getByRole("button", { name: "下移" }).first().click()
-    await page.getByRole("button", { name: "检查顺序" }).click()
-    await expect(page.getByText(/^(顺序正确|按这个顺序会重建失败|能建出来，但设计意图有问题)$/).first()).toBeVisible()
-
-    await page.getByRole("tab", { name: "改参预测" }).click()
-    await expect(page.getByText(/^第 1 题，共 \d+ 题$/)).toBeVisible()
-    const canvas = page.locator("canvas").first()
-    await expectRendered(canvas, "/practice predict")
-    await page.getByRole("tabpanel").getByRole("button", { name: /正常重建|在「.+」失败/ }).first().click()
-    await expect(page.getByRole("button", { name: "下一题" })).toBeVisible()
-    await expectRendered(canvas, "/practice predict revealed")
-  })
-
   test("/atlas 工具图鉴", async ({ page }) => {
     await page.goto("/atlas")
     await expect(page.getByRole("heading", { name: "工具图鉴" })).toBeVisible()

@@ -28,7 +28,6 @@ const router = createBrowserRouter([
       { path: "/teardown", lazy: lazy(() => import("@/routes/teardown"), "TeardownIndex") },
       { path: "/atlas", lazy: lazy(() => import("@/routes/atlas"), "AtlasPage") },
       { path: "/glossary", lazy: lazy(() => import("@/routes/glossary"), "GlossaryPage") },
-      { path: "/practice", lazy: lazy(() => import("@/routes/practice"), "PracticePage") },
       { path: "/card/:code", lazy: lazy(() => import("@/routes/card"), "CardPage") },
     ],
   },
