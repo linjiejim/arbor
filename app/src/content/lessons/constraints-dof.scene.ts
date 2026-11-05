@@ -349,7 +349,7 @@ export class ConstraintsDofScene extends LessonScene<DofState> {
       hd.position.copy(v3(p[i], 0.1))
       hd.element.className = defined
         ? "interactive size-3 rounded-full border-2 border-foreground bg-background cursor-not-allowed"
-        : "interactive size-3.5 rounded-full border-2 border-primary bg-background cursor-grab transition-[scale] hover:scale-125"
+        : "interactive size-3.5 rounded-full border-2 border-primary bg-background cursor-grab transition-shadow hover:ring-4 hover:ring-primary/25"
       hd.element.title = defined ? "已完全定义：拖不动" : "拖动这个角点"
     })
     this.v.invalidate()

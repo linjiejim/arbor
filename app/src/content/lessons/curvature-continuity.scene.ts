@@ -289,7 +289,7 @@ export class CurvatureScene extends LessonScene<CurvatureState> {
 }
 
 function handleClass(isA: boolean, driven: boolean) {
-  const base = "interactive size-3.5 border-2 bg-background cursor-grab transition-transform hover:scale-125"
+  const base = "interactive size-3.5 border-2 bg-background cursor-grab transition-shadow hover:ring-4 hover:ring-primary/25"
   if (driven) return `${base} rounded-xs border-primary`
   return `${base} rounded-full ${isA ? "border-primary" : "border-foreground"}`
 }
