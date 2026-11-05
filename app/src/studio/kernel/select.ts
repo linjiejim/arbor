@@ -168,8 +168,7 @@ export function describeEdge(e: EdgeInfo) {
 }
 
 function dirName(v: V3) {
-  for (const [name, d] of Object.entries(DIRS)) if (dot(v, d) > 0.9999) return name
-  return `(${v.map(r2).join(", ")})`
+  return axisDir(v) ?? `(${v.map(r2).join(", ")})`
 }
 
 function checkCount<T>(found: T[], expect: number | undefined, what: string, all: T[], describe: (t: T) => string) {
@@ -261,4 +260,75 @@ function filterEdges(sel: Omit<EdgeSelector, "not" | "expect">, edges: EdgeInfo[
     out = nearest(out, (e) => e.edge, p)
   }
   return out
+}
+
+// ------------------------------------------------------- selectors for a pick
+
+const round3 = (x: number) => Math.round(x * 1000) / 1000
+const SIX = ["+Z", "-Z", "+X", "-X", "+Y", "-Y"] as const
+type Sel = Record<string, unknown>
+
+/** "+Z" etc. when `v` points along an axis, else null. */
+export function axisDir(v: V3): string | null {
+  for (const [name, d] of Object.entries(DIRS)) if (dot(v, d) > 0.9999) return name
+  return null
+}
+
+/** The first candidate that, run against the current shape, picks exactly the target. */
+function firstUnique<T>(candidates: Sel[], run: (sel: Sel) => T[], isTarget: (t: T) => boolean): Sel | null {
+  const seen = new Set<string>()
+  for (const c of candidates) {
+    const key = JSON.stringify(c)
+    if (seen.has(key)) continue
+    seen.add(key)
+    try {
+      const got = run(c)
+      if (got.length === 1 && isTarget(got[0])) return { ...c, expect: 1 }
+    } catch {
+      /* nothing matched */
+    }
+  }
+  return null
+}
+
+/**
+ * A selector that picks exactly this face, as semantic as possible: which
+ * feature made it, what it is, which way it faces; then "outermost", a
+ * coordinate, and only as a last resort the point that was clicked.
+ */
+export function uniqueFaceSelector(target: FaceInfo, faces: FaceInfo[], scope: Scope, point: V3): Sel | null {
+  const base: Sel = {}
+  if (target.origin && target.origin !== "?") base.of = target.origin
+  if (target.kind !== "plane") base.kind = target.kind
+  const n = target.normal ? axisDir(target.normal) : null
+  if (n) base.normal = n
+  if (target.radius !== undefined) base.radius = round3(target.radius)
+  const extremes = n ? [n, ...SIX.filter((d) => d !== n)] : [...SIX]
+  const axis = n ? n[1] : null
+  const at = axis ? { axis, value: round3(target.center["XYZ".indexOf(axis)]) } : null
+  const candidates: Sel[] = [base, ...extremes.map((e) => ({ ...base, extreme: e })), ...(at ? [{ ...base, at }] : []), { ...base, near: point.map(round3) }]
+  return firstUnique(candidates, (sel) => selectFaces(sel as FaceSelector, faces, scope), (f) => f.index === target.index)
+}
+
+/** Same for an edge: its kind and direction or radius, the feature(s) whose faces it bounds, then position. */
+export function uniqueEdgeSelector(target: EdgeInfo, edges: EdgeInfo[], faces: FaceInfo[], scope: Scope, point: V3): Sel | null {
+  const base: Sel = { kind: target.kind }
+  const d = target.dir ? axisDir(target.dir) : null
+  if (d) base.parallel = d[1]
+  if (target.radius !== undefined) base.radius = round3(target.radius)
+  const origins = [...new Set(target.faces.map((i) => faces[i]?.origin).filter((o): o is string => !!o && o !== "?"))]
+  const bases = [base, ...origins.map((o) => ({ of: o, ...base }))]
+  // Axes along which the whole edge sits at one coordinate (a rim at Z = 30).
+  const ats = (["X", "Y", "Z"] as const).flatMap((ax, k) => {
+    const v = [target.start[k], target.mid[k], target.end[k]]
+    return Math.max(...v) - Math.min(...v) < 1e-6 ? [{ axis: ax, value: round3(target.mid[k]) }] : []
+  })
+  const candidates: Sel[] = [
+    ...bases,
+    ...bases.flatMap((b) => SIX.map((e) => ({ ...b, extreme: e }))),
+    ...bases.flatMap((b) => ats.map((at) => ({ ...b, at }))),
+    ...bases.flatMap((b) => ats.flatMap((at) => SIX.map((e) => ({ ...b, at, extreme: e })))),
+    { ...bases[bases.length - 1], near: point.map(round3) },
+  ]
+  return firstUnique(candidates, (sel) => selectEdges(sel as EdgeSelector, edges, faces, scope), (e) => e.index === target.index)
 }

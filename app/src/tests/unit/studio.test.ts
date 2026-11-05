@@ -7,6 +7,8 @@ import { evaluate, resolveParams } from "@/studio/expr"
 import { Kernel } from "@/studio/kernel/build"
 import { initNodeKernel } from "@/studio/kernel/node"
 import { trimMessages } from "@/studio/trim"
+import { annotationText } from "@/studio/annotations"
+import { STARTERS } from "@/studio/starters"
 
 describe("parameter expressions", () => {
   it("evaluates arithmetic, functions in degrees and parameters", () => {
@@ -155,6 +157,85 @@ describe("kernel", () => {
     expect(rep.features[3].summary).toMatch(/×6/)
     const bad = k.rebuild({ ...tree, features: tree.features.map((f) => (f.id === "p" ? { ...f, count: "k" } : f)) as Tree["features"] })
     expect(bad.features[3].message).toMatch(/整数/)
+  })
+
+  it("turns any clicked face or edge into a selector that picks exactly it", () => {
+    const plate: Tree = {
+      params: { L: 100, W: 60 },
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W" }] },
+        { id: "b", op: "extrude", sketch: "s", distance: 5 },
+        { id: "h", op: "hole", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, at: [["L/2-8", "W/2-8"], ["8-L/2", "W/2-8"]], d: 6 },
+        { id: "f", op: "fillet", edges: { parallel: "Z", not: { of: "h" } }, r: 4 },
+      ],
+    }
+    const models = [plate, ...STARTERS.map((x) => x.tree)]
+    let slowest = 0
+    for (const tree of models) {
+      k.rebuild(tree)
+      const d = k.display()
+      const v = d.mesh!.vertices
+      const t = d.mesh!.triangles
+      let faces = 0
+      for (const g of d.groups) {
+        const p = [0, 1, 2].map((c) => (v[t[g.start] * 3 + c] + v[t[g.start + 1] * 3 + c] + v[t[g.start + 2] * 3 + c]) / 3) as [number, number, number]
+        const info = k.pick({ kind: "face", hash: g.hash, point: p })
+        expect(info, `face pick on ${tree.features.at(-1)?.id}`).not.toBeNull()
+        expect(info!.selector, `${info!.what} ${info!.where}`).not.toBeNull()
+        expect(k.locate("face", info!.selector)).toEqual([g.hash])
+        faces++
+      }
+      let edges = 0
+      for (const g of d.edgeGroups) {
+        const e = d.edges!
+        const p = [0, 1, 2].map((c) => (e[g.start * 3 + c] + e[(g.start + 1) * 3 + c]) / 2) as [number, number, number]
+        const t0 = performance.now()
+        const info = k.pick({ kind: "edge", hash: g.hash, point: p })
+        slowest = Math.max(slowest, performance.now() - t0)
+        if (!info) continue // seam lines are not edges
+        expect(info.selector, `${info.what} ${info.where}`).not.toBeNull()
+        expect(k.locate("edge", info.selector)).toEqual([g.hash])
+        edges++
+      }
+      expect(faces).toBeGreaterThan(3)
+      expect(edges).toBeGreaterThan(3)
+    }
+    console.log(`slowest edge pick: ${Math.round(slowest)} ms`)
+  }, 120_000)
+
+  it("tells a fillet's tangent line apart from a real edge", () => {
+    k.rebuild(STARTERS.find((x) => x.id === "box-fillet-first")!.tree)
+    const d = k.display()
+    const e = d.edges!
+    const picks = d.edgeGroups
+      .map((g) => k.pick({ kind: "edge", hash: g.hash, point: [0, 1, 2].map((c) => (e[g.start * 3 + c] + e[(g.start + 1) * 3 + c]) / 2) as [number, number, number] }))
+      .filter((p) => p !== null)
+    expect(picks.some((p) => p.smooth)).toBe(true)
+    // The rim of the open top is a real corner between the wall top and the walls.
+    expect(picks.some((p) => !p.smooth)).toBe(true)
+  }, 60_000)
+
+  it("keeps pointing at one face after a parameter change, and tells the model where to sketch", () => {
+    const tree: Tree = {
+      params: { L: 80, W: 50, H: 30 },
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W" }] },
+        { id: "base", op: "extrude", sketch: "s", distance: "H" },
+      ],
+    }
+    k.rebuild(tree)
+    const top = k.display().groups.find((g) => g.origin === "base")!
+    const info = k.pick({ kind: "face", hash: k.display().groups[0].hash, point: [10, -5, 30] })!
+    expect(info).not.toBeNull()
+    void top
+    const topInfo = k.display().groups.map((g) => k.pick({ kind: "face", hash: g.hash, point: [10, -5, 30] })!).find((x) => x.what.includes("朝上"))!
+    expect(topInfo.selector).toMatchObject({ of: "base", normal: "+Z", expect: 1 })
+    expect(topInfo.sketch).toEqual({ plane: "XY", offset: 30, uv: [10, -5] })
+    k.rebuild({ ...tree, params: { ...tree.params, H: 45, L: 120 } })
+    expect(k.locate("face", topInfo.selector)).toHaveLength(1)
+    const text = annotationText([{ n: 1, note: "这里开个孔", kind: "face", ...topInfo, point: topInfo.point }])
+    expect(text).toMatch(/\[标注 ①\] 学习者的备注：这里开个孔/)
+    expect(text).toMatch(/草图坐标 \(10, -5\)/)
   })
 
   it("refuses a revolve profile that crosses the axis", () => {
