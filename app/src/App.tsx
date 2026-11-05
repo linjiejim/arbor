@@ -1,5 +1,5 @@
 import type * as React from "react"
-import { createBrowserRouter, Outlet, RouterProvider, ScrollRestoration } from "react-router"
+import { createBrowserRouter, Outlet, redirect, RouterProvider, ScrollRestoration } from "react-router"
 import { SiteHeader } from "@/components/site-header"
 import { HomePage } from "@/routes/home"
 import { syncDocumentTitle } from "@/lib/document-title"
@@ -29,6 +29,9 @@ const router = createBrowserRouter([
       { path: "/atlas", lazy: lazy(() => import("@/routes/atlas"), "AtlasPage") },
       { path: "/glossary", lazy: lazy(() => import("@/routes/glossary"), "GlossaryPage") },
       { path: "/card/:code", lazy: lazy(() => import("@/routes/card"), "CardPage") },
+      // 「练习」was taken down on 2026-11-06; old links land on the learning path.
+      { path: "/practice", loader: () => redirect("/learn") },
+      { path: "*", lazy: lazy(() => import("@/routes/not-found"), "NotFoundPage") },
     ],
   },
   // Immersive pages: their own header, the viewport takes the screen.

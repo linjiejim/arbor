@@ -24,6 +24,15 @@ test.describe("页面", () => {
     await expect(page.locator(`a[href="/teardown/${MODELS[0].id}"] img`)).toBeVisible()
   })
 
+  test("未知地址显示 404，旧的 /practice 跳到学习路径", async ({ page }) => {
+    await page.goto("/no-such-page")
+    await expect(page.getByText("没有这个页面")).toBeVisible()
+    await page.getByRole("link", { name: "回到首页" }).click()
+    await expect(page).toHaveURL(/\/$/)
+    await page.goto("/practice")
+    await expect(page).toHaveURL(/\/learn$/)
+  })
+
   test("/atlas 工具图鉴", async ({ page }) => {
     await page.goto("/atlas")
     await expect(page.getByRole("heading", { name: "工具图鉴" })).toBeVisible()
