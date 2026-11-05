@@ -30,6 +30,10 @@ FeatureTree 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和�
 | Inter（经 `@fontsource-variable/inter` 打包） | 5.3.0 | SIL OFL 1.1 | 界面字体 | <https://github.com/rsms/inter> |
 | JetBrains Mono（经 `@fontsource-variable/jetbrains-mono` 打包） | 5.3.0 | SIL OFL 1.1 | 等宽字体 | <https://github.com/JetBrains/JetBrainsMono> |
 | **planegcs**（`@salusoft89/planegcs`） | 1.3.0 | **LGPL-2.1**，见下 | 「几何约束与自由度」课的草图求解器 | <https://github.com/Salusoft89/planegcs> |
+| replicad | 1.2.0 | MIT | AI 建模工作台的建模 API（浏览器里的 Web Worker） | <https://github.com/sgenoud/replicad> |
+| **replicad-opencascadejs** | 1.1.0 | **LGPL-2.1-only**，见下 | 工作台的几何内核：OpenCascade 编译成的 WebAssembly | <https://github.com/sgenoud/replicad> |
+| AI SDK（`ai`、`@ai-sdk/react`） | 7.0 / 4.0 | Apache-2.0 | 工作台的对话与工具调用 | <https://github.com/vercel/ai> |
+| Zod | 4.6.7 | MIT | 工作台特征树和工具参数的 schema | <https://github.com/colinhacks/zod> |
 
 `package.json` 里还有 cmdk 和 vaul（都是 MIT），目前没有页面用到，构建时被摇树去掉了，不在产物里。
 
@@ -49,6 +53,25 @@ FeatureTree 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和�
   - 上游 C++：<https://github.com/FreeCAD/FreeCAD/tree/main/src/Mod/Sketcher/App/planegcs>。
   - 我们没有修改它。
 - **许可证全文**：<https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>，安装依赖后也在 `app/node_modules/@salusoft89/planegcs/LICENSE`。
+
+### replicad-opencascadejs（LGPL）
+
+- **是什么**：replicad 作者为它定制编译的 OpenCascade（OCCT）WebAssembly 版本。OCCT 本身是 LGPL-2.1 加 OCCT 例外条款。
+- **怎么分发**：
+  - 只在 AI 建模工作台（`/studio`）里由 Web Worker 加载，胶水代码在工作台的 Worker 分块里，wasm 是单独的文件（`assets/replicad_single-*.wasm`，构建时另存一份 `.br` / `.gz` 压缩版）。
+  - 换成自己编译的版本，替换这个 wasm 文件（需与胶水代码版本匹配），或改 `app/package.json` 里的版本后重新构建。
+- **源码**：npm 包 `replicad-opencascadejs` 1.1.0 由 <https://github.com/sgenoud/replicad>（`packages/replicad-opencascadejs`）构建；上游 OCCT 在 <https://github.com/Open-Cascade-SAS/OCCT>。我们没有修改它。
+- **许可证全文**：安装依赖后在 `app/node_modules/replicad-opencascadejs/LICENSE`。
+
+### 工作台的服务端（不随网站下载）
+
+`app/server/` 是一个只转发对话的小服务，部署在服务器上，不发给浏览器：
+
+| 组件 | 版本 | 许可证 | 链接 |
+| --- | --- | --- | --- |
+| Hono、`@hono/node-server` | 4.13 / 2.1 | MIT | <https://github.com/honojs/hono> |
+| `@ai-sdk/deepseek` | 3.0.80 | Apache-2.0 | <https://github.com/vercel/ai> |
+| AI SDK（`ai`）、Zod | 同上 | Apache-2.0 / MIT | 同上 |
 
 ### jim-uiux 组件（待确认）
 

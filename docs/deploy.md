@@ -17,9 +17,10 @@ npm run build     # 产出 app/dist，最后一步生成每个页面的 HTML、s
 
 站点在 <https://featuretree.linjiejim.com>，和 design.linjiejim.com 用同一套静态站做法：
 
-- push 到 `main`（改了 `app/**` 或工作流本身）时，`.github/workflows/deploy.yml` 在 GitHub Actions 里跑 `npm ci` → `npm run check` → `npm run build`。
-- 构建产物 rsync 到 `/srv/featuretree/releases/<sha7>`，再原子地切换 `/srv/featuretree/current` 软链；保留最近 5 个版本。
-- 最后检查首页、一个深层路由和模型索引都返回 200。
+- push 到 `main`（改了 `app/**` 或工作流本身）时，`.github/workflows/deploy.yml` 在 GitHub Actions 里跑 `npm ci` → `npm run check` → `npm run build` → `npm run build:api` → 冒烟测试（`npm run e2e`），全部通过才上线。
+- 静态产物 rsync 到 `/srv/featuretree/releases/<sha7>`（`--link-dest` 复用上一版没变的文件），再原子地切换 `/srv/featuretree/current` 软链；保留最近 5 个版本。
+- 工作台 API 上传到 `/root/featuretree/api/releases/<sha7>`，切换 `current` 后 `pm2 startOrReload`（进程 `featuretree-api`，见 `docs/dev/studio.md`）。
+- 最后检查首页、一个深层路由、模型索引和 `/api/health` 都返回 200。
 - 需要仓库 environment `jim-server` 里的 `DEV_SERVER_HOST / PORT / USERNAME / SSH_KEY`（专用 CI 密钥，不是个人密钥）。
 
 回滚：
@@ -40,7 +41,7 @@ ssh jim-server 'ln -sfn /srv/featuretree/releases/<sha7> /srv/featuretree/curren
 | 文件 | 页面 |
 | --- | --- |
 | `dist/index.html` | 首页，也是未知路由的回落页 |
-| `dist/<页面>/index.html` | `learn`、`teardown`、`practice`、`atlas`、`glossary` |
+| `dist/<页面>/index.html` | `learn`、`teardown`、`practice`、`atlas`、`glossary`、`studio` |
 | `dist/lesson/<id>/index.html` | 每节已注册的课 |
 | `dist/teardown/<id>/index.html` | 每个烘焙好的模型 |
 | `dist/sitemap.xml`、`dist/robots.txt` | 全部上述页面 |
@@ -61,11 +62,15 @@ ssh jim-server 'ln -sfn /srv/featuretree/releases/<sha7> /srv/featuretree/curren
 ```caddyfile
 featuretree.linjiejim.com {
 	import logging
+	# No text/event-stream here: the studio chat streams and must not be buffered.
 	encode {
 		zstd
 		gzip
 		match {
-			header Content-Type text/*
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+			header Content-Type text/javascript*
 			header Content-Type application/json*
 			header Content-Type application/javascript*
 			header Content-Type application/wasm*
@@ -73,17 +78,24 @@ featuretree.linjiejim.com {
 			header Content-Type model/gltf-binary*
 		}
 	}
-	root * /srv/featuretree/current
-	@glb path *.glb
-	header @glb Content-Type model/gltf-binary
-	@assets path /assets/*
-	header @assets Cache-Control "public, max-age=31536000, immutable"
-	@models path /models/*
-	header @models Cache-Control "public, max-age=3600"
-	@pages not path /assets/* /models/*
-	header @pages Cache-Control "no-cache"
-	try_files {path} {path}/index.html /index.html
-	file_server
+	handle /api/* {
+		reverse_proxy 127.0.0.1:18914
+	}
+	handle {
+		root * /srv/featuretree/current
+		@glb path *.glb
+		header @glb Content-Type model/gltf-binary
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+		@models path /models/*
+		header @models Cache-Control "public, max-age=3600"
+		@pages not path /assets/* /models/*
+		header @pages Cache-Control "no-cache"
+		try_files {path} {path}/index.html /index.html
+		file_server {
+			precompressed br gzip
+		}
+	}
 }
 ```
 

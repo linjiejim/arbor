@@ -1,7 +1,7 @@
 import * as React from "react"
 import * as THREE from "three"
 import { Link, useNavigate, useParams } from "react-router"
-import { ArrowLeft, ChevronLeft, ChevronRight, CircleX, ExternalLink, Pause, Play, SquareDashed, TriangleAlert } from "lucide-react"
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight, CircleX, ExternalLink, Pause, Play, SquareDashed, TriangleAlert } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,7 @@ import { CodeBlock } from "@/components/code-block"
 import { useBakedThumbnail } from "@/components/thumbnail"
 import { markDone, markVisited } from "@/lib/progress"
 import { PLANNED_MODELS } from "@/content/teardowns"
+import { starterFor } from "@/studio/starters"
 import { sourceUrl } from "@/lib/site"
 import { useAsync } from "@/lib/use-async"
 import { loadGlb, loadIndex, loadManifest, type AssemblyManifest, type Manifest, type ModelIndexEntry, type PartManifest } from "@/three/baked"
@@ -396,6 +397,18 @@ function PartTeardown({ manifest: m }: { manifest: PartManifest }) {
             <p className="text-small text-muted-foreground">
               这些组合都在内核里实际算过。失败的组合不隐藏：它们说明了特征之间的约束。
             </p>
+            {starterFor(m.id) && (
+              <Link
+                to={`/studio?start=${starterFor(m.id)!.id}`}
+                className="mt-3 flex items-center gap-2 rounded-md border p-3 text-small transition-colors duration-(--duration-fast) hover:bg-accent"
+              >
+                <span className="flex-1">
+                  <span className="font-medium text-foreground">在 AI 工作台里打开</span>
+                  <span className="block text-muted-foreground">同一棵特征树，参数可以取任意值，还能接着加特征。</span>
+                </span>
+                <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+              </Link>
+            )}
             {failedAt && (
               <div className="mt-3 rounded-lg bg-destructive-subtle p-3">
                 <div className="flex items-center gap-2 text-body font-medium text-destructive">

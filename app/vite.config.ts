@@ -8,7 +8,12 @@ export default defineConfig({
   resolve: {
     alias: { '@': path.resolve(import.meta.dirname, './src') },
   },
-  server: { port: 5287, strictPort: true },
+  // The studio API (app/server) runs separately: `npm run dev:api`.
+  server: { port: 5287, strictPort: true, proxy: { "/api": "http://127.0.0.1:18914" } },
+  preview: { proxy: { "/api": "http://127.0.0.1:18914" } },
+  // The OpenCascade glue locates its .wasm itself; keep it out of dependency pre-bundling.
+  optimizeDeps: { exclude: ["replicad-opencascadejs"] },
+  worker: { format: "es" },
   build: {
     chunkSizeWarningLimit: 800,
     rolldownOptions: {

@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.server.tsbuildinfo",
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  "include": ["server", "scripts", "src/studio/**/*.ts"],
+  "exclude": ["src/studio/**/*.tsx", "src/studio/worker.ts", "src/studio/client.ts", "src/studio/render.ts"]
+}

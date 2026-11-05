@@ -43,12 +43,24 @@ export default defineConfig({
       },
     },
   ],
-  webServer: {
-    command: `${ci ? "" : "npx vite build && "}npx vite preview --host 127.0.0.1 --port ${port} --strictPort`,
-    url: `http://127.0.0.1:${port}`,
-    reuseExistingServer: false,
-    timeout: 180_000,
-    stdout: "ignore",
-    stderr: "pipe",
-  },
+  webServer: [
+    {
+      command: `${ci ? "" : "npx vite build && "}npx vite preview --host 127.0.0.1 --port ${port} --strictPort`,
+      url: `http://127.0.0.1:${port}`,
+      reuseExistingServer: false,
+      timeout: 180_000,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+    {
+      // The studio API with the scripted model (no key needed); `vite preview` proxies /api to it.
+      command: "npx tsx server/index.ts",
+      url: "http://127.0.0.1:18914/api/health",
+      env: { STUDIO_MOCK: "1", STUDIO_DATA_DIR: ".tmp/e2e-studio", PORT: "18914" },
+      reuseExistingServer: !ci,
+      timeout: 60_000,
+      stdout: "ignore",
+      stderr: "pipe",
+    },
+  ],
 })

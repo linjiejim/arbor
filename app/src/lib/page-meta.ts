@@ -44,6 +44,10 @@ export const STATIC_PAGES: Record<string, PageMeta> = {
     title: "术语表",
     description: "同一个建模命令在 8 个软件里的叫法对照，以及基准、设计意图、拓扑命名、自由度等概念卡。",
   },
+  "/studio": {
+    title: "AI 建模工作台",
+    description: "用中文描述零件，AI 助教一步步建出可回滚、可改参数的特征树，并讲清每一步的设计意图。几何在浏览器里由 OpenCascade 算出，可导出 STEP 和 build123d 代码。",
+  },
 }
 
 /** A registered lesson's page, or undefined for an unknown id. */

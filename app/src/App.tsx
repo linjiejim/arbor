@@ -34,6 +34,7 @@ const router = createBrowserRouter([
   // Immersive pages: their own header, the viewport takes the screen.
   { path: "/lesson/:id", lazy: lazy(() => import("@/routes/lesson"), "LessonPage") },
   { path: "/teardown/:id", lazy: lazy(() => import("@/routes/teardown"), "TeardownPage") },
+  { path: "/studio", lazy: lazy(() => import("@/routes/studio"), "StudioPage") },
 ])
 
 // Per-route <title>, matching the prerendered HTML (lib/page-meta.ts).
