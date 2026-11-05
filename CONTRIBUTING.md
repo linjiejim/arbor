@@ -26,7 +26,7 @@ npm run dev         # http://localhost:5287
 ```bash
 cd app
 npm run check       # 类型检查 + oxlint + 设计守卫 + 单元测试
-npm run build       # 生产构建
+npm run build       # 生产构建，并为每个页面生成带标题和描述的 HTML
 ```
 
 `npm run check` 和 `npm run build` 都要通过；CI 部署前也跑这两步。
