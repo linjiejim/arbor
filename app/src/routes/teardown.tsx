@@ -547,11 +547,11 @@ function AssemblyTeardown({ manifest: m }: { manifest: AssemblyManifest }) {
 
   const onReady = React.useCallback(
     (v: Viewer) => {
-      let alive = true
-      let cleanup = () => {}
+      // Disposal happens long after this render: keep it in an object instead of reassigning locals.
+      const life = { alive: true, cleanup: () => {} }
       loadGlb(m.id, m.file).then(
         (glb) => {
-          if (!alive) return
+          if (!life.alive) return
           const s = new BakedAssemblyScene(v, m, glb as THREE.Group)
           scene.current = s
           setRange(s.sectionRange())
@@ -576,19 +576,19 @@ function AssemblyTeardown({ manifest: m }: { manifest: AssemblyManifest }) {
           el.addEventListener("pointermove", move)
           el.addEventListener("pointerdown", press)
           el.addEventListener("pointerup", click)
-          cleanup = () => {
+          life.cleanup = () => {
             el.removeEventListener("pointermove", move)
             el.removeEventListener("pointerdown", press)
             el.removeEventListener("pointerup", click)
             s.dispose()
           }
         },
-        (e) => alive && setError(e instanceof Error ? e.message : String(e)),
+        (e) => life.alive && setError(e instanceof Error ? e.message : String(e)),
       )
       return () => {
-        alive = false
+        life.alive = false
         cancel.current = true
-        cleanup()
+        life.cleanup()
         scene.current = null
       }
     },

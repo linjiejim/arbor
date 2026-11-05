@@ -4,5 +4,29 @@
   "rules": {
     "react/rules-of-hooks": "error",
     "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
+  },
+  "overrides": [
+    // Each lesson module default-exports a LessonDef object (steps, quiz, scene factory), not a
+    // component, by design (docs/dev/lesson-authoring.md). Fast refresh simply reloads the lesson.
+    {
+      "files": ["src/content/lessons/**"],
+      "rules": { "react/only-export-components": "off" }
+    },
+    // Vendored from the jim-uiux registry and identical to upstream apart from import paths:
+    // shadcn-style files export variant helpers and hooks next to their components.
+    // Fix these upstream and reinstall rather than editing them here.
+    {
+      "files": ["src/components/ui/**"],
+      "rules": { "react/only-export-components": "off" }
+    },
+    {
+      "files": ["src/components/ui/confirm-dialog.tsx"],
+      "rules": { "react/set-state-in-effect": "off" }
+    },
+    // TanStack Table's useReactTable cannot be memoised; the React Compiler already skips this component.
+    {
+      "files": ["src/components/ui/data-table.tsx"],
+      "rules": { "react/incompatible-library": "off" }
+    }
+  ]
 }
