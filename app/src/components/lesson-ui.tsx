@@ -147,7 +147,7 @@ export function Quiz({ items, onDone }: { items: QuizItem[]; onDone: (score: num
     }
   }, [done, score, onDone])
   return (
-    <div className="mt-4 space-y-4">
+    <div className="mt-4 space-y-4" data-testid="quiz">
       {items.map((item, qi) => (
         <div key={item.q} className="rounded-lg border p-3">
           <div className="text-body font-medium">

@@ -404,7 +404,7 @@ function PartTeardown({ manifest: m }: { manifest: PartManifest }) {
             )}
             <div className="mt-4 space-y-4">
               {grid.map((p) => (
-                <div key={p.id}>
+                <div key={p.id} data-testid={`param-${p.id}`}>
                   <div className="flex items-baseline gap-2">
                     <span className="text-small font-medium">{p.label}</span>
                     <span className="text-caption text-faint-foreground">在 {m.features.find((x) => x.id === p.feature)?.name} 里生效</span>
