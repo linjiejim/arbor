@@ -3,6 +3,10 @@ import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type FileUIPart, type UIMessage } from "ai"
 import { trimMessages } from "./trim"
 import type { Studio } from "./use-studio"
+import type { Note } from "./use-annotations"
+
+/** Filename of the annotated view sent with a message; not kept in storage, the annotations are. */
+export const ANNOTATED_VIEW = "标注截图.png"
 
 const STORE = "ft-studio-chat-v1"
 export const KEY_STORE = "ft-studio-deepseek-key"
@@ -25,7 +29,7 @@ function forStorage(messages: UIMessage[]): UIMessage[] {
   return messages.map((m) => ({
     ...m,
     parts: m.parts.flatMap((p): UIMessage["parts"] => {
-      if (p.type === "file") return [{ type: "text" as const, text: "（参考图未保存）" }]
+      if (p.type === "file") return p.filename === ANNOTATED_VIEW ? [] : [{ type: "text" as const, text: "（参考图未保存）" }]
       if (p.type === "tool-look" && "output" in p && p.output) return [{ ...p, output: { ...(p.output as object), images: undefined } } as UIMessage["parts"][number]]
       return [p]
     }),
@@ -121,15 +125,17 @@ export function useStudioChat(studio: Studio) {
   }, [chat.messages, chat.status])
 
   const send = React.useCallback(
-    (text: string, files?: FileUIPart[]) => {
+    (text: string, files?: FileUIPart[], notes?: Note[], shot?: string | null) => {
       const t = text.trim()
-      if (!t && !files?.length) return
+      if (!t && !files?.length && !notes?.length) return
       setPaused(false)
       const s = bridge.studio
       s?.checkpoint()
-      // What the model is told the part looks like for this whole turn.
-      const metadata = s ? { tree: s.treeRef.current, summary: s.summary } : undefined
-      void chat.sendMessage({ text: t || "照着这张图建模", files, metadata })
+      // What the model is told the part looks like for this whole turn, and where the learner pointed.
+      const annotations = notes?.length ? notes.map(({ hash: _hash, ...a }) => a) : undefined
+      const metadata = s ? { tree: s.treeRef.current, summary: s.summary, annotations } : { annotations }
+      const all = [...(files ?? []), ...(shot ? [{ type: "file" as const, mediaType: "image/png", filename: ANNOTATED_VIEW, url: shot }] : [])]
+      void chat.sendMessage({ text: t || (notes?.length ? "按标注修改" : "照着这张图建模"), files: all.length ? all : undefined, metadata })
     },
     [chat],
   )

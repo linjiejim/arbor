@@ -3,7 +3,7 @@ import { applyEdit, executeTool, treeText, type ToolRun } from "./apply"
 import { KernelClient } from "./client"
 import { EMPTY_TREE, Tree } from "./dsl"
 import type { BuildReport, DisplayData } from "./kernel/build"
-import { renderViews } from "./look"
+import { renderViews, type Pin } from "./look"
 import { STARTERS } from "./starters"
 
 const STORE = "ft-studio-v1"
@@ -42,6 +42,8 @@ export function useStudio() {
   const rollbackRef = React.useRef(rollback)
   const historyRef = React.useRef(history)
   const queue = React.useRef<Promise<unknown>>(Promise.resolve())
+  /** Numbered pins of the current annotations; `look` draws them for the model. */
+  const pinsRef = React.useRef<Pin[]>([])
   React.useEffect(() => {
     rollbackRef.current = rollback
   }, [rollback])
@@ -152,7 +154,7 @@ export function useStudio() {
         await c.ready
         const look = async (views: string[], highlight?: string) => {
           const d = await c.display()
-          return renderViews(d, views, highlight)
+          return renderViews(d, views, highlight, { pins: pinsRef.current })
         }
         const run = await executeTool(c, treeRef.current, name, input, look)
         if (run.tree !== treeRef.current || run.report) await commit(run.tree, run.report)
@@ -190,6 +192,21 @@ export function useStudio() {
 
   const exportBody = React.useCallback(async (format: "step" | "stl") => client.current?.exportBody(format) ?? null, [])
 
+  /** Describe a clicked face or edge of the latest body (null while rolled back or not ready). */
+  const pick = React.useCallback(
+    async (kind: "face" | "edge", hash: number, point: [number, number, number]) => {
+      if (rollbackRef.current || !client.current) return null
+      return client.current.pick(kind, hash, point)
+    },
+    [],
+  )
+
+  const locate = React.useCallback(async (kind: "face" | "edge", selector: unknown) => client.current?.locate(kind, selector) ?? null, [])
+
+  const setPins = React.useCallback((pins: Pin[]) => {
+    pinsRef.current = pins
+  }, [])
+
   const summary = report ? treeText(tree, report) : ""
 
   return {
@@ -209,6 +226,9 @@ export function useStudio() {
     setParam,
     showFeature,
     exportBody,
+    pick,
+    locate,
+    setPins,
   }
 }
 

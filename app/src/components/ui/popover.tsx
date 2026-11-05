@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils"
 export const Popover = PopoverPrimitive.Root
 export const PopoverTrigger = PopoverPrimitive.Trigger
 export const PopoverClose = PopoverPrimitive.Close
+/** Position the panel somewhere other than the trigger (e.g. a point in a 3D view, via `virtualRef`). */
+export const PopoverAnchor = PopoverPrimitive.Anchor
 
 /** Small, non-blocking panel anchored to its trigger: filters, pickers, quick edits. */
 export function PopoverContent({ className, align = "start", sideOffset = 4, ...props }: React.ComponentProps<typeof PopoverPrimitive.Content>) {

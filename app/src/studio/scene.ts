@@ -4,7 +4,11 @@ import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js
 import type { MaterialKit } from "@/three/materials"
 import type { DisplayData } from "./kernel/build"
 
-export type Paint = { status: boolean; highlight?: string }
+/**
+ * How faces are coloured: by this step's status, by provenance (`highlight` =
+ * a feature id), or, when `faces` is given, only those faces (by mesh hash).
+ */
+export type Paint = { status: boolean; highlight?: string; faces?: number[] }
 
 /**
  * The live model as three.js objects: one mesh with a group per B-rep face
@@ -40,6 +44,7 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint): THR
 }
 
 function materialIndex(g: DisplayData["groups"][number], paint: Paint) {
+  if (paint.faces) return paint.faces.includes(g.hash) ? 1 : 0
   if (paint.highlight) return g.origin === paint.highlight ? 1 : 0
   if (!paint.status) return 0
   return g.status === "new" ? 1 : g.status === "modified" ? 2 : 0
@@ -55,12 +60,32 @@ export function repaint(root: THREE.Object3D, paint: Paint) {
   })
 }
 
-/** Which feature made the face under a raycast hit. */
-export function originAt(hit: THREE.Intersection): string | null {
-  const mesh = hit.object as THREE.Mesh
-  const groups = mesh.userData.groups as DisplayData["groups"] | undefined
+/** Thick lines over the given edges (by mesh hash), drawn on top of the model. */
+export function edgeHighlight(d: DisplayData, hashes: number[], kit: MaterialKit): THREE.Object3D | null {
+  if (!d.edges) return null
+  const pts: number[] = []
+  for (const g of d.edgeGroups) {
+    if (!hashes.includes(g.hash)) continue
+    for (let i = g.start * 3; i < (g.start + g.count) * 3; i++) pts.push(d.edges[i])
+  }
+  if (!pts.length) return null
+  const geo = new LineSegmentsGeometry()
+  geo.setPositions(pts)
+  // Its own material: thicker, in the highlight colour, and never hidden by the faces it borders.
+  const mat = kit.sketch.clone()
+  mat.color.copy(kit.edgeHighlight.color)
+  mat.linewidth = 4
+  mat.depthTest = false
+  mat.resolution.copy(kit.sketch.resolution)
+  const lines = new LineSegments2(geo, mat)
+  lines.renderOrder = 4
+  return lines
+}
+
+/** The face group a raycast hit landed on. */
+export function groupAt(hit: THREE.Intersection): DisplayData["groups"][number] | null {
+  const groups = (hit.object as THREE.Mesh).userData.groups as DisplayData["groups"] | undefined
   if (!groups || hit.faceIndex === undefined || hit.faceIndex === null) return null
   const idx = hit.faceIndex * 3
-  const g = groups.find((x) => idx >= x.start && idx < x.start + x.count)
-  return g?.origin ?? null
+  return groups.find((x) => idx >= x.start && idx < x.start + x.count) ?? null
 }

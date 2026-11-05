@@ -1,5 +1,4 @@
 import * as React from "react"
-import * as THREE from "three"
 import { useNavigate } from "react-router"
 import { ArrowLeft, Download, KeyRound, Undo2 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
@@ -8,16 +7,14 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { notify } from "@/components/ui/toast"
-import { Viewport } from "@/components/viewport"
-import type { Viewer } from "@/three/viewer"
-import { modelObject, repaint } from "@/studio/scene"
 import { ChatPanel } from "@/studio/ui/chat-panel"
 import { toBuild123d } from "@/studio/codegen"
 import { CodePanel, ParamsPanel, TreePanel } from "@/studio/ui/side-panels"
-import { useStudio, type Studio } from "@/studio/use-studio"
+import { StudioViewport } from "@/studio/ui/studio-viewport"
+import { useAnnotations } from "@/studio/use-annotations"
+import { useStudio } from "@/studio/use-studio"
 import { KEY_STORE, useStudioChat } from "@/studio/use-studio-chat"
 
 type Status = { model: string; via?: "deepseek" | "openrouter" | "mock"; hostedKey: boolean; budgetExhausted: boolean }
@@ -26,6 +23,12 @@ export function StudioPage() {
   const navigate = useNavigate()
   const studio = useStudio()
   const chat = useStudioChat(studio)
+  const annotations = useAnnotations(studio)
+  // Pins of a sent message stay on the model until the reply is done.
+  const { clearSent } = annotations
+  React.useEffect(() => {
+    if (!chat.busy) clearSent()
+  }, [chat.busy, clearSent])
   const [hover, setHover] = React.useState<string | null>(null)
   const [confirmNew, setConfirmNew] = React.useState(false)
   const [status, setStatus] = React.useState<Status | null>(null)
@@ -93,7 +96,7 @@ export function StudioPage() {
 
       <div className="flex min-h-0 flex-1 max-lg:flex-col">
         <main className="relative min-h-0 min-w-0 flex-1">
-          <StudioViewport studio={studio} hover={hover} />
+          <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={chat.busy} />
         </main>
 
         <Tabs
@@ -115,6 +118,7 @@ export function StudioPage() {
             )}
             <ChatPanel
               chat={chat}
+              annotations={annotations}
               ready={ready}
               onSelectFeature={studio.showFeature}
               onLoad={(t) => {
@@ -144,6 +148,7 @@ export function StudioPage() {
         tone="danger"
         onConfirm={() => {
           chat.clear()
+          annotations.reset()
           studio.reset()
         }}
       />
@@ -243,78 +248,5 @@ function KeySettings({ status }: { status: Status | null }) {
         </div>
       </PopoverContent>
     </Popover>
-  )
-}
-
-function StudioViewport({ studio, hover }: { studio: Studio; hover: string | null }) {
-  const [viewer, setViewer] = React.useState<Viewer | null>(null)
-  const current = React.useRef<THREE.Group | null>(null)
-  const fittedSize = React.useRef(0)
-  const { display, kernel } = studio
-
-  const onReady = React.useCallback((v: Viewer) => {
-    setViewer(v)
-    return () => setViewer(null)
-  }, [])
-
-  React.useEffect(() => {
-    if (!viewer || !display) return
-    const g = modelObject(display, viewer.kit, { status: true, highlight: hover ?? undefined })
-    viewer.setContent(g)
-    current.current = g
-    if (display.bbox) {
-      const box = new THREE.Box3(new THREE.Vector3(...display.bbox[0]), new THREE.Vector3(...display.bbox[1]))
-      const size = box.getSize(new THREE.Vector3()).length()
-      // Re-frame on the first model and when it changes size a lot; otherwise keep the learner's camera.
-      if (!fittedSize.current || size > fittedSize.current * 1.6 || size < fittedSize.current / 2.5) {
-        void viewer.fit(box, { view: fittedSize.current ? undefined : "iso", animate: fittedSize.current > 0 })
-        fittedSize.current = size
-      }
-    } else fittedSize.current = 0
-    // hover is applied by the effect below
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewer, display])
-
-  React.useEffect(() => {
-    if (!viewer || !current.current) return
-    repaint(current.current, { status: true, highlight: hover ?? undefined })
-    viewer.invalidate()
-  }, [viewer, hover])
-
-  return (
-    <Viewport className="absolute inset-0" onReady={onReady}>
-      {kernel.phase === "loading" && (
-        <div className="absolute inset-0 grid place-items-center">
-          <div className="flex items-center gap-2 rounded-md border bg-background px-4 py-3 text-body">
-            <Spinner className="size-4" />
-            正在加载建模内核（OpenCascade）… {kernel.loadedMB > 0 ? `${kernel.loadedMB.toFixed(1)} MB` : ""}
-          </div>
-        </div>
-      )}
-      {kernel.phase === "error" && (
-        <div className="absolute inset-0 grid place-items-center p-6">
-          <div role="alert" className="max-w-sm rounded-md border border-destructive/40 bg-background p-4 text-body">
-            建模内核没能启动：{kernel.message}
-            <div className="mt-3">
-              <Button size="sm" variant="secondary" onClick={() => location.reload()}>
-                重新加载
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-      {display?.mesh && (
-        <div className="pointer-events-none absolute right-3 bottom-3 flex gap-3 rounded-md border bg-background/90 px-3 py-1.5 text-caption text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <span className="size-2.5 rounded-xs bg-primary" /> {hover ? "该特征生成的面" : "这一步新生成"}
-          </span>
-          {!hover && (
-            <span className="flex items-center gap-1.5">
-              <span className="size-2.5 rounded-xs bg-scene-modified" /> 被修改
-            </span>
-          )}
-        </div>
-      )}
-    </Viewport>
   )
 }

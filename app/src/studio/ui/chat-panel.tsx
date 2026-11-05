@@ -11,7 +11,9 @@ import type { OpId } from "@/content/ops"
 import { STARTERS } from "../starters"
 import type { Tree } from "../dsl"
 import type { ToolOutput } from "../tools"
-import { errorText, MAX_CALLS_PER_TURN, type StudioChat } from "../use-studio-chat"
+import { ANNOTATED_VIEW, errorText, MAX_CALLS_PER_TURN, type StudioChat } from "../use-studio-chat"
+import { Annotations as AnnotationList, circled, type Annotation } from "../annotations"
+import type { Annotations, Note } from "../use-annotations"
 import { Markdown } from "./markdown"
 
 const EXAMPLES = [
@@ -44,11 +46,13 @@ const TOOL_LABEL: Record<string, { label: string; op?: OpId; icon?: LucideIcon }
 
 export function ChatPanel({
   chat,
+  annotations,
   onSelectFeature,
   onLoad,
   ready,
 }: {
   chat: StudioChat
+  annotations: Annotations
   onSelectFeature: (id: string) => void
   onLoad: (t: Tree) => void
   ready: boolean
@@ -65,12 +69,21 @@ export function ChatPanel({
     if (el) el.scrollTop = el.scrollHeight
   }, [chat.messages, chat.status])
 
+  const notes = annotations.pending
+  const canSend = (text.trim() || files.length || notes.length) && !chat.busy && ready
   const submit = () => {
-    if ((!text.trim() && !files.length) || chat.busy || !ready) return
-    chat.send(text, files.length ? files : undefined)
+    if (!canSend) return
+    chat.send(text, files.length ? files : undefined, notes, notes.length ? annotations.snapshot() : null)
+    annotations.markSent()
     setText("")
     setFiles([])
   }
+
+  // A reply's ①② refer to the annotations of the message it answers.
+  const notesFor = React.useMemo(
+    () => chat.messages.reduce<(Annotation[] | null)[]>((acc, m, i) => [...acc, m.role === "user" ? annotationsOf(m) : (acc[i - 1] ?? null)], []),
+    [chat.messages],
+  )
 
   const attach = async (list: FileList | null) => {
     setFileError(null)
@@ -90,8 +103,8 @@ export function ChatPanel({
           <Intro onPick={(t) => ready && chat.send(t)} onLoad={onLoad} disabled={!ready} />
         ) : (
           <div className="space-y-4">
-            {chat.messages.map((m) => (
-              <Message key={m.id} m={m} onSelectFeature={onSelectFeature} />
+            {chat.messages.map((m, i) => (
+              <Message key={m.id} m={m} notes={notesFor[i]} onShow={annotations.show} onSelectFeature={onSelectFeature} />
             ))}
             {chat.status === "submitted" && (
               <div className="flex items-center gap-2 text-small text-muted-foreground">
@@ -118,6 +131,13 @@ export function ChatPanel({
         )}
       </div>
       <div className="shrink-0 border-t p-3">
+        {notes.length > 0 && (
+          <div className="mb-2 flex flex-wrap gap-1.5" aria-label="要随消息发出的标注">
+            {notes.map((a) => (
+              <NoteChip key={a.n} a={a} onClick={() => annotations.setFocus({ kind: a.kind, hashes: [a.hash] })} onRemove={() => annotations.remove(a.n)} />
+            ))}
+          </div>
+        )}
         {files.length > 0 && (
           <div className="mb-2 flex gap-2">
             {files.map((f, i) => (
@@ -139,7 +159,7 @@ export function ChatPanel({
         <Textarea
           rows={2}
           value={text}
-          placeholder={ready ? "描述你想做的零件，或者说要改哪里… Enter 发送" : "建模内核加载中…"}
+          placeholder={!ready ? "建模内核加载中…" : notes.length ? "补充说明（可以不写）… Enter 发送" : "描述你想做的零件，或者说要改哪里… Enter 发送"}
           disabled={!ready}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -172,7 +192,7 @@ export function ChatPanel({
               停止
             </Button>
           ) : (
-            <Button size="sm" variant="primary" className="ml-auto" disabled={(!text.trim() && !files.length) || !ready} onClick={submit}>
+            <Button size="sm" variant="primary" className="ml-auto" disabled={!canSend} onClick={submit}>
               发送
             </Button>
           )}
@@ -222,7 +242,27 @@ function Intro({ onPick, onLoad, disabled }: { onPick: (t: string) => void; onLo
   )
 }
 
-function Message({ m, onSelectFeature }: { m: UIMessage; onSelectFeature: (id: string) => void }) {
+function Message({
+  m,
+  notes,
+  onShow,
+  onSelectFeature,
+}: {
+  m: UIMessage
+  notes: Annotation[] | null
+  onShow: (a: Annotation) => void
+  onSelectFeature: (id: string) => void
+}) {
+  const onPin = React.useMemo(
+    () =>
+      notes?.length
+        ? (n: number) => {
+            const a = notes.find((x) => x.n === n)
+            if (a) onShow(a)
+          }
+        : undefined,
+    [notes, onShow],
+  )
   if (m.role === "user") {
     const text = m.parts.map((p) => (p.type === "text" ? p.text : "")).join("")
     const images = m.parts.filter((p): p is FileUIPart => p.type === "file" && p.mediaType.startsWith("image/"))
@@ -231,11 +271,18 @@ function Message({ m, onSelectFeature }: { m: UIMessage; onSelectFeature: (id: s
         {images.length > 0 && (
           <div className="mb-2 flex gap-2">
             {images.map((f, i) => (
-              <img key={i} src={f.url} alt="参考图" className="max-h-28 rounded-md border" />
+              <img key={i} src={f.url} alt={f.filename === ANNOTATED_VIEW ? "标注截图" : "参考图"} className="max-h-28 rounded-md border" />
             ))}
           </div>
         )}
         {text}
+        {notes && notes.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5 whitespace-normal">
+            {notes.map((a) => (
+              <NoteChip key={a.n} a={a} onClick={() => onShow(a)} />
+            ))}
+          </div>
+        )}
       </div>
     )
   }
@@ -245,11 +292,39 @@ function Message({ m, onSelectFeature }: { m: UIMessage; onSelectFeature: (id: s
     <div className="space-y-2">
       {thoughts.length > 0 && <Reasoning parts={thoughts} />}
       {m.parts.map((p, i) => {
-        if (p.type === "text") return p.text.trim() ? <Markdown key={i} text={p.text} /> : null
+        if (p.type === "text") return p.text.trim() ? <Markdown key={i} text={p.text} onPin={onPin} /> : null
         if (p.type.startsWith("tool-")) return <ToolCard key={i} part={p as ToolPart} onSelectFeature={onSelectFeature} />
         return null
       })}
     </div>
+  )
+}
+
+function annotationsOf(m: UIMessage): Annotation[] | null {
+  const parsed = AnnotationList.safeParse((m.metadata as { annotations?: unknown } | undefined)?.annotations)
+  return parsed.success && parsed.data.length ? parsed.data : null
+}
+
+/** ① 平面 · 来自「拉伸1」：开个孔 — click to show it on the model. */
+function NoteChip({ a, onClick, onRemove }: { a: Annotation | Note; onClick: () => void; onRemove?: () => void }) {
+  const label = a.note.trim() || `${a.kind === "face" ? "面" : "边"} · ${a.what}`
+  return (
+    <span className="inline-flex max-w-full items-center rounded-md border bg-background text-small">
+      <button
+        type="button"
+        onClick={onClick}
+        title={`${a.kind === "face" ? "面" : "边"} · ${a.what} · ${a.where}`}
+        className="flex min-w-0 items-center gap-1 px-2 py-1 text-left hover:text-foreground"
+      >
+        <span className="font-semibold text-primary">{circled(a.n)}</span>
+        <span className="truncate">{label}</span>
+      </button>
+      {onRemove && (
+        <button type="button" onClick={onRemove} aria-label={`删除标注 ${a.n}`} className="grid size-6 shrink-0 place-items-center text-muted-foreground hover:text-foreground">
+          <X className="size-3.5" />
+        </button>
+      )}
+    </span>
   )
 }
 
