@@ -1,0 +1,94 @@
+# 第三方组件与许可
+
+FeatureTree 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和文档用 CC BY 4.0（[`LICENSE-content`](LICENSE-content)）。下面是用到的第三方组件。许可证一栏取自 `app/node_modules` 里各包的 `package.json` 和 LICENSE 文件，以及 Python 环境里各包的 PyPI 元数据；版本是 `app/package-lock.json` 和 `models/requirements.txt` 锁定的版本。
+
+按是否随网站发布分成三类：
+
+1. **随网站发布**：打进 `app/dist` 的 JS、CSS、字体和 wasm，访问者的浏览器会下载。
+2. **只在构建时用**：生成 `app/dist` 的工具，不进产物。
+3. **只在离线烘焙时用**：在开发者电脑上把 `models/` 算成 GLB，网站不包含它们。
+
+## 1. 随网站发布
+
+| 组件 | 版本 | 许可证 | 用途 | 链接 |
+| --- | --- | --- | --- | --- |
+| three.js（含 addons：OrbitControls、GLTFLoader、CSS2DRenderer、Line2 系列、RoundedBoxGeometry、RoomEnvironment） | 0.187.0 | MIT | 3D 视口 | <https://github.com/mrdoob/three.js> |
+| React、React DOM、scheduler | 19.3.1 | MIT | 界面 | <https://github.com/facebook/react> |
+| React Router | 8.5.1 | MIT | 路由 | <https://github.com/remix-run/react-router> |
+| Radix UI（`radix-ui` 及其 `@radix-ui/*` 子包） | 1.8.1 | MIT | 弹层、菜单、标签页等无样式组件 | <https://github.com/radix-ui/primitives> |
+| Floating UI（`@floating-ui/core`、`dom`、`react-dom`、`utils`，Radix 依赖） | 1.8 / 2.1 | MIT | 弹层定位 | <https://github.com/floating-ui/floating-ui> |
+| aria-hidden、react-remove-scroll、react-remove-scroll-bar、react-style-singleton、use-callback-ref、use-sidecar（Radix 依赖） | — | MIT | 弹层的焦点与滚动锁定 | <https://github.com/theKashey> |
+| get-nonce（Radix 依赖） | 1.0.1 | MIT | — | <https://github.com/theKashey/get-nonce> |
+| tslib（Radix 依赖） | 2.8 / 2.9 | 0BSD | TypeScript 运行时辅助函数 | <https://github.com/microsoft/tslib> |
+| Tailwind CSS（生成的 CSS 里含它的 preflight 样式） | 4.3.4 | MIT | 样式 | <https://github.com/tailwindlabs/tailwindcss> |
+| Lucide（`lucide-react`） | 1.68.0 | ISC；其中源自 Feather 的图标为 MIT | 图标 | <https://github.com/lucide-icons/lucide> |
+| class-variance-authority | 0.7.1 | Apache-2.0 | 组件变体 | <https://github.com/joe-bell/cva> |
+| clsx | 2.1.1 | MIT | 拼 class | <https://github.com/lukeed/clsx> |
+| tailwind-merge | 3.7.0 | MIT | 合并 class | <https://github.com/dcastil/tailwind-merge> |
+| Sonner | 2.0.8 | MIT | 轻提示 | <https://github.com/emilkowalski/sonner> |
+| TanStack Table（`@tanstack/react-table`、`table-core`） | 8.21.3 | MIT | 表格 | <https://github.com/TanStack/table> |
+| Inter（经 `@fontsource-variable/inter` 打包） | 5.3.0 | SIL OFL 1.1 | 界面字体 | <https://github.com/rsms/inter> |
+| JetBrains Mono（经 `@fontsource-variable/jetbrains-mono` 打包） | 5.3.0 | SIL OFL 1.1 | 等宽字体 | <https://github.com/JetBrains/JetBrainsMono> |
+| **planegcs**（`@salusoft89/planegcs`） | 1.3.0 | **LGPL-2.1**，见下 | 「几何约束与自由度」课的草图求解器 | <https://github.com/Salusoft89/planegcs> |
+
+`package.json` 里还有 cmdk 和 vaul（都是 MIT），目前没有页面用到，构建时被摇树去掉了，不在产物里。
+
+### planegcs（LGPL）
+
+- **是什么**：FreeCAD 草图求解器 planegcs 的 C++ 代码编译成的 WebAssembly，外加一层 TypeScript 封装。
+- **许可证**：包里附带的 LICENSE 是 GNU LGPL 2.1 全文；`package.json` 声明为 `LGPL-2.0-or-later`，和 FreeCAD 源文件头一致。按 LGPL-2.1 遵守即可。
+- **wasm 里还编译进了两个库**：
+  - Eigen：MPL-2.0。
+  - Boost 头文件库：BSL-1.0。
+- **怎么分发**：
+  - 求解器没有和本站代码合并。它的 JS 胶水代码在单独的按需分块里（`assets/planegcs-*.js`），wasm 是单独的文件（`assets/planegcs-*.wasm`）。
+  - 只有打开那节课才会下载。
+  - 换成自己编译的版本，只要替换这两个文件，或改 `app/package.json` 里的版本后重新构建。
+- **源码**：
+  - npm 包：<https://github.com/Salusoft89/planegcs>，1.3.0 对应标签 [`1.3`](https://github.com/Salusoft89/planegcs/tree/1.3)。
+  - 上游 C++：<https://github.com/FreeCAD/FreeCAD/tree/main/src/Mod/Sketcher/App/planegcs>。
+  - 我们没有修改它。
+- **许可证全文**：<https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html>，安装依赖后也在 `app/node_modules/@salusoft89/planegcs/LICENSE`。
+
+### jim-uiux 组件（待确认）
+
+`app/src/components/ui/` 下的组件、`app/src/lib/utils.ts`、`app/src/lib/strings.ts` 和设计令牌，来自作者自己的设计系统 [jim-uiux](https://design.linjiejim.com)（通过 shadcn 注册表安装）。
+
+- 除 import 路径外和上游一致。
+- 它们基于 [shadcn/ui](https://github.com/shadcn-ui/ui)（MIT），用到的 Radix、cva 等见上表。
+- jim-uiux 目前没有公开的许可证文件。在作者确认之前，这些文件随本仓库按 MIT 发布的前提是作者同意。
+
+## 2. 只在构建时用（不进产物）
+
+| 组件 | 许可证 | 链接 |
+| --- | --- | --- |
+| Vite（含 Rolldown） | MIT | <https://github.com/vitejs/vite> |
+| @vitejs/plugin-react | MIT | <https://github.com/vitejs/vite-plugin-react> |
+| Tailwind CSS 编译器（`tailwindcss`、`@tailwindcss/vite`、`@tailwindcss/oxide`） | MIT | <https://github.com/tailwindlabs/tailwindcss> |
+| Lightning CSS（Tailwind 依赖） | MPL-2.0 | <https://github.com/parcel-bundler/lightningcss> |
+| TypeScript | Apache-2.0 | <https://github.com/microsoft/TypeScript> |
+| Oxlint | MIT | <https://github.com/oxc-project/oxc> |
+| Vitest | MIT | <https://github.com/vitest-dev/vitest> |
+| culori（对比度测试） | MIT | <https://github.com/Evercoder/culori> |
+
+## 3. 只在离线烘焙时用（不随网站发布）
+
+`models/` 里的模型代码在开发者电脑上运行，把几何算成 GLB，提交在 `app/public/models/`。
+
+- 网站只包含算出来的 GLB 和清单。
+- 不包含下面任何一个库，也不在浏览器里调用它们。
+
+| 组件 | 版本 | 许可证 | 链接 |
+| --- | --- | --- | --- |
+| build123d | 0.13.0 | Apache-2.0 | <https://github.com/gumyr/build123d> |
+| OCP（`cadquery-ocp-novtk`，OpenCascade 的 Python 绑定） | 8.0.1.1.0 | Apache-2.0 | <https://github.com/CadQuery/OCP> |
+| **Open CASCADE Technology**（随 OCP 的 wheel 一起安装） | 8.0.1 | **LGPL-2.1**，附 Open CASCADE Exception 1.0 | <https://github.com/Open-Cascade-SAS/OCCT> |
+| pygltflib | 1.16.5 | MIT | <https://gitlab.com/dodgyville/pygltflib> |
+| NumPy | 2.5.4 | BSD-3-Clause 等 | <https://github.com/numpy/numpy> |
+
+build123d 还会装上 anytree、ezdxf、lib3mf、ocpsvg、ocp_gordon、scipy 等依赖，都是宽松许可（Apache-2.0、MIT、BSD），同样只在本机用。
+
+`spikes/replicad-kernel/` 是浏览器内核的实测代码，不属于网站。它的依赖没有提交进仓库，需要自己 `npm install`：
+
+- replicad：MIT。
+- replicad-opencascadejs：LGPL-2.1。

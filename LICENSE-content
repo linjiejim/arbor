@@ -1,0 +1,98 @@
+FeatureTree 课程内容许可 · Content licence
+
+Copyright (c) 2026 linjiejim
+
+本仓库的教学内容按「知识共享 署名 4.0 国际」许可协议（CC BY 4.0）发布。
+代码按 MIT 许可发布，见 LICENSE。第三方组件见 THIRD_PARTY.md。
+
+The teaching content in this repository is licensed under the Creative
+Commons Attribution 4.0 International licence (CC BY 4.0). The code is under
+the MIT licence (see LICENSE). Third-party components: see THIRD_PARTY.md.
+
+许可协议正文 · Legal code
+  https://creativecommons.org/licenses/by/4.0/legalcode
+  https://creativecommons.org/licenses/by/4.0/legalcode.zh-hans （官方中文译本）
+协议摘要 · Summary
+  https://creativecommons.org/licenses/by/4.0/deed.zh-hans
+
+
+一、哪些用 CC BY 4.0 · What is CC BY 4.0
+---------------------------------------
+
+给学习者读的文字，以及调研和文档：
+
+1. 课程讲解与小测：app/src/content/lessons/*.tsx 里的文字，包括步骤标题和
+   正文、提示、注释、「先猜再看」的问题与解释、小测的题目、选项和解释、本课
+   要点；以及 app/src/content/lessons/index.ts 里每节课的标题和简介。
+2. 术语表和概念卡：app/src/content/terms.ts；工具图鉴里每个命令的说明文字：
+   app/src/content/ops.ts。
+3. 课程大纲：app/src/content/curriculum.json。
+4. 练习里的解释文字：app/src/content/practice.ts。
+5. 案例拆解的讲解文字：models/ 里模型定义的 title、subtitle、teaches、
+   why、pitfall、failures、notes 等文字字段，以及烘焙后 app/public/models/
+   下各 manifest.json 里的同一份文字。
+6. docs/ 下的全部文档，包括 docs/research/ 的调研报告和原始笔记。
+
+Text written for learners, plus the research and documentation:
+
+1. Lesson text and quizzes in app/src/content/lessons/*.tsx (step titles and
+   bodies, hints, notes, predict-then-reveal questions, quiz questions, options
+   and explanations, takeaways) and the lesson titles and summaries in
+   app/src/content/lessons/index.ts.
+2. Glossary and concept cards (app/src/content/terms.ts) and the command
+   descriptions in the tool atlas (app/src/content/ops.ts).
+3. The curriculum (app/src/content/curriculum.json).
+4. Explanations in the practice exercises (app/src/content/practice.ts).
+5. Teardown explanations: the text fields of the model definitions in models/
+   (title, subtitle, teaches, why, pitfall, failures, notes, …) and the same
+   text in the baked app/public/models/**/manifest.json.
+6. Everything under docs/, including the research in docs/research/.
+
+
+二、哪些用 MIT · What is MIT
+---------------------------
+
+能执行的部分都用 MIT（见 LICENSE）：网站代码（app/，包括课程文件里的组件、
+场景控制器和判定逻辑）、模型代码和烘焙器（models/）、内核实测代码（spikes/），
+以及烘焙出的几何文件（app/public/models/**/*.glb）。
+
+一个文件里两种都有时（例如课程的 .tsx），代码按 MIT，给学习者读的中文文字
+按 CC BY 4.0。
+
+Everything that runs is MIT (see LICENSE): the website code (app/, including
+the components, scene controllers and checks inside lesson files), the model
+code and baker (models/), the kernel spike (spikes/), and the baked geometry
+(app/public/models/**/*.glb). Where a file holds both (such as a lesson .tsx),
+the code is MIT and the prose written for learners is CC BY 4.0.
+
+
+三、怎么署名 · How to attribute
+-----------------------------
+
+转载、改编课程文字时，写明出处、许可协议，并说明是否做了修改，例如：
+
+  内容来自 FeatureTree（linjiejim），https://featuretree.linjiejim.com ，
+  按 CC BY 4.0 许可使用，有删改。
+
+When you reuse or adapt the text, credit the source, name the licence and
+say whether you changed it, e.g.:
+
+  From FeatureTree by linjiejim, https://featuretree.linjiejim.com,
+  licensed under CC BY 4.0; adapted.
+
+
+四、不在许可范围内的 · Not covered
+-------------------------------
+
+- 第三方组件、字体和库按各自的许可证，见 THIRD_PARTY.md。
+- 文中引用的标准条文、外部资料的摘录，版权归原作者所有，这里只按合理引用
+  使用，见各处标注的出处。
+- 文中提到的软件名称（SOLIDWORKS、Fusion、Onshape、Creo、NX、Rhino、
+  FreeCAD 等）是各自所有者的商标。
+
+- Third-party components, fonts and libraries keep their own licences (see
+  THIRD_PARTY.md).
+- Quoted standards and excerpts from external sources remain with their
+  authors and are used as short citations with the sources given.
+- Software names mentioned (SOLIDWORKS, Fusion, Onshape, Creo, NX, Rhino,
+  FreeCAD, …) are trademarks of their owners.

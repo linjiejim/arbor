@@ -65,8 +65,32 @@ cd app && npm run bake
 
 ## 许可
 
-尚未确定（见 `docs/report.md` 的开源前清单）。
+- **代码**用 MIT，见 [`LICENSE`](LICENSE)：
+  - 网站 `app/`
+  - 模型与烘焙器 `models/`
+  - 烘焙出的 GLB
+  - `spikes/`
+- **课程文字和文档**用 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.zh-hans)，见 [`LICENSE-content`](LICENSE-content)：
+  - 课程讲解和小测
+  - 术语表和概念卡
+  - 命令说明
+  - 课程大纲
+  - 拆解讲解
+  - `docs/`，包括调研
+
+同一个文件里两种都有时（例如课程的 `.tsx`），代码按 MIT，给学习者读的文字按 CC BY 4.0。转载课程文字请注明出处 FeatureTree 和许可协议。
 
 ## 第三方
 
-three.js（MIT）、React（MIT）、build123d（Apache-2.0）、OpenCascade / OCP（LGPL-2.1，仅离线使用）、@salusoft89/planegcs（LGPL，作为独立 wasm 文件加载）、Inter 与 JetBrains Mono（OFL）、Lucide（ISC）。
+完整清单、版本和链接见 [`THIRD_PARTY.md`](THIRD_PARTY.md)。要点：
+
+- **随网站发布**：
+  - three.js、React、React Router、Radix UI、Tailwind CSS：MIT。
+  - Lucide：ISC。
+  - Inter、JetBrains Mono：OFL 1.1。
+  - @salusoft89/planegcs：LGPL-2.1。它是独立的 wasm 文件，只在约束课按需加载；源码见 <https://github.com/Salusoft89/planegcs>。
+- **只在离线烘焙时用，不随网站发布**：
+  - build123d：Apache-2.0。
+  - OCP：Apache-2.0。
+  - Open CASCADE Technology：LGPL-2.1，附 OCCT 例外条款。
+- **`app/src/components/ui/`**：来自作者的 jim-uiux 设计系统（基于 shadcn/ui，MIT）。
