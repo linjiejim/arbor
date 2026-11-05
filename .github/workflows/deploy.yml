@@ -1,0 +1,59 @@
+# FeatureTree → https://featuretree.linjiejim.com
+# Static site: built here, rsynced to /srv/featuretree/releases/<sha7> on jim-server,
+# then /srv/featuretree/current is flipped atomically. Last 5 releases kept for rollback:
+#   ssh jim-server 'ls -t /srv/featuretree/releases'  → ln -sfn <release> /srv/featuretree/current
+# Requires environment `jim-server` with DEV_SERVER_HOST / PORT / USERNAME / SSH_KEY.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", ".github/workflows/deploy.yml"]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: jim-server
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+
+      - name: Ship
+        env:
+          HOST: ${{ secrets.DEV_SERVER_HOST }}
+          PORT: ${{ secrets.DEV_SERVER_PORT }}
+          USER: ${{ secrets.DEV_SERVER_USERNAME }}
+          KEY: ${{ secrets.DEV_SERVER_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          SSH="ssh -i $HOME/.ssh/deploy -p $PORT -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes"
+          REL="/srv/featuretree/releases/${GITHUB_SHA::7}"
+          $SSH "$USER@$HOST" "mkdir -p $REL"
+          rsync -az --delete -e "$SSH" dist/ "$USER@$HOST:$REL/"
+          $SSH "$USER@$HOST" "ln -sfn $REL /srv/featuretree/current.tmp && mv -Tf /srv/featuretree/current.tmp /srv/featuretree/current && cd /srv/featuretree/releases && ls -1t | tail -n +6 | xargs -r rm -rf"
+
+      - name: Verify
+        run: |
+          for url in / /lesson/revolve /models/index.json; do
+            for i in 1 2 3; do
+              S=$(curl -s -o /dev/null -w '%{http_code}' "https://featuretree.linjiejim.com$url")
+              echo "$url attempt $i: HTTP $S"; [ "$S" = "200" ] && continue 2; sleep 3
+            done
+            exit 1
+          done
