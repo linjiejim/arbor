@@ -1,6 +1,9 @@
 # AI 对话式建模：FeatureTree 工作台
 
-- 状态：已定稿（2026-11-05），进入阶段 0
+- 状态：已定稿（2026-11-05）。
+  - 阶段 0 和阶段 1 已上线（Beta，`/studio`）。
+  - 阶段 2 已做：参考图、「边做边学」、看图自检，以及从拆解打开。
+  - 待做：真模型评测（需要 DeepSeek key）；草图约束和分享链接未做。
 - 日期：2026-11-05
 - 默认模型：DeepSeek `deepseek-flash`（V4.1-Flash-1017）
 - 技术栈：Vercel AI SDK 7、replicad（OpenCascade WebAssembly）、现有 three.js 视口
