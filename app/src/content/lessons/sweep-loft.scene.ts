@@ -308,7 +308,7 @@ export class SweepLoftScene extends LessonScene<SweepLoftState> {
 
   private handle(i: number) {
     const el = document.createElement("div")
-    el.className = "interactive size-3.5 rounded-full border-2 border-primary bg-background cursor-grab transition-[scale] hover:scale-125"
+    el.className = "interactive size-3.5 rounded-full border-2 border-primary bg-background cursor-grab transition-shadow hover:ring-4 hover:ring-primary/25"
     el.title = "拖动路径点"
     const o = new CSS2DObject(el)
     el.addEventListener("pointerdown", (e) => {

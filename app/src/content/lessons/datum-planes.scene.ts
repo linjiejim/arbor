@@ -191,7 +191,7 @@ export class DatumPlanesScene extends LessonScene<DatumState> {
 
   private handle(title: string, onDrag: (e: PointerEvent) => void) {
     const el = document.createElement("div")
-    el.className = "interactive size-3.5 rounded-full border-2 border-primary bg-background cursor-grab transition-transform hover:scale-125"
+    el.className = "interactive size-3.5 rounded-full border-2 border-primary bg-background cursor-grab transition-shadow hover:ring-4 hover:ring-primary/25"
     el.title = title
     el.addEventListener("pointerdown", (e) => {
       e.preventDefault()
