@@ -1,6 +1,6 @@
 import * as THREE from "three"
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js"
-import { datumPlane, face, line, linearDim } from "@/three/build"
+import { datumPlane, edgeLine, face, line, linearDim } from "@/three/build"
 import { capLoop, draftedPrism, ellipsePoints, extrude, flipFaces, lathe, loft, ringPoints, roundedRect, roundedRectPoints, sweepEllipse, type V2 } from "@/three/geom"
 import type { MaterialKit } from "@/three/materials"
 import type { OpId } from "./ops"
@@ -81,11 +81,17 @@ const DEMOS: Demo[] = [
       const g = new THREE.Group()
       const H = 18
       const depth = (mode === "through" ? H : Math.min(o.d, H)) * Math.max(0.02, t)
-      const pocket = () => roundedRect(new THREE.Path(), 26, 14, 3)
-      if (H - depth > 0.01) g.add(solid(kit, block(50, 34, 0, H - depth)))
+      const floor = H - depth
+      // The outer walls are one full-height mesh (the block with the pocket through it), and a
+      // plug fills the pocket up to its floor. Stacking two blocks instead drew a seam around the
+      // outside at the floor height. Edges are drawn by hand so only the real ones show.
       const s2 = roundedRect(new THREE.Shape(), 50, 34, 3)
-      s2.holes.push(pocket())
-      g.add(solid(kit, extrude(s2, depth, { z0: H - depth })))
+      s2.holes.push(roundedRect(new THREE.Path(), 26, 14, 3))
+      g.add(solid(kit, extrude(s2, H), "model", false))
+      if (floor > 0.01) g.add(solid(kit, extrude(roundedRect(new THREE.Shape(), 26, 14, 3), floor), "model", false))
+      g.add(edgeLine(roundedRectPoints(50, 34, 3, 0, 16), kit), edgeLine(roundedRectPoints(50, 34, 3, H, 16), kit))
+      g.add(edgeLine(roundedRectPoints(26, 14, 3, H, 16), kit))
+      if (floor > 0.01) g.add(edgeLine(roundedRectPoints(26, 14, 3, floor, 16), kit))
       g.add(line(roundedRectPoints(26, 14, 3, H + 0.05), kit.sketch))
       return g
     },
