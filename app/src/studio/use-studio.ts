@@ -4,12 +4,13 @@ import { KernelClient } from "./client"
 import { EMPTY_TREE, Tree } from "./dsl"
 import type { BuildReport, DisplayData } from "./kernel/build"
 import { renderViews } from "./look"
+import { STARTERS } from "./starters"
 
 const STORE = "ft-studio-v1"
 
 type Saved = { tree: Tree; history: Tree[] }
 
-function load(): Saved {
+function loadSaved(): Saved {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE) ?? "null")
     const tree = Tree.safeParse(raw?.tree)
@@ -28,7 +29,7 @@ export type KernelState = { phase: "loading"; loadedMB: number } | { phase: "rea
  * Tool calls from the model run through `runTool`, one at a time.
  */
 export function useStudio() {
-  const [saved] = React.useState(load)
+  const [saved] = React.useState(loadSaved)
   const [tree, setTreeState] = React.useState<Tree>(saved.tree)
   const [history, setHistory] = React.useState<Tree[]>(saved.history)
   const [report, setReport] = React.useState<BuildReport | null>(null)
@@ -81,7 +82,18 @@ export function useStudio() {
       .then(async () => {
         if (!life.alive) return
         setKernel({ phase: "ready" })
-        await commit(treeRef.current)
+        // /studio?start=<id> opens a ready-made tree (from a teardown, or a shared link).
+        const url = new URL(location.href)
+        const starter = STARTERS.find((x) => x.id === url.searchParams.get("start"))
+        if (starter) {
+          url.searchParams.delete("start")
+          window.history.replaceState(null, "", url)
+          if (treeRef.current.features.length) {
+            historyRef.current = [...historyRef.current.slice(-29), treeRef.current]
+            setHistory(historyRef.current)
+          }
+          await commit(starter.tree)
+        } else await commit(treeRef.current)
       })
       .catch((e) => life.alive && setKernel({ phase: "error", message: String(e?.message ?? e) }))
     return () => {
@@ -113,6 +125,17 @@ export function useStudio() {
     setHistory(historyRef.current)
     void commit(prev)
   }, [commit])
+
+  /** Open a ready-made tree (undoable). */
+  const load = React.useCallback(
+    (t: Tree) => {
+      checkpoint()
+      rollbackRef.current = null
+      setRollback(null)
+      void commit(t)
+    },
+    [checkpoint, commit],
+  )
 
   const reset = React.useCallback(() => {
     checkpoint()
@@ -181,6 +204,7 @@ export function useStudio() {
     checkpoint,
     undo,
     reset,
+    load,
     runTool,
     setParam,
     showFeature,

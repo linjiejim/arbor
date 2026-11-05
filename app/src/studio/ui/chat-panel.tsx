@@ -9,6 +9,8 @@ import { Textarea } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { OpIcon } from "@/components/op-icon"
 import type { OpId } from "@/content/ops"
+import { STARTERS } from "../starters"
+import type { Tree } from "../dsl"
 import type { ToolOutput } from "../tools"
 import { errorText, MAX_CALLS_PER_TURN, type StudioChat } from "../use-studio-chat"
 
@@ -40,7 +42,17 @@ const TOOL_LABEL: Record<string, { label: string; op?: OpId; icon?: LucideIcon }
   look: { label: "看一眼", icon: Eye },
 }
 
-export function ChatPanel({ chat, onSelectFeature, ready }: { chat: StudioChat; onSelectFeature: (id: string) => void; ready: boolean }) {
+export function ChatPanel({
+  chat,
+  onSelectFeature,
+  onLoad,
+  ready,
+}: {
+  chat: StudioChat
+  onSelectFeature: (id: string) => void
+  onLoad: (t: Tree) => void
+  ready: boolean
+}) {
   const [text, setText] = React.useState("")
   const [files, setFiles] = React.useState<FileUIPart[]>([])
   const [fileError, setFileError] = React.useState<string | null>(null)
@@ -75,7 +87,7 @@ export function ChatPanel({ chat, onSelectFeature, ready }: { chat: StudioChat; 
     <div className="flex min-h-0 flex-1 flex-col">
       <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {chat.messages.length === 0 ? (
-          <Intro onPick={(t) => ready && chat.send(t)} disabled={!ready} />
+          <Intro onPick={(t) => ready && chat.send(t)} onLoad={onLoad} disabled={!ready} />
         ) : (
           <div className="space-y-4">
             {chat.messages.map((m) => (
@@ -170,7 +182,7 @@ export function ChatPanel({ chat, onSelectFeature, ready }: { chat: StudioChat; 
   )
 }
 
-function Intro({ onPick, disabled }: { onPick: (t: string) => void; disabled: boolean }) {
+function Intro({ onPick, onLoad, disabled }: { onPick: (t: string) => void; onLoad: (t: Tree) => void; disabled: boolean }) {
   return (
     <div>
       <h2 className="text-heading font-semibold">用说的来建模</h2>
@@ -188,6 +200,21 @@ function Intro({ onPick, disabled }: { onPick: (t: string) => void; disabled: bo
             className="rounded-md border px-3 py-2 text-left text-body transition-colors duration-(--duration-fast) hover:bg-accent disabled:opacity-50"
           >
             {e}
+          </button>
+        ))}
+      </div>
+      <div className="mt-6 text-small text-faint-foreground">或者从现成的特征树开始（不用 AI）</div>
+      <div className="mt-2 grid grid-cols-2 gap-2">
+        {STARTERS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            disabled={disabled}
+            title={s.note}
+            onClick={() => onLoad(s.tree)}
+            className="rounded-md border px-3 py-2 text-left text-body transition-colors duration-(--duration-fast) hover:bg-accent disabled:opacity-50"
+          >
+            {s.title}
           </button>
         ))}
       </div>

@@ -36,6 +36,7 @@ export const SYSTEM_PROMPT = `你是 FeatureTree 工作台里的建模助教。�
 - 竖直的棱：{"parallel":"Z"}；某个特征的竖直棱：{"of":"base","parallel":"Z"}
 - 顶面一圈边：{"faces":{"normal":"+Z","extreme":"+Z"}}
 - 孔口的圆边：{"kind":"circle","of":"h1","extreme":"+Z"}
+- 除了顶面一圈以外的所有边：{"not":{"extreme":"+Z"}}
 - 只要一个：加 "near":[x,y,z]；确认数量：加 "expect": n
 选中的数量不符时会报错并列出候选，照着候选改选择器。
 

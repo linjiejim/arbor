@@ -47,6 +47,15 @@ const trees: Record<string, Tree> = {
       { id: "m", op: "mirror", plane: "XZ", features: ["rib"], offset: 0 },
     ],
   },
+  boxA: {
+    params: { L: 60, W: 40, H: 30, r: 4, t: 2.5 },
+    features: [
+      { id: "sk1", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W" }] },
+      { id: "ext1", op: "extrude", sketch: "sk1", distance: "H" },
+      { id: "fil1", op: "fillet", edges: { not: { extreme: "+Z" } }, r: "r" },
+      { id: "shell1", op: "shell", open: { normal: "+Z", extreme: "+Z" }, t: "t" },
+    ],
+  },
   handle: {
     params: { R: 30, H: 60 },
     features: [

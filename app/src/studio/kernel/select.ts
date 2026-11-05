@@ -174,6 +174,15 @@ function checkCount<T>(found: T[], expect: number | undefined, what: string, all
 }
 
 export function selectFaces(sel: FaceSelector, faces: FaceInfo[], scope: Scope): FaceInfo[] {
+  let out = filterFaces(sel, faces, scope)
+  if (sel.not) {
+    const drop = new Set(filterFaces(sel.not, faces, scope).map((f) => f.index))
+    out = out.filter((f) => !drop.has(f.index))
+  }
+  return checkCount(out, sel.expect, "面", faces, describeFace)
+}
+
+function filterFaces(sel: Omit<FaceSelector, "not" | "expect">, faces: FaceInfo[], scope: Scope): FaceInfo[] {
   const tol = 1e-3 * Math.max(1, sizeOf(faces) / 100)
   let out = faces
   if (sel.of) out = out.filter((f) => f.origin === sel.of)
@@ -199,10 +208,19 @@ export function selectFaces(sel: FaceSelector, faces: FaceInfo[], scope: Scope):
     const p = sel.near.map((c) => num(c, scope)) as V3
     out = nearest(out, (f) => f.face, p)
   }
-  return checkCount(out, sel.expect, "面", faces, describeFace)
+  return out
 }
 
 export function selectEdges(sel: EdgeSelector, edges: EdgeInfo[], faces: FaceInfo[], scope: Scope): EdgeInfo[] {
+  let out = filterEdges(sel, edges, faces, scope)
+  if (sel.not) {
+    const drop = new Set(filterEdges(sel.not, edges, faces, scope).map((e) => e.index))
+    out = out.filter((e) => !drop.has(e.index))
+  }
+  return checkCount(out, sel.expect, "边", edges, describeEdge)
+}
+
+function filterEdges(sel: Omit<EdgeSelector, "not" | "expect">, edges: EdgeInfo[], faces: FaceInfo[], scope: Scope): EdgeInfo[] {
   const tol = 1e-3 * Math.max(1, sizeOf(edges) / 100)
   let out = edges
   if (sel.of) {
@@ -235,5 +253,5 @@ export function selectEdges(sel: EdgeSelector, edges: EdgeInfo[], faces: FaceInf
     const p = sel.near.map((c) => num(c, scope)) as V3
     out = nearest(out, (e) => e.edge, p)
   }
-  return checkCount(out, sel.expect, "边", edges, describeEdge)
+  return out
 }

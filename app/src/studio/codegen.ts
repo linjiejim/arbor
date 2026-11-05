@@ -59,7 +59,12 @@ function shape2d(s: SketchShape): string {
   }
 }
 
-function faces(sel: FaceSelector, base = "part.faces()") {
+function faces(sel: FaceSelector, base = "part.faces()"): string {
+  const main = faceFilter(sel, base)
+  return sel.not ? `(${main} - ${faceFilter(sel.not, base)})` : main
+}
+
+function faceFilter(sel: Omit<FaceSelector, "not" | "expect">, base: string) {
   let e = base
   if (sel.of) e = `on_feature(${e}, tool_${sel.of})`
   if (sel.kind) e += `.filter_by(GeomType.${KIND_FACE[sel.kind]})`
@@ -74,7 +79,12 @@ function faces(sel: FaceSelector, base = "part.faces()") {
   return e
 }
 
-function edges(sel: EdgeSelector) {
+function edges(sel: EdgeSelector): string {
+  const main = edgeFilter(sel)
+  return sel.not ? `(${main} - ${edgeFilter(sel.not)})` : main
+}
+
+function edgeFilter(sel: Omit<EdgeSelector, "not" | "expect">) {
   let e = sel.faces ? `${faces(sel.faces)}.edges()` : "part.edges()"
   if (sel.of) e = `on_feature(${e}, tool_${sel.of})`
   if (sel.kind) e += `.filter_by(GeomType.${KIND_EDGE[sel.kind]})`

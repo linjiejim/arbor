@@ -24,29 +24,41 @@ const AtCoord = z
   .object({ axis: Axis, value: Num })
   .describe('中心落在这个坐标上，例如 { "axis": "Z", "value": "H" }')
 
+const faceFields = {
+  of: z.string().optional().describe("只选这个特征生成、且现在仍存在的面（特征 id）"),
+  normal: Dir.optional().describe("平面的外法向"),
+  kind: SurfaceKind.optional(),
+  extreme: Dir.optional().describe('沿这个方向最靠外的面，例如 "+Z" = 最上面的面'),
+  at: AtCoord.optional(),
+  radius: Num.optional().describe("圆柱面、圆锥面或球面的半径"),
+  near: Vec3.optional().describe("只保留离这个点最近的一个"),
+}
+const FaceBase = z.object(faceFields)
+
 export const FaceSelector = z
   .object({
-    of: z.string().optional().describe("只选这个特征生成、且现在仍存在的面（特征 id）"),
-    normal: Dir.optional().describe("平面的外法向"),
-    kind: SurfaceKind.optional(),
-    extreme: Dir.optional().describe('沿这个方向最靠外的面，例如 "+Z" = 最上面的面'),
-    at: AtCoord.optional(),
-    radius: Num.optional().describe("圆柱面、圆锥面或球面的半径"),
-    near: Vec3.optional().describe("只保留离这个点最近的一个"),
+    ...faceFields,
+    not: FaceBase.optional().describe("从结果里去掉满足这些条件的面"),
     expect: z.number().int().positive().optional().describe("预期选中几个；数量不符时报错并列出候选"),
   })
   .describe("按语义选面：所有条件同时满足。每次重建都重新解析，不依赖编号")
 
+const edgeFields = {
+  of: z.string().optional().describe("只选这个特征生成的面上的边（特征 id）"),
+  faces: FaceSelector.optional().describe("只选这些面的边界边"),
+  parallel: Axis.optional().describe("平行于这个轴的直线边"),
+  kind: CurveKind.optional(),
+  extreme: Dir.optional().describe('沿这个方向最靠外的边，例如 "+Z" = 最上面一圈边'),
+  at: AtCoord.optional(),
+  radius: Num.optional().describe("圆弧边的半径"),
+  near: Vec3.optional().describe("只保留离这个点最近的一条"),
+}
+const EdgeBase = z.object(edgeFields)
+
 export const EdgeSelector = z
   .object({
-    of: z.string().optional().describe("只选这个特征生成的面上的边（特征 id）"),
-    faces: FaceSelector.optional().describe("只选这些面的边界边"),
-    parallel: Axis.optional().describe("平行于这个轴的直线边"),
-    kind: CurveKind.optional(),
-    extreme: Dir.optional().describe('沿这个方向最靠外的边，例如 "+Z" = 最上面一圈边'),
-    at: AtCoord.optional(),
-    radius: Num.optional().describe("圆弧边的半径"),
-    near: Vec3.optional().describe("只保留离这个点最近的一条"),
+    ...edgeFields,
+    not: EdgeBase.optional().describe('从结果里去掉满足这些条件的边，例如 { "extreme": "+Z" } = 除了最上面一圈'),
     expect: z.number().int().positive().optional().describe("预期选中几条；数量不符时报错并列出候选"),
   })
   .describe("按语义选边：所有条件同时满足。每次重建都重新解析，不依赖编号")

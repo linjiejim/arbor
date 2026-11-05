@@ -115,7 +115,7 @@ export function StudioPage() {
             {status && !status.hostedKey && !hasOwnKey() && (
               <div className="shrink-0 border-b px-4 py-2 text-small text-muted-foreground">服务器没有配置公共额度：点右上角钥匙图标，填自己的 DeepSeek key。</div>
             )}
-            <ChatPanel chat={chat} ready={ready} onSelectFeature={studio.showFeature} />
+            <ChatPanel chat={chat} ready={ready} onSelectFeature={studio.showFeature} onLoad={studio.load} />
           </TabsContent>
           <div className="contents lg:hidden">{side}</div>
         </Tabs>
