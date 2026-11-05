@@ -9,10 +9,12 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "bake": "cd ../models && ../.venv/bin/python -m ftbake",
-    "check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.server.json --noEmit && oxlint src && vitest run src/tests",
+    "check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p e2e/tsconfig.json --noEmit && oxlint src e2e && vitest run src/tests",
     "dev:api": "STUDIO_DATA_DIR=.tmp/studio tsx watch server/index.ts",
     "build:api": "esbuild server/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist-server/index.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --log-level=warning",
-    "eval:studio": "tsx scripts/studio-eval.ts"
+    "eval:studio": "tsx scripts/studio-eval.ts",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^3.0.80",
@@ -43,6 +45,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/culori": "^4.0.1",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
