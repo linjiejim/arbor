@@ -89,10 +89,14 @@ export async function inkShare(canvas: Locator) {
  */
 export const MIN_INK = 0.01
 
-/** The canvas shows more than its background colour (retried while models load and cameras fly). */
+/**
+ * The canvas shows more than its background colour (retried while models load
+ * and cameras fly). Software WebGL on CI runners can take many seconds per
+ * frame for the heavier scenes, hence the long window.
+ */
 export async function expectRendered(canvas: Locator, what: string) {
   await expect(canvas, `${what}: canvas visible`).toBeVisible()
   await expect
-    .poll(() => inkShare(canvas), { message: `${what}: canvas is blank (share of non-background pixels)`, timeout: 15_000 })
+    .poll(() => inkShare(canvas), { message: `${what}: canvas is blank (share of non-background pixels)`, timeout: 40_000, intervals: [500, 1000, 2000] })
     .toBeGreaterThan(MIN_INK)
 }

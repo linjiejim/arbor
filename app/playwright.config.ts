@@ -18,8 +18,9 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: ci,
   retries: ci ? 1 : 0,
-  workers: ci ? 3 : undefined,
-  timeout: 60_000,
+  // Two workers on CI: SwiftShader renders on the CPU, and three parallel viewers starved each other.
+  workers: ci ? 2 : undefined,
+  timeout: 90_000,
   expect: { timeout: 10_000 },
   reporter: ci ? [["github"], ["list"], ["html", { open: "never" }]] : [["list"], ["html", { open: "never" }]],
   use: {
