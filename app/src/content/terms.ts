@@ -73,6 +73,22 @@ export const TERMS: Term[] = [
     models: ["gear", "brick"],
   },
   {
+    id: "construction-geometry",
+    name: "构造几何",
+    en: "Construction geometry",
+    group: "草图与参数化",
+    def: "草图里只当参照用的线、圆和点：中心线、对称轴、布局框。它参与约束，但不会变成特征的轮廓。",
+    why: "先用构造几何搭骨架，实际轮廓挂在骨架上，约束更少，意图更清楚。",
+  },
+  {
+    id: "configuration",
+    name: "配置",
+    en: "Configurations / variants",
+    group: "草图与参数化",
+    def: "同一个模型里存多组参数和特征开关，每组就是一个尺寸规格或变体。表格形式的配置也叫设计表、配置表。",
+    why: "一个模型管住一个系列（比如 M3 到 M8），改一处结构，所有规格一起更新。",
+  },
+  {
     id: "feature-tree",
     name: "特征树",
     en: "Feature tree / history / timeline",
@@ -120,6 +136,14 @@ export const TERMS: Term[] = [
     models: ["box_fillet_first", "box_shell_first", "mug"],
   },
   {
+    id: "dumb-solid",
+    name: "无历史实体",
+    en: "Dumb solid",
+    group: "特征树",
+    def: "从 STEP、IGES 这类中性格式导入的实体：只有面和边，没有草图、尺寸和特征树。",
+    why: "改它不能回去改参数，只能直接编辑面，或在它上面接着加特征。",
+  },
+  {
     id: "mate",
     name: "配合与联接",
     en: "Mates / joints",
@@ -137,6 +161,14 @@ export const TERMS: Term[] = [
     def: "多余的配合约束了已经被约束的自由度。看起来没事，改一个尺寸就会冲突报错。",
     why: "完全定义只是状态，正确定义才是目标。",
     lessons: ["assembly-dof"],
+  },
+  {
+    id: "external-reference",
+    name: "外部参考",
+    en: "External / in-context reference",
+    group: "装配",
+    def: "一个零件的草图或特征引用了另一个零件的几何，通常是在装配里「照着邻居画」。被引用的零件变了，它跟着变。",
+    why: "方便，也危险：零件离开这个装配就会断，引用多了还会互相牵连、重建变慢。",
   },
   {
     id: "exploded-view",

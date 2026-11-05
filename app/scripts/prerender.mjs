@@ -47,9 +47,10 @@ const pages = [
   ...Object.entries(meta.STATIC_PAGES).map(([p, m]) => ({ path: p, ...m })),
   ...meta.lessonPaths().map((p) => ({ path: p, ...meta.lessonPageMeta(p.slice("/lesson/".length)) })),
   ...Object.values(models).map((m) => ({ path: `/teardown/${m.id}`, ...meta.teardownPageMeta(m) })),
+  ...meta.cardPaths().map((p) => ({ path: p, ...meta.cardPageMeta(p.slice("/card/".length)) })),
 ]
 for (const p of pages) {
-  if (!/^\/([\w-]+(\/[\w-]+)*)?$/.test(p.path)) throw new Error(`prerender: unsafe path ${p.path}`)
+  if (!/^\/([\w.-]+(\/[\w.-]+)*)?$/.test(p.path) || p.path.includes("..")) throw new Error(`prerender: unsafe path ${p.path}`)
   if (!p.description) throw new Error(`prerender: no description for ${p.path}`)
 }
 

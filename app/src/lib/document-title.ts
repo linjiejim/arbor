@@ -1,5 +1,5 @@
 import { loadIndex } from "@/three/baked"
-import { documentTitle, lessonPageMeta, STATIC_PAGES, teardownPageMeta } from "@/lib/page-meta"
+import { cardPageMeta, documentTitle, lessonPageMeta, STATIC_PAGES, teardownPageMeta } from "@/lib/page-meta"
 
 let shown: string | null = null
 
@@ -16,7 +16,9 @@ export function syncDocumentTitle(pathname: string) {
   }
   const lesson = path.match(/^\/lesson\/([^/]+)$/)
   const teardown = path.match(/^\/teardown\/([^/]+)$/)
+  const card = path.match(/^\/card\/([^/]+)$/)
   if (lesson) set(lessonPageMeta(decodeURIComponent(lesson[1]))?.title)
+  else if (card) set(cardPageMeta(decodeURIComponent(card[1]))?.title)
   else if (teardown) {
     // The index is usually cached already; until it arrives, keep the current (often prerendered) title.
     const id = decodeURIComponent(teardown[1])

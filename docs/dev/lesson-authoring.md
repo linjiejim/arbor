@@ -84,3 +84,55 @@ npx playwright test -g <id>       # 这节课的冒烟测试
 - 小测用标准的 `quiz` 字段，不要另做答题控件。
 
 怎么跑见根目录 `README.md` 的「开发」一节。
+
+# 写一张图文卡
+
+交互必要性为 0–1 的课（见 `curriculum.json` 的 `interactive`）做成图文卡：几段短文、一张示意图或一张表、2–3 道小测。学习路径上显示「图文」标签，读完答完小测就算完成，小测按 1 天、1 周、3 周进入复习。
+
+## 文件
+
+一张卡一个文件：`app/src/content/cards/<课程编号>.tsx`，比如 `0.3.2.tsx`，默认导出一个 `CardDef`（`cards/types.ts`）。写好后在 `cards/index.ts` 里按课程顺序加一行注册，卡会单独打包、按需加载：
+
+```ts
+{ code: "0.3.2", load: () => import("./0.3.2") },
+```
+
+注册后 `/card/0.3.2` 就能打开。同一个编号如果已经有互动课或拆解，学习路径优先进互动课，其次拆解，最后才是图文卡。
+
+参考实现：`0.3.2.tsx`（示意图加表格），`1.5.4.tsx`（代码示例）。
+
+## CardDef
+
+```tsx
+const card: CardDef = {
+  code: "0.3.2",                 // 和文件名一致，必须在 curriculum.json 里
+  title: "文件格式：导出时带走了什么",
+  minutes: 4,                    // 3–5 分钟读完
+  sections: [ { heading, body }, ... ],          // 2–4 段，body 写 <p>、<ul>、<ol>、<code>
+  figure: { Figure: () => <Svg …>…</Svg>, caption, after: 0 },   // 可选：画在第几段后面
+  table: { caption, head, rows, after, nowrap, note },           // 可选
+  terms: { ops: ["hole"], concepts: ["tnp"] },   // ops.ts 的命令 id、terms.ts 的概念 id
+  quiz: [ { q, options, answer, explain }, ... ], // 2–3 题，每题都有解释
+  takeaways: ["…", "…", "…"],
+  sources: [ { title, publisher, url }, ... ],   // 至少一条，http(s) 链接
+  related: { lessons: ["feature-tree"], teardowns: ["mug"], cards: ["1.3.6"] },
+}
+export default card
+```
+
+- 示意图用 `components/card-figure.tsx` 的 `Svg`、`T`（文字）、`Arrow`。画布宽不超过 320，文字用默认的 `text-small`：手机上 SVG 按约 1:1 显示，文字不会小于 12px。颜色只用主题类（`text-primary`、`fill-muted`、`text-muted-foreground`…），线条默认是 `currentColor`。
+- `Figure` 写成对象里的箭头函数，辅助函数用小写名字，这样卡片文件不会触发 oxlint 的 fast-refresh 警告。
+- 剖面线用 `<pattern>`，id 带上卡片编号（如 `card-124-hatch`），避免和别的 SVG 冲突。
+- 表格在手机上横向滚动；标准号、零件号这类不能断行的列放进 `nowrap`。
+
+## 内容
+
+- 每个事实都要有出处，写进 `sources`：优先各软件官方帮助（中文版）、标准原文或国家标准平台的记录、厂商技术文档；其次是权威参考。不复制原文，用自己的话说，一张卡最多引一句短句。
+- 命令名用各软件官方中文界面的叫法，和 `ops.ts`、`terms.ts` 已有的说法保持一致；各软件叫法不同时用一张对照表。
+- 工程约定以国标为准，写明标准号；标准会修订，写之前确认是否现行。
+- 小测的错误选项要是真实的误解；解释说清楚为什么对、为什么错。
+- 不确定的说法宁可不写，或者写「以帮助为准」「因版本而异」。
+
+## 检查
+
+`npm run check` 里的 `src/tests/unit/cards.test.ts` 会检查：每张卡都已注册且按课程顺序、编号在大纲里、2–4 段、至少一条 http(s) 来源、2–3 道带解释的小测、引用的命令 / 概念 / 课 / 拆解 / 卡都存在。

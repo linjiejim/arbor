@@ -12,7 +12,7 @@ import { ParamSlider } from "@/components/param-slider"
 import { OpIcon } from "@/components/op-icon"
 import { OPS, SOFTWARE, type Op, type OpCategory, type OpId } from "@/content/ops"
 import { demoDefaults, demoFor, type Demo } from "@/content/demos"
-import { lessonById } from "@/content/curriculum"
+import { availableFor, lessonById } from "@/content/curriculum"
 import { useModelIndex } from "@/lib/use-async"
 import { acquireSnapshotter, releaseSnapshotter } from "@/three/snapshot"
 import { onThemeChange } from "@/three/tokens"
@@ -195,12 +195,16 @@ function Related({ op }: { op: Op }) {
     <div>
       <h3 className="mb-2 text-heading font-semibold">在哪儿学到它</h3>
       <div className="flex flex-col gap-1">
-        {lessons.map((l) => (
-          <Link key={l.id} to={`/learn#${l.id}`} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent">
-            <span className="w-10 font-mono text-caption tabular text-faint-foreground">{l.id}</span>
-            {l.title}
-          </Link>
-        ))}
+        {lessons.map((l) => {
+          const avail = availableFor(l.id)
+          return (
+            <Link key={l.id} to={avail?.to ?? `/learn#${l.id}`} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent">
+              <span className="w-10 shrink-0 font-mono text-caption tabular text-faint-foreground">{l.id}</span>
+              <span className="min-w-0 flex-1">{l.title}</span>
+              {avail ? <Badge tone="info">{avail.label}</Badge> : <span className="shrink-0 text-caption text-faint-foreground">规划中</span>}
+            </Link>
+          )
+        })}
         {models.map((m) => (
           <Link key={m.id} to={`/teardown/${m.id}`} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent">
             <Badge tone="info" className="w-10 justify-center">

@@ -1,4 +1,6 @@
 import { LESSONS } from "@/content/lessons"
+import { CARDS } from "@/content/cards"
+import curriculum from "@/content/curriculum.json"
 import type { ModelIndexEntry } from "@/three/baked"
 
 /**
@@ -55,6 +57,18 @@ export function lessonPageMeta(id: string): PageMeta | undefined {
   const l = LESSONS.find((x) => x.id === id)
   return l && { title: l.title, description: `互动课，约 ${l.minutes} 分钟。${l.gist}` }
 }
+
+/** A 图文卡 page: title and goal come from the curriculum. */
+export function cardPageMeta(code: string): PageMeta | undefined {
+  if (!CARDS.some((c) => c.code === code)) return undefined
+  for (const t of curriculum.tracks)
+    for (const m of t.modules)
+      for (const l of m.lessons) if (l.id === code) return { title: `${l.title} · 图文卡`, description: `图文卡 ${l.id}：${l.goal}。` }
+  return undefined
+}
+
+/** Every card path that gets its own HTML copy. */
+export const cardPaths = () => CARDS.map((c) => `/card/${c.code}`)
 
 export function teardownPageMeta(m: Pick<ModelIndexEntry, "kind" | "title" | "subtitle" | "teaches">): PageMeta {
   const what = m.kind === "assembly" ? "装配拆解" : "按特征树重建"

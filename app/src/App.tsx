@@ -29,6 +29,7 @@ const router = createBrowserRouter([
       { path: "/atlas", lazy: lazy(() => import("@/routes/atlas"), "AtlasPage") },
       { path: "/glossary", lazy: lazy(() => import("@/routes/glossary"), "GlossaryPage") },
       { path: "/practice", lazy: lazy(() => import("@/routes/practice"), "PracticePage") },
+      { path: "/card/:code", lazy: lazy(() => import("@/routes/card"), "CardPage") },
     ],
   },
   // Immersive pages: their own header, the viewport takes the screen.

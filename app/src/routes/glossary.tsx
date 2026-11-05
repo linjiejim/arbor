@@ -1,4 +1,5 @@
-import { Link, useSearchParams } from "react-router"
+import * as React from "react"
+import { Link, useLocation, useSearchParams } from "react-router"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable } from "@/components/ui/data-table"
 import { Page, PageHeader, Section } from "@/components/ui/page"
@@ -74,6 +75,12 @@ export function GlossaryPage() {
 
 function Concepts() {
   const models = useModelIndex()
+  // Concept links (from 图文卡) land on their card: /glossary?tab=concepts#tnp
+  const { hash } = useLocation()
+  React.useEffect(() => {
+    if (!hash) return
+    document.getElementById(decodeURIComponent(hash.slice(1)))?.scrollIntoView({ block: "center" })
+  }, [hash])
   return (
     <>
       {GROUPS.map((g) => (
