@@ -15,6 +15,7 @@ export const NAV = [
   { to: "/practice", label: "练习" },
   { to: "/atlas", label: "工具图鉴" },
   { to: "/glossary", label: "术语表" },
+  { to: "/studio", label: "AI 工作台" },
 ]
 
 /**
