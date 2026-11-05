@@ -84,6 +84,33 @@ describe("kernel", () => {
     expect(run.output.text).toMatch(/选中了 4 个边，预期 2 个/)
   })
 
+  it("sweeps a handle, lofts a transition and drafts walls", () => {
+    const rep = k.rebuild({
+      params: { R: 30 },
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "circle", d: "2*R" }] },
+        { id: "body", op: "extrude", sketch: "s", distance: 60 },
+        { id: "h", op: "sweep", path: { on: { plane: "XZ" }, points: [["R-2", 45], [50, 45], [50, 15], ["R-2", 15]], corner: 8 }, profile: { type: "circle", d: 8 } },
+        { id: "a", op: "sketch", on: { plane: "XY", offset: 60 }, shapes: [{ type: "circle", d: 60 }] },
+        { id: "b", op: "sketch", on: { plane: "XY", offset: 80 }, shapes: [{ type: "rect", w: 30, h: 30 }] },
+        { id: "neck", op: "loft", sketches: ["a", "b"] },
+      ],
+    })
+    expect(rep.features.map((f) => f.state)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok"])
+    expect(rep.body?.solids).toBe(1)
+    expect(rep.body?.size[0]).toBeCloseTo(84, 0)
+    const drafted = k.rebuild({
+      params: {},
+      features: [
+        { id: "a", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 60, h: 40 }] },
+        { id: "b", op: "extrude", sketch: "a", distance: 25 },
+        { id: "d", op: "draft", faces: { kind: "plane", at: { axis: "Z", value: 12.5 } }, angle: 3, neutral: { plane: "XY" } },
+      ],
+    })
+    expect(drafted.features[2].selected).toBe(4)
+    expect(drafted.body!.volume).toBeLessThan(60 * 40 * 25)
+  })
+
   it("refuses a revolve profile that crosses the axis", () => {
     const rep = k.rebuild({
       params: {},

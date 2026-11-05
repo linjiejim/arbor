@@ -21,6 +21,9 @@ const OP_ICON: Record<Feature["op"], OpId> = {
   linear_pattern: "pattern",
   circular_pattern: "pattern",
   mirror: "mirror",
+  sweep: "sweep",
+  loft: "loft",
+  draft: "draft",
 }
 
 function iconOf(f: Feature): OpId {

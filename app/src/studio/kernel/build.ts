@@ -10,7 +10,10 @@ import {
   drawPolysides,
   drawRoundedRectangle,
   makeCompound,
+  makePlane,
   measureShapeVolumeProperties,
+  sketchCircle,
+  sketchRectangle,
   type Drawing,
   type Shape3D,
 } from "replicad"
@@ -485,6 +488,54 @@ export class Kernel {
           summary = `×${f.count} · ${fmt(total)}° · 绕 ${f.axis} 轴`
         }
         return this.copyTools(body, sources, moves, summary, warnings)
+      }
+      case "sweep": {
+        const plane = this.plane(f.path.on, prev)
+        const pts = f.path.points.map((p) => (Array.isArray(p) ? { to: [n(p[0]), n(p[1])] as [number, number] } : { to: [n(p.to[0]), n(p.to[1])] as [number, number], via: [n(p.via[0]), n(p.via[1])] as [number, number] }))
+        const corner = f.path.corner !== undefined ? n(f.path.corner) : 0
+        let pen = draw(pts[0].to)
+        pts.slice(1).forEach((p, i) => {
+          pen = p.via ? pen.threePointsArcTo(p.to, p.via) : pen.lineTo(p.to)
+          if (corner > 0 && i < pts.length - 2 && !pts[i + 2].via && !p.via) pen = pen.customCorner(corner)
+        })
+        const path = pen.done().sketchOnPlane(plane.name, plane.origin)
+        const prof = f.profile
+        const tool = (path as unknown as { sweepSketch: (fn: unknown) => Shape3D }).sweepSketch((pl: unknown, origin: unknown) =>
+          prof.type === "circle" ? sketchCircle(n(prof.d) / 2, { plane: pl as never, origin: origin as never }) : sketchRectangle(n(prof.w), n(prof.h), { plane: pl as never, origin: origin as never }),
+        )
+        const mode = f.mode ?? "add"
+        const next = applyTool(body, tool, mode, warnings)
+        const shape = prof.type === "circle" ? `⌀${fmt(n(prof.d))}` : `${fmt(n(prof.w))}×${fmt(n(prof.h))}`
+        return { body: next, tools: [{ tool, mode }], summary: `${mode === "cut" ? "扫掠切除" : "扫掠"} · 截面 ${shape} · 路径 ${pts.length} 点` }
+      }
+      case "loft": {
+        const sketches = f.sketches.map((id) => {
+          const { drawing, plane } = this.sketchOf(id)
+          const sk = drawing.clone().sketchOnPlane(plane.name, plane.origin)
+          if (!("wire" in sk)) throw new InputError(`放样的草图「${id}」有多个轮廓：每个截面只能是一个闭合轮廓`)
+          return sk
+        })
+        const [first, ...rest] = sketches
+        const tool = (first as unknown as { loftWith: (o: unknown[], c: unknown) => Shape3D }).loftWith(rest, { ruled: f.ruled ?? false })
+        const mode = f.mode ?? "add"
+        const next = applyTool(body, tool, mode, warnings)
+        return { body: next, tools: [{ tool, mode }], summary: `${mode === "cut" ? "放样切除" : "放样"} · ${f.sketches.length} 个截面${f.ruled ? " · 直纹" : ""}` }
+      }
+      case "draft": {
+        if (!body) throw new InputError("还没有实体")
+        const angle = n(f.angle)
+        if (!(Math.abs(angle) > 0 && Math.abs(angle) < 45)) throw new InputError("拔模角要在 0–45° 之间（常用 1–3°）")
+        const faces = faceInfos(body, prev!.origins)
+        try {
+          const sel = selectFaces(f.faces, faces, this.scope)
+          const list = sel.map((x) => x.face)
+          const origin: V3 = [0, 0, 0]
+          origin[PLANES[f.neutral.plane].axis] = f.neutral.offset !== undefined ? n(f.neutral.offset) : 0
+          const next = body.draft(angle, (ff) => ff.inList(list), makePlane(f.neutral.plane, origin))
+          return { body: next, selected: sel.length, summary: `${fmt(angle)}° · ${sel.length} 个面 · 中性面 ${PLANES[f.neutral.plane].label}` }
+        } finally {
+          disposeInfos(faces)
+        }
       }
       case "mirror": {
         if (!body) throw new InputError("还没有实体")

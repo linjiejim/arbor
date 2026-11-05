@@ -55,6 +55,12 @@ export function explain(op: string, e: KernelError): { message: string; hint?: s
     case "extrude":
     case "revolve":
       return { message: `${op === "extrude" ? "拉伸" : "旋转"}失败（${raw}）`, hint: "检查草图是否闭合、是否自相交；旋转时轮廓不能跨过旋转轴。" }
+    case "sweep":
+      return { message: `扫掠失败（${raw}）`, hint: "路径的拐弯半径要大于截面尺寸的一半，否则截面会自交；尖角拐弯用 corner 加圆角。" }
+    case "loft":
+      return { message: `放样失败（${raw}）`, hint: "各截面要在不同的平行平面上，轮廓的段数和走向尽量一致。" }
+    case "draft":
+      return { message: `拔模失败（${raw}）`, hint: "选中的面要与中性面相交；拔模角太大或面上已有圆角时也会失败，先拔模再倒圆角。" }
     default:
       return { message: `内核报错（${raw}）` }
   }

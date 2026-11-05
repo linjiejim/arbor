@@ -47,6 +47,30 @@ const trees: Record<string, Tree> = {
       { id: "m", op: "mirror", plane: "XZ", features: ["rib"], offset: 0 },
     ],
   },
+  handle: {
+    params: { R: 30, H: 60 },
+    features: [
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "circle", d: "2*R" }] },
+      { id: "body", op: "extrude", sketch: "s", distance: "H" },
+      { id: "h", op: "sweep", path: { on: { plane: "XZ" }, points: [["R-2", 45], [50, 45], [50, 15], ["R-2", 15]], corner: 8 }, profile: { type: "circle", d: 8 } },
+    ],
+  },
+  transition: {
+    params: {},
+    features: [
+      { id: "a", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 40, h: 40 }] },
+      { id: "b", op: "sketch", on: { plane: "XY", offset: 30 }, shapes: [{ type: "circle", d: 30 }] },
+      { id: "l", op: "loft", sketches: ["a", "b"] },
+    ],
+  },
+  drafted: {
+    params: {},
+    features: [
+      { id: "a", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 60, h: 40 }] },
+      { id: "b", op: "extrude", sketch: "a", distance: 25 },
+      { id: "d", op: "draft", faces: { kind: "plane", at: { axis: "Z", value: 12.5 } }, angle: 3, neutral: { plane: "XY" } },
+    ],
+  },
 }
 
 await initNodeKernel()

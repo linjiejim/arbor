@@ -166,6 +166,38 @@ export const Feature = z.discriminatedUnion("op", [
   }),
   z.object({
     ...Base,
+    op: z.literal("sweep"),
+    path: z
+      .object({
+        on: PlaneRef.describe("路径所在的平面"),
+        points: z.array(z.union([Vec2, z.object({ to: Vec2, via: Vec2 })])).min(2).describe("路径点（不闭合）；{to, via} 是三点圆弧"),
+        corner: Num.optional().describe("直线拐角处自动倒的圆角半径（路径不能有尖角，否则截面会自交）"),
+      })
+      .describe("扫掠路径"),
+    profile: z
+      .discriminatedUnion("type", [
+        z.object({ type: z.literal("circle"), d: Num }),
+        z.object({ type: z.literal("rect"), w: Num.describe("在路径平面内的宽"), h: Num.describe("垂直于路径平面的高") }),
+      ])
+      .describe("截面：放在路径起点、垂直于路径"),
+    mode: Mode,
+  }),
+  z.object({
+    ...Base,
+    op: z.literal("loft"),
+    sketches: z.array(z.string()).min(2).describe("按顺序连接的草图（每个只能有一个闭合轮廓，通常画在一组平行的偏移平面上）"),
+    ruled: z.boolean().optional().describe("true = 截面之间用直纹面（棱角分明），缺省光滑过渡"),
+    mode: Mode,
+  }),
+  z.object({
+    ...Base,
+    op: z.literal("draft"),
+    faces: FaceSelector.describe("要加拔模角的面（通常是侧壁）"),
+    angle: Num.describe("拔模角，度；正值让侧壁朝开模方向向内收"),
+    neutral: z.object({ plane: PlaneName, offset: Num.optional() }).describe("中性面：这里的尺寸保持不变，通常是分型面或底面"),
+  }),
+  z.object({
+    ...Base,
     op: z.literal("mirror"),
     plane: PlaneName,
     offset: Num.optional(),
@@ -200,6 +232,9 @@ export const OP_NAMES: Record<FeatureOp, string> = {
   linear_pattern: "线性阵列",
   circular_pattern: "圆周阵列",
   mirror: "镜像",
+  sweep: "扫掠",
+  loft: "放样",
+  draft: "拔模",
 }
 
 /** Display name: the model's own name, else 「拉伸2」 style numbering. */
@@ -210,4 +245,4 @@ export function displayName(tree: Tree, f: Feature) {
 }
 
 /** Features that add or remove material through a tool body (patternable). */
-export const TOOL_OPS: FeatureOp[] = ["extrude", "revolve", "hole"]
+export const TOOL_OPS: FeatureOp[] = ["extrude", "revolve", "hole", "sweep", "loft"]

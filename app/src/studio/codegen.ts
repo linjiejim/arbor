@@ -145,6 +145,32 @@ function feature(f: Feature, tree: Tree): string[] {
       const rot = { X: "Rot(X=a)", Y: "Rot(Y=a)", Z: "Rot(Z=a)" }[f.axis]
       return [...head, ...f.features.map((id) => `for a in [${step} * i for i in range(1, ${f.count})]:\n    part = part ${modeOf(tree, id) === "cut" ? "-" : "+"} ${rot} * tool_${id}`)]
     }
+    case "sweep": {
+      const pts = f.path.points.map((p) => (Array.isArray(p) ? { to: p as [N, N] } : { to: p.to as [N, N], via: p.via as [N, N] }))
+      const xy = (p: [N, N]) => `(${py(p[0])}, ${py(p[1])})`
+      const pl = sketchPlane(f.path.on)
+      const straight = pts.every((p) => !p.via)
+      const wire =
+        straight && f.path.corner !== undefined
+          ? `FilletPolyline(${pts.map((p) => xy(p.to)).join(", ")}, radius=${py(f.path.corner)})`
+          : `Wire([${pts
+              .slice(1)
+              .map((p, i) => (p.via ? `ThreePointArc(${xy(pts[i].to)}, ${xy(p.via)}, ${xy(p.to)})` : `Line(${xy(pts[i].to)}, ${xy(p.to)})`))
+              .join(", ")}])`
+      const prof = f.profile.type === "circle" ? `Circle(${py(f.profile.d)} / 2)` : `Rectangle(${py(f.profile.w)}, ${py(f.profile.h)})`
+      return [
+        ...head,
+        `path_${f.id} = ${pl} * ${wire}`,
+        `t0 = path_${f.id} % 0`,
+        `prof_${f.id} = Plane(origin=path_${f.id} @ 0, x_dir=t0.cross(${pl}.z_dir), z_dir=-t0) * ${prof}`,
+        `tool_${f.id} = sweep(prof_${f.id}, path=path_${f.id})`,
+        combine(f.id, f.mode),
+      ]
+    }
+    case "loft":
+      return [...head, `tool_${f.id} = loft([${f.sketches.map((id) => `sk_${id}`).join(", ")}], ruled=${f.ruled ? "True" : "False"})`, combine(f.id, f.mode)]
+    case "draft":
+      return [...head, `part = draft(${faces(f.faces)}, ${plane(f.neutral)}, ${py(f.angle)})`]
     case "mirror": {
       const about = plane({ plane: f.plane, offset: f.offset })
       if (!f.features?.length) return [...head, `part = part + mirror(part, about=${about})`]
