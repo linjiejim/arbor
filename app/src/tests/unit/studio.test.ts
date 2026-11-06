@@ -9,6 +9,7 @@ import { initNodeKernel } from "@/studio/kernel/node"
 import { trimMessages } from "@/studio/trim"
 import { annotationText } from "@/studio/annotations"
 import { STARTERS } from "@/studio/starters"
+import { closeOpen, splitBlocks } from "@/studio/md-blocks"
 
 describe("parameter expressions", () => {
   it("evaluates arithmetic, functions in degrees and parameters", () => {
@@ -260,6 +261,20 @@ describe("trimMessages", () => {
     const out = trimMessages([{ id: "u", role: "user", parts: [{ type: "text", text: "hi" }] }, look("a"), look("b")])
     const imgs = out.map((m) => ((m.parts[0] as { output?: { images?: string[] } }).output?.images ?? null))
     expect(imgs).toEqual([null, null, ["data:image/png;base64,AA"]])
+  })
+})
+
+describe("streaming Markdown", () => {
+  it("splits at blank lines, but not inside a fence or before a list item's continuation", () => {
+    expect(splitBlocks("a\n\nb")).toEqual(["a", "b"])
+    expect(splitBlocks("```\nx\n\ny\n```\n\nz")).toEqual(["```\nx\n\ny\n```", "z"])
+    expect(splitBlocks("1. a\n\n   more\n\nnext")).toEqual(["1. a\n\n   more", "next"])
+  })
+  it("closes what a half-written block opened", () => {
+    expect(closeOpen("this is **bold")).toBe("this is **bold**")
+    expect(closeOpen("call `inspect")).toBe("call `inspect`")
+    expect(closeOpen("```json\n{")).toBe("```json\n{\n```")
+    expect(closeOpen("done **ok**")).toBe("done **ok**")
   })
 })
 

@@ -12,6 +12,8 @@ const STORE = "ft-studio-chat-v1"
 export const KEY_STORE = "ft-studio-deepseek-key"
 const MODE_STORE = "ft-studio-mode"
 export type ChatMode = "build" | "teach"
+/** How long `busy` holds after a request ends, in case the next step of the turn follows. */
+const BETWEEN_STEPS_MS = 400
 /** Tool calls allowed per user turn before the loop pauses. */
 export const MAX_CALLS_PER_TURN = 30
 
@@ -95,6 +97,8 @@ export function useStudioChat(studio: Studio) {
   const chat = useChat({
     messages: initial,
     transport,
+    // Re-render (and re-parse the Markdown) at most every 40 ms while text streams in.
+    throttle: 40,
     sendAutomaticallyWhen: ({ messages }) => {
       if (!lastAssistantMessageIsCompleteWithToolCalls({ messages })) return false
       if (callsInLastTurn(messages) >= MAX_CALLS_PER_TURN) {
@@ -147,7 +151,23 @@ export function useStudioChat(studio: Studio) {
     localStorage.removeItem(STORE)
   }, [chat])
 
-  return { ...chat, send, clear, paused, mode, setMode: setModeState, busy: chat.status === "submitted" || chat.status === "streaming" }
+  // Between the steps of one turn the status drops to "ready" for a moment before the next
+  // request starts; hold `busy` over that gap so the UI doesn't flicker between steps.
+  const requesting = chat.status === "submitted" || chat.status === "streaming"
+  const [wasRequesting, setWasRequesting] = React.useState(requesting)
+  const [linger, setLinger] = React.useState(0)
+  if (requesting !== wasRequesting) {
+    setWasRequesting(requesting)
+    if (!requesting) setLinger((n) => n + 1)
+  }
+  React.useEffect(() => {
+    if (!linger) return
+    const t = setTimeout(() => setLinger(0), BETWEEN_STEPS_MS)
+    return () => clearTimeout(t)
+  }, [linger])
+  const busy = requesting || (linger > 0 && chat.status === "ready" && !paused)
+
+  return { ...chat, send, clear, paused, mode, setMode: setModeState, busy }
 }
 
 export type StudioChat = ReturnType<typeof useStudioChat>

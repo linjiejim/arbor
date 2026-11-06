@@ -44,6 +44,9 @@ const TOOL_LABEL: Record<string, { label: string; op?: OpId; icon?: LucideIcon }
   look: { label: "看一眼", icon: Eye },
 }
 
+/** Tools that only look at the model. */
+const READ_TOOLS = new Set(["inspect", "look"])
+
 export function ChatPanel({
   chat,
   annotations,
@@ -62,17 +65,31 @@ export function ChatPanel({
   const [fileError, setFileError] = React.useState<string | null>(null)
   const picker = React.useRef<HTMLInputElement>(null)
   const scroller = React.useRef<HTMLDivElement>(null)
+  const content = React.useRef<HTMLDivElement>(null)
+  /** Follow new output only while the learner is at the bottom; scrolling up to read stops it. */
+  const stick = React.useRef(true)
   const err = errorText(chat.error)
 
   React.useEffect(() => {
     const el = scroller.current
-    if (el) el.scrollTop = el.scrollHeight
-  }, [chat.messages, chat.status])
+    const inner = content.current
+    if (!el || !inner) return
+    const follow = () => {
+      // The intro reads from the top; only a conversation follows its end.
+      if (stick.current && !inner.dataset.empty) el.scrollTop = el.scrollHeight
+    }
+    // Any growth counts: streamed text, a tool card filling in, a `look` image loading.
+    const ro = new ResizeObserver(follow)
+    ro.observe(inner)
+    follow()
+    return () => ro.disconnect()
+  }, [])
 
   const notes = annotations.pending
   const canSend = (text.trim() || files.length || notes.length) && !chat.busy && ready
   const submit = () => {
     if (!canSend) return
+    stick.current = true
     chat.send(text, files.length ? files : undefined, notes, notes.length ? annotations.snapshot() : null)
     annotations.markSent()
     setText("")
@@ -98,37 +115,50 @@ export function ChatPanel({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {chat.messages.length === 0 ? (
-          <Intro onPick={(t) => ready && chat.send(t)} onLoad={onLoad} disabled={!ready} />
-        ) : (
-          <div className="space-y-4">
-            {chat.messages.map((m, i) => (
-              <Message key={m.id} m={m} notes={notesFor[i]} onShow={annotations.show} onSelectFeature={onSelectFeature} />
-            ))}
-            {chat.status === "submitted" && (
-              <div className="flex items-center gap-2 text-small text-muted-foreground">
-                <Spinner className="size-3.5" /> 思考中…
-              </div>
-            )}
-            {chat.paused && (
-              <div className="rounded-md border p-3 text-small text-muted-foreground">
-                这一轮已经调用了 {MAX_CALLS_PER_TURN} 次工具，先停一下。看看模型，需要的话说「继续」。
-              </div>
-            )}
-            {err && (
-              <div role="alert" className="rounded-md border border-destructive/40 p-3 text-small">
-                <div className="flex items-start gap-2 text-destructive">
-                  <TriangleAlert className="mt-0.5 size-4 shrink-0" />
-                  <span>{err}</span>
+      <div
+        ref={scroller}
+        className="min-h-0 flex-1 overflow-y-auto [overflow-anchor:none]"
+        onScroll={(e) => {
+          const el = e.currentTarget
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+        }}
+      >
+        <div ref={content} data-empty={chat.messages.length === 0 || undefined} className="px-4 pt-4 pb-2">
+          {chat.messages.length === 0 ? (
+            <Intro
+              onPick={(t) => {
+                if (!ready) return
+                stick.current = true
+                chat.send(t)
+              }}
+              onLoad={onLoad}
+              disabled={!ready}
+            />
+          ) : (
+            <div className="space-y-4">
+              {chat.messages.map((m, i) => (
+                <Message key={m.id} m={m} notes={notesFor[i]} streaming={chat.busy && i === chat.messages.length - 1} onShow={annotations.show} onSelectFeature={onSelectFeature} />
+              ))}
+              {chat.paused && (
+                <div className="rounded-md border p-3 text-small text-muted-foreground">
+                  这一轮已经调用了 {MAX_CALLS_PER_TURN} 次工具，先停一下。看看模型，需要的话说「继续」。
                 </div>
-                <Button size="sm" variant="secondary" className="mt-2" onClick={() => void chat.regenerate()}>
-                  重试
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+              {err && (
+                <div role="alert" className="rounded-md border border-destructive/40 p-3 text-small">
+                  <div className="flex items-start gap-2 text-destructive">
+                    <TriangleAlert className="mt-0.5 size-4 shrink-0" />
+                    <span>{err}</span>
+                  </div>
+                  <Button size="sm" variant="secondary" className="mt-2" onClick={() => void chat.regenerate()}>
+                    重试
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        {chat.busy && <TurnStatus chat={chat} />}
       </div>
       <div className="shrink-0 border-t p-3">
         {notes.length > 0 && (
@@ -245,11 +275,14 @@ function Intro({ onPick, onLoad, disabled }: { onPick: (t: string) => void; onLo
 function Message({
   m,
   notes,
+  streaming,
   onShow,
   onSelectFeature,
 }: {
   m: UIMessage
   notes: Annotation[] | null
+  /** The reply still coming in: its unfinished Markdown is patched up while it streams. */
+  streaming: boolean
   onShow: (a: Annotation) => void
   onSelectFeature: (id: string) => void
 }) {
@@ -292,7 +325,7 @@ function Message({
     <div className="space-y-2">
       {thoughts.length > 0 && <Reasoning parts={thoughts} />}
       {m.parts.map((p, i) => {
-        if (p.type === "text") return p.text.trim() ? <Markdown key={i} text={p.text} onPin={onPin} /> : null
+        if (p.type === "text") return p.text.trim() ? <Markdown key={i} text={p.text} onPin={onPin} streaming={streaming && p.state === "streaming"} /> : null
         if (p.type.startsWith("tool-")) return <ToolCard key={i} part={p as ToolPart} onSelectFeature={onSelectFeature} />
         return null
       })}
@@ -326,6 +359,43 @@ function NoteChip({ a, onClick, onRemove }: { a: Annotation | Note; onClick: () 
       )}
     </span>
   )
+}
+
+/** What the turn is doing right now, pinned to the bottom of the conversation while it runs. */
+function TurnStatus({ chat }: { chat: StudioChat }) {
+  const [start] = React.useState(() => Date.now())
+  const [now, setNow] = React.useState(start)
+  React.useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const seconds = Math.round((now - start) / 1000)
+  return (
+    <div role="status" className="sticky bottom-0 flex items-center gap-2 bg-background/95 px-4 py-2 text-small text-muted-foreground">
+      <Spinner className="size-3.5" />
+      <span className="truncate">{activity(chat)}…</span>
+      {seconds >= 3 && <span className="ml-auto shrink-0 text-caption text-faint-foreground tabular">{seconds} 秒</span>}
+    </div>
+  )
+}
+
+function activity(chat: StudioChat): string {
+  const last = chat.messages.at(-1)
+  if (chat.status === "submitted" || last?.role !== "assistant") return "思考中"
+  const p = last.parts.at(-1)
+  if (p?.type === "text" && p.state === "streaming") return "正在回复"
+  if (p?.type.startsWith("tool-")) {
+    const t = p as ToolPart
+    if (t.state === "input-streaming" || t.state === "input-available") {
+      const name = t.type.slice(5)
+      if (name === "look") return "正在看模型"
+      if (name === "inspect") return "正在查看模型"
+      const label = TOOL_LABEL[name]?.label ?? name
+      const target = (t.input?.name as string | undefined) ?? (t.input?.id as string | undefined)
+      return `正在${t.state === "input-streaming" ? "写" : "做"}「${label}${target && target !== label ? ` · ${target}` : ""}」`
+    }
+  }
+  return "思考中"
 }
 
 function Reasoning({ parts }: { parts: string[] }) {
@@ -366,9 +436,11 @@ function ToolCard({ part, onSelectFeature }: { part: ToolPart; onSelectFeature: 
   const firstLine = text?.split("\n")[0]
   const clickable = featureId && name !== "delete_feature"
   const Icon = meta.icon
+  // Steps that change the model get a fill, so they stand out from the prose and from `inspect` / `look`.
+  const changes = !READ_TOOLS.has(name)
 
   return (
-    <div className={cn("rounded-md border text-small", failed && "border-destructive/40")}>
+    <div className={cn("rounded-md border text-small", failed ? "border-destructive/40 bg-destructive-subtle" : changes && "border-primary/15 bg-selected")}>
       <button
         type="button"
         className="flex w-full items-center gap-2 px-3 py-2 text-left"

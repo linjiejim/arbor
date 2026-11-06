@@ -3,6 +3,7 @@ import { Link } from "react-router"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { CIRCLED_RE, circledNumber } from "../annotations"
+import { closeOpen, splitBlocks } from "../md-blocks"
 
 /** Paths on this site the assistant may cite; they open in a new tab so the model stays put. */
 const SITE_PATH = /^\/(?:lesson|teardown|card|atlas|glossary)\/[A-Za-z0-9._-]+$/
@@ -87,10 +88,15 @@ function remarkPins() {
 /**
  * The assistant's replies: Markdown (GFM) with the site's type and colours.
  * Raw HTML is not rendered. Bare lesson paths become links too; with `onPin`,
- * ①②… are buttons that show that annotation on the model.
+ * ①②… are buttons that show that annotation on the model. While `streaming`,
+ * finished blocks stay put and only the last one re-renders.
  */
-export function Markdown({ text, onPin }: { text: string; onPin?: (n: number) => void }) {
-  const source = React.useMemo(() => text.replace(BARE_SITE_PATH, "$1[$2]($2)"), [text])
+export function Markdown({ text, onPin, streaming = false }: { text: string; onPin?: (n: number) => void; streaming?: boolean }) {
+  const blocks = React.useMemo(() => {
+    const list = splitBlocks(text.replace(BARE_SITE_PATH, "$1[$2]($2)"))
+    if (streaming && list.length) list[list.length - 1] = closeOpen(list[list.length - 1])
+    return list
+  }, [text, streaming])
   const components = React.useMemo<Components>(
     () =>
       onPin
@@ -114,11 +120,22 @@ export function Markdown({ text, onPin }: { text: string; onPin?: (n: number) =>
         : base,
     [onPin],
   )
+  const plugins = React.useMemo(() => (onPin ? [remarkGfm, remarkPins] : [remarkGfm]), [onPin])
   return (
     <div className="text-reading break-words">
-      <ReactMarkdown remarkPlugins={onPin ? [remarkGfm, remarkPins] : [remarkGfm]} components={components}>
-        {source}
-      </ReactMarkdown>
+      {blocks.map((b, i) => (
+        <Block key={i} source={b} plugins={plugins} components={components} />
+      ))}
     </div>
   )
 }
+
+type Plugins = NonNullable<React.ComponentProps<typeof ReactMarkdown>["remarkPlugins"]>
+
+const Block = React.memo(function Block({ source, plugins, components }: { source: string; plugins: Plugins; components: Components }) {
+  return (
+    <ReactMarkdown remarkPlugins={plugins} components={components}>
+      {source}
+    </ReactMarkdown>
+  )
+})
