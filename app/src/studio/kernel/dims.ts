@@ -177,12 +177,18 @@ function featureDims(f: Feature, g: StepGeom, ctx: Ctx, pitched: Set<string>): D
   }
 
   if (f.op === "extrude" && g.op === "extrude") {
-    if (f.through) return out
     const { x, y } = g.plane
     const [lo, hi] = g.box
     const a = add(g.start, add(mul(x, hi[0]), mul(y, lo[1])))
-    const d = n(f.distance)
-    push(["distance"], "linear", f.distance, line(a, add(a, mul(g.dir, d)), mul(unit(sub(x, y)), off)))
+    if (f.distance !== undefined) push(["distance"], "linear", f.distance, line(a, add(a, mul(g.dir, n(f.distance))), mul(unit(sub(x, y)), off)))
+    const corner = add(g.start, add(mul(x, lo[0]), mul(y, hi[1])))
+    if (f.thin) push(["thin", "t"], "callout", f.thin.t, leader(corner, sub(y, x)), { words: "壁厚 " })
+    if (f.draft !== undefined) push(["draft"], "angle", f.draft, leader(add(corner, mul(g.dir, 0.5 * off)), sub(y, x)), { words: "拔模 " })
+    return out
+  }
+
+  if (f.op === "rib" && g.op === "faces") {
+    push(["t"], "callout", f.t, leader(g.at, g.out), { words: "筋厚 " })
     return out
   }
 

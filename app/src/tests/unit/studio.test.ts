@@ -690,7 +690,7 @@ describe("requirement checks", () => {
       ],
     })
     expect(r.checks![0]).toMatchObject({ pass: true, actual: "2.5 mm" })
-    expect(r.checks![1].pass).toBe(false)
+    expect(r.checks![1]).toMatchObject({ pass: false, invalid: true })
     expect(r.checks![1].actual).toMatch(/没有|没找到/)
   })
 
@@ -704,5 +704,112 @@ describe("requirement checks", () => {
     expect(taller.checks![0].pass).toBe(true)
     run = await executeTool(port, run.tree, "check", { remove: ["size"] })
     expect(run.tree.checks).toBeUndefined()
+  })
+})
+
+describe("more features: up to, thin, taper, rib", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+  const gate = (H: number, col: Record<string, unknown>): Tree =>
+    ({
+      params: { H },
+      features: [
+        { id: "b", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 80, h: 60 }] },
+        { id: "base", op: "extrude", sketch: "b", distance: 8 },
+        { id: "w", op: "sketch", on: { plane: "XY", offset: 8 }, shapes: [{ type: "rect", w: 8, h: 60, center: [-36, 0] }, { type: "rect", w: 8, h: 60, center: [36, 0] }] },
+        { id: "walls", op: "extrude", sketch: "w", distance: "H" },
+        { id: "tp", op: "sketch", on: { plane: "XY", offset: "8+H" }, shapes: [{ type: "rect", w: 80, h: 60 }] },
+        { id: "top", op: "extrude", sketch: "tp", distance: 6 },
+        { id: "c", op: "sketch", on: { plane: "XY", offset: 8 }, shapes: [{ type: "circle", d: 16 }] },
+        { id: "col", op: "extrude", sketch: "c", ...col },
+      ],
+    }) as unknown as Tree
+  const frame = (H: number) => 80 * 60 * 8 + 2 * 8 * 60 * H + 80 * 60 * 6
+  const column = (H: number) => Math.PI * 64 * H
+
+  it("grows a column up to the next face, and it follows the frame", () => {
+    for (const H of [40, 60]) {
+      const r = k.rebuild(gate(H, { until: "next" }))
+      expect(r.features.at(-1)!.summary).toContain(`实际 ${H} mm`)
+      expect(r.body!.volume).toBeCloseTo(frame(H) + column(H), 0)
+      expect(r.body!.solids).toBe(1)
+    }
+    const face = k.rebuild(gate(40, { until: { face: { normal: "-Z", extreme: "+Z" } } }))
+    expect(face.body!.volume).toBeCloseTo(frame(40) + column(40), 0)
+    expect(k.rebuild(gate(40, { until: "next", distance: 10 })).features.at(-1)!.message).toMatch(/正好写一个/)
+  })
+
+  it("makes thin walls from a closed outline and from an open path", () => {
+    const ring = k.rebuild({ params: {}, features: [
+      { id: "p", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 20, h: 10 }] },
+      { id: "e", op: "extrude", sketch: "p", distance: 5, thin: { t: 2 } },
+    ] } as unknown as Tree)
+    // Grown outwards, the corners round over (radius 1): (22×12 − (4 − π) − 18×8) × 5.
+    expect(ring.body!.volume).toBeCloseTo((22 * 12 - (4 - Math.PI) - 18 * 8) * 5, 1)
+    const angle = k.rebuild({ params: {}, features: [
+      { id: "p", op: "sketch", on: { plane: "XZ" }, shapes: [{ type: "path", points: [[40, 0], [0, 0], [0, 30]] }] },
+      { id: "e", op: "extrude", sketch: "p", distance: 50, thin: { t: 3, side: "inside" } },
+    ] } as unknown as Tree)
+    expect(angle.body!.volume).toBeCloseTo((40 + 30 - 3) * 3 * 50, 3)
+    expect(angle.body!.size).toEqual([40, 50, 30])
+    const plain = k.rebuild({ params: {}, features: [
+      { id: "p", op: "sketch", on: { plane: "XZ" }, shapes: [{ type: "path", points: [[40, 0], [0, 0]] }] },
+      { id: "e", op: "extrude", sketch: "p", distance: 50 },
+    ] } as unknown as Tree)
+    expect(plain.features[1].message).toMatch(/开放的线只能做薄壁/)
+  })
+
+  it("tapers an extrusion: a frustum for squares and circles", () => {
+    const t = Math.tan((5 * Math.PI) / 180)
+    const frustum = (a1: number, a2: number) => (10 / 3) * (a1 + a2 + Math.sqrt(a1 * a2))
+    const box = k.rebuild({ params: {}, features: [
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 20, h: 20 }] },
+      { id: "e", op: "extrude", sketch: "s", distance: 10, draft: 5 },
+    ] } as unknown as Tree)
+    expect(box.body!.volume).toBeCloseTo(frustum(400, (20 - 20 * t) ** 2), 0)
+    const disc = k.rebuild({ params: {}, features: [
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "circle", d: 20 }] },
+      { id: "e", op: "extrude", sketch: "s", distance: 10, draft: 5 },
+    ] } as unknown as Tree)
+    expect(disc.body!.volume).toBeCloseTo(frustum(Math.PI * 100, Math.PI * (10 - 10 * t) ** 2), 0)
+  })
+
+  it("grows a rib from a line to the walls, on the enclosed side", () => {
+    const bracket = (rib: Record<string, unknown>[]) =>
+      ({ params: {}, features: [
+        { id: "b", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 60, h: 30 }] },
+        { id: "base", op: "extrude", sketch: "b", distance: 6 },
+        { id: "w", op: "sketch", on: { plane: "XY", offset: 6 }, shapes: [{ type: "rect", w: 6, h: 30, center: [-27, 0] }] },
+        { id: "wall", op: "extrude", sketch: "w", distance: 44 },
+        ...rib,
+      ] }) as unknown as Tree
+    const without = k.rebuild(bracket([])).body!.volume
+    const r = k.rebuild(bracket([
+      { id: "rp", op: "sketch", on: { plane: "XZ" }, shapes: [{ type: "path", points: [[-24, 40], [10, 6]] }] },
+      { id: "rib", op: "rib", sketch: "rp", t: 4 },
+    ]))
+    expect(r.body!.volume - without).toBeCloseTo((34 * 34) / 2 * 4, 1)
+    expect(r.body!.solids).toBe(1)
+    // A line out in the open: nothing encloses either side.
+    const lost = k.rebuild(bracket([
+      { id: "rp", op: "sketch", on: { plane: "XZ" }, shapes: [{ type: "path", points: [[100, 100], [120, 120]] }] },
+      { id: "rib", op: "rib", sketch: "rp", t: 4 },
+    ]))
+    expect(lost.features.at(-1)!.message).toMatch(/筋碰不到实体/)
+  })
+
+  it("exports them to build123d", () => {
+    const code = toBuild123d({ params: {}, features: [
+      { id: "p", op: "sketch", on: { plane: "XZ" }, shapes: [{ type: "path", points: [[40, 0], [0, 0], [0, 30]] }] },
+      { id: "e", op: "extrude", sketch: "p", distance: 50, thin: { t: 3 } },
+      { id: "c", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "circle", d: 10 }] },
+      { id: "u", op: "extrude", sketch: "c", until: "next" },
+      { id: "d", op: "extrude", sketch: "c", distance: 5, draft: 3 },
+      { id: "r", op: "rib", sketch: "p", t: 4 },
+    ] } as unknown as Tree)
+    for (const s of ["trace(path_p, line_width=3)", "until=Until.NEXT", "taper=3", "def rib(", "tool_r = rib(part, plane_p, pts_p, 4)"]) expect(code).toContain(s)
   })
 })
