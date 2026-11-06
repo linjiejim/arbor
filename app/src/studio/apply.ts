@@ -43,6 +43,29 @@ export function replaceFeature(tree: Tree, f: unknown): Tree {
   return { ...tree, features }
 }
 
+/** One field of one feature set to `value` (a dimension edited on the model). */
+export function setFieldAt(tree: Tree, id: string, path: (string | number)[], value: number | string): Tree {
+  const f = tree.features.find((x) => x.id === id)
+  if (!f) throw new InputError(`找不到特征「${id}」`)
+  const copy = structuredClone(f) as Record<string | number, unknown>
+  let at: Record<string | number, unknown> = copy
+  for (const k of path.slice(0, -1)) {
+    const next = at[k]
+    if (!next || typeof next !== "object") throw new InputError(`「${displayName(tree, f)}」没有这个字段：${path.join(".")}`)
+    at = next as Record<string | number, unknown>
+  }
+  at[path[path.length - 1]] = value
+  return replaceFeature(tree, copy)
+}
+
+/** A plain number in a feature made a named parameter: same model, now on the parameters panel. */
+export function promoteToParam(tree: Tree, id: string, path: (string | number)[], name: string, note: string, value: number): Tree {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new InputError("参数名只能用字母、数字和下划线，不能以数字开头")
+  if (name in tree.params) throw new InputError(`已经有参数「${name}」了`)
+  const withParam: Tree = { ...tree, params: { ...tree.params, [name]: value }, paramNotes: { ...tree.paramNotes, [name]: note } }
+  return setFieldAt(withParam, id, path, name)
+}
+
 /** Move a feature one step up or down, never above something it uses or below something that uses it. */
 export function moveFeature(tree: Tree, id: string, by: -1 | 1): Tree {
   const i = tree.features.findIndex((x) => x.id === id)

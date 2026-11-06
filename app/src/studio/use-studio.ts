@@ -4,6 +4,7 @@ import { takeKernel } from "./boot"
 import type { KernelClient } from "./client"
 import { EMPTY_TREE, Tree } from "./dsl"
 import type { BuildReport, DisplayData } from "./kernel/build"
+import type { Dim } from "./kernel/dims"
 import type { MeasureTarget } from "./kernel/measure"
 import { renderViews, type Pin } from "./look"
 import { STARTERS } from "./starters"
@@ -36,6 +37,8 @@ export function useStudio() {
   const [history, setHistory] = React.useState<Tree[]>(saved.history)
   const [report, setReport] = React.useState<BuildReport | null>(null)
   const [display, setDisplay] = React.useState<DisplayData | null>(null)
+  /** Dimensions of every feature that built, for the model and the feature card. */
+  const [dims, setDims] = React.useState<Dim[]>([])
   const [kernel, setKernel] = React.useState<KernelState>({ phase: "loading", loadedMB: 0 })
   /** Feature the viewport rolls back to; null = latest. */
   const [rollback, setRollback] = React.useState<string | null>(null)
@@ -72,6 +75,7 @@ export function useStudio() {
       const at = rollbackRef.current && t.features.some((f) => f.id === rollbackRef.current) ? rollbackRef.current : null
       if (at !== rollbackRef.current) setRollback(null)
       await showStep(t, at)
+      setDims(await c.dimensions())
       return r
     },
     [showStep],
@@ -234,6 +238,7 @@ export function useStudio() {
     report,
     summary,
     display,
+    dims,
     kernel,
     rollback,
     canUndo: history.length > 0,

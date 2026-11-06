@@ -11,7 +11,15 @@ import type { DisplayData } from "./kernel/build"
 export type Paint = { status: boolean; highlight?: string | string[]; faces?: number[] }
 
 /** Features lit up from outside the viewport (a tree row, a parameter), and what the legend calls them. */
-export type Hover = { ids: string[]; label: string }
+export type Hover = {
+  ids: string[]
+  label: string
+  /** Pointing at a parameter: its dimensions on the model, joined to `row` by a line. */
+  param?: string
+  row?: HTMLElement
+  /** Pointing at a feature row: that step's dimensions. */
+  feature?: string
+}
 
 /**
  * The live model as three.js objects: one mesh with a group per B-rep face

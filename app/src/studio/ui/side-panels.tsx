@@ -18,7 +18,7 @@ export function ParamsPanel({ studio, onHover }: { studio: Studio; onHover: (h: 
   if (!entries.length) return <p className="px-4 py-4 text-body text-muted-foreground">还没有参数。助教会把关键尺寸定成参数，之后可以在这里直接改。</p>
   return (
     <div className="space-y-1 px-2 py-3" onMouseLeave={() => onHover(null)}>
-      <p className="px-2 pb-1 text-small text-muted-foreground">改完按 Enter，整棵特征树按新参数重算。指向一个参数，模型上会标出它影响的特征。</p>
+      <p className="px-2 pb-1 text-small text-muted-foreground">改完按 Enter，整棵特征树按新参数重算。指向一个参数，模型上会标出它的尺寸。</p>
       {studio.report?.paramError && <p className="px-2 text-small text-destructive">{studio.report.paramError}</p>}
       {entries.map(([k, v]) => {
         const uses = paramUses(tree, k)
@@ -33,7 +33,7 @@ export function ParamsPanel({ studio, onHover }: { studio: Studio; onHover: (h: 
             uses={[...uses.map((u) => describeUse(tree, u)), ...deps.map((d) => `参数 ${d}`)]}
             computed={studio.report?.params[k]}
             onCommit={(x) => studio.setParam(k, x)}
-            onPoint={() => onHover(driven.length ? { ids: driven, label: `受 ${k} 影响的特征` } : null)}
+            onPoint={(row) => onHover({ ids: driven, label: `受 ${k} 影响的特征`, param: k, row })}
           />
         )
       })}
@@ -71,7 +71,7 @@ function ParamRow({
   uses: string[]
   computed?: number
   onCommit: (v: number | string) => Promise<string | null>
-  onPoint: () => void
+  onPoint: (row: HTMLElement) => void
 }) {
   const [draft, setDraft] = React.useState(String(value))
   const [error, setError] = React.useState<string | null>(null)
@@ -87,7 +87,7 @@ function ParamRow({
   }
   const isExpr = typeof value === "string"
   return (
-    <div className="rounded-md px-2 py-2 transition-colors duration-(--duration-fast) hover:bg-accent focus-within:bg-accent" onMouseEnter={onPoint} onFocus={onPoint}>
+    <div className="rounded-md px-2 py-2 transition-colors duration-(--duration-fast) hover:bg-accent focus-within:bg-accent" onMouseEnter={(e) => onPoint(e.currentTarget)} onFocus={(e) => onPoint(e.currentTarget)}>
       <label className="block">
         <span className="flex items-baseline gap-2">
           <span className="font-mono text-small font-medium">{name}</span>

@@ -3,6 +3,7 @@ import type { KernelPort } from "./apply"
 import type { Tree } from "./dsl"
 import type { PickInfo } from "./annotations"
 import type { BuildReport, DisplayData } from "./kernel/build"
+import type { Dim } from "./kernel/dims"
 import type { WorkerMessage, WorkerRequest } from "./worker"
 
 // Distributive Omit, so each request variant keeps its own fields.
@@ -74,6 +75,10 @@ export class KernelClient implements KernelPort {
 
   measure(targets: MeasureTarget[]): Promise<MeasureResult | null> {
     return this.call("measure", { type: "measure", targets })
+  }
+
+  dimensions(): Promise<Dim[]> {
+    return this.call("dimensions", { type: "dimensions" })
   }
 
   exportBody(format: "step" | "stl", index?: number): Promise<Blob | null> {

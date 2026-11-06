@@ -1,4 +1,4 @@
-import { ArrowLeftRight, RulerDimensionLine, ScissorsLineDashed, X } from "lucide-react"
+import { ArrowLeftRight, Ruler, RulerDimensionLine, ScissorsLineDashed, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { IconButton } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
@@ -15,12 +15,17 @@ export function ViewTools({
   section,
   onSection,
   bbox,
+  dims,
+  onDims,
 }: {
   measuring: boolean
   onMeasuring: (on: boolean) => void
   section: Section | null
   onSection: (s: Section | null) => void
   bbox: [V3, V3] | null
+  /** 「显示尺寸」: on or off, and how many of how many it shows. */
+  dims: { on: boolean; shown: number; total: number }
+  onDims: (on: boolean) => void
 }) {
   return (
     <>
@@ -33,6 +38,11 @@ export function ViewTools({
         <Tooltip content="剖视：切开看里面" side="left">
           <IconButton label="剖视" size="icon-sm" aria-pressed={!!section} className={cn(section && "bg-selected text-primary")} disabled={!bbox} onClick={() => onSection(section ? null : newSection(bbox))}>
             <ScissorsLineDashed />
+          </IconButton>
+        </Tooltip>
+        <Tooltip content={dims.total > dims.shown ? `显示尺寸：标出主要的 ${dims.shown} / ${dims.total} 个，单击可以改` : "显示尺寸：标出模型的尺寸，单击可以改"} side="left">
+          <IconButton label="显示尺寸" size="icon-sm" aria-pressed={dims.on} className={cn(dims.on && "bg-selected text-primary")} disabled={!dims.total} onClick={() => onDims(!dims.on)}>
+            <Ruler />
           </IconButton>
         </Tooltip>
       </div>
