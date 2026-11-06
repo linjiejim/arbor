@@ -46,16 +46,22 @@ export function DesktopApp() {
   )
 
   // The agent points something out: a feature lights up like a hover in the tree; faces or edges like a note.
+  // Its highlight goes when it's cleared or replaced (only the one it set: the person's own stays).
   const { setFocus } = notes
+  const shownByAgent = React.useRef(false)
   React.useEffect(() => {
-    if (!show || show.path !== path) return
-    if (show.hashes?.length && show.kind) setFocus({ kind: show.kind, hashes: show.hashes })
+    if (show && show.path === path && show.hashes?.length && show.kind) {
+      setFocus({ kind: show.kind, hashes: show.hashes })
+      shownByAgent.current = true
+    } else if (shownByAgent.current) {
+      setFocus(null)
+      shownByAgent.current = false
+    }
   }, [show, path, setFocus])
   const agentHover: Hover | null = show?.feature && show.path === path ? { ids: [show.feature], label: show.label ?? "Agent 指的特征" } : null
-  const clearShow = () => {
-    setShow(null)
-    setFocus(null)
-  }
+  const clearShow = () => setShow(null)
+  // A pick request is answered only on the part it asks about.
+  const pickHere = pick && pick.path === path ? pick : null
 
   return (
     <div className="flex h-dvh flex-col bg-background">
@@ -70,11 +76,11 @@ export function DesktopApp() {
                 hover={treeHover ?? agentHover}
                 annotations={notes}
                 busy={false}
-                copy={{ hint: pick ? null : "单击模型上的面或边，给 agent 留一条备注", add: pick ? "就是这里" : "记下备注", next: notes.nextPin }}
+                copy={{ hint: pick ? null : "单击模型上的面或边，给 agent 留一条备注", add: pickHere ? "就是这里" : "记下备注", next: notes.nextPin }}
               />
               <TreeOverlay studio={studio} onHover={setTreeHover} />
               <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex flex-col items-center gap-2 px-56">
-                {pick && <PickBanner request={pick} />}
+                {pick && <PickBanner request={pick} elsewhere={pick.path !== path} />}
                 {show && show.path === path && !pick && <ShowBanner request={show} onClose={clearShow} />}
                 {doc.error && (
                   <Banner tone="danger" icon={<CircleAlert />}>
@@ -134,19 +140,27 @@ function Banner({ tone, icon, children, action }: { tone: "info" | "warning" | "
 }
 
 /** The agent is waiting for a click: say what it asked, and let the person decline. */
-function PickBanner({ request }: { request: PickRequest }) {
+function PickBanner({ request, elsewhere }: { request: PickRequest; elsewhere: boolean }) {
   const what = request.kind === "face" ? "一个面" : request.kind === "edge" ? "一条边" : "一个面或一条边"
+  const part = request.path.split(/[\\/]/).pop()
   return (
     <Banner
       tone="warning"
       icon={<MousePointerClick />}
       action={
-        <Button size="sm" variant="ghost" onClick={() => void arbor.answerPick(request.id, null)}>
-          不点了
-        </Button>
+        <>
+          {elsewhere && (
+            <Button size="sm" variant="secondary" onClick={() => void arbor.call("open_part", { path: request.path })}>
+              切到 {part}
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={() => void arbor.answerPick(request.id, null)}>
+            不点了
+          </Button>
+        </>
       }
     >
-      <span className="font-medium">Agent 请你点{what}：</span>
+      <span className="font-medium">Agent 请你{elsewhere ? `在 ${part} 上` : ""}点{what}：</span>
       {request.prompt}
     </Banner>
   )

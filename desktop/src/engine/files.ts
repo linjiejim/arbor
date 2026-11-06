@@ -1,7 +1,7 @@
 // Parts and notes on disk: atomic writes (an editor never sees half a file),
 // and a watcher on the part's folder, since editors and git replace files
 // rather than writing into them.
-import { watch, type FSWatcher } from "node:fs"
+import { realpathSync, watch, type FSWatcher } from "node:fs"
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import path from "node:path"
 import type { Files } from "../../../app/src/desktop/core/engine"
@@ -39,6 +39,21 @@ export const nodeFiles: Files = {
     return () => {
       if (timer) clearTimeout(timer)
       w?.close()
+    }
+  },
+  canonical(p) {
+    // Symlinks resolved in the deepest folder that exists (the file itself may not exist yet).
+    let dir = path.dirname(p)
+    const rest = [path.basename(p)]
+    for (;;) {
+      try {
+        return path.join(realpathSync(dir), ...rest)
+      } catch {
+        const up = path.dirname(dir)
+        if (up === dir) return p
+        rest.unshift(path.basename(dir))
+        dir = up
+      }
     }
   },
 }

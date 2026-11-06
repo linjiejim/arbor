@@ -3,6 +3,7 @@
 // window, an engine of their own in this process.
 import { spawn } from "node:child_process"
 import { randomBytes } from "node:crypto"
+import { normalizePartPath } from "../../../app/src/desktop/core/engine"
 import type { CallContext, CommandResult } from "../../../app/src/desktop/core/protocol"
 import { readAppInfo, readEngineInfo, type EngineInfo } from "./home"
 import { startEngine } from "./host"
@@ -144,18 +145,27 @@ export class Link {
   }
 
   async call(command: string, input: unknown, ctx: Omit<Ctx, "session">): Promise<CommandResult> {
-    const full = { ...ctx, session: this.session }
+    // Every command names this agent's part: a backend we move to (headless → app, a restarted app)
+    // doesn't know the session, and must not fall back to whatever the window shows.
+    const full = { ...ctx, part: ctx.part ?? this.part, session: this.session }
     const b = await this.get()
+    let res: CommandResult
     try {
-      return await b.call(command, input, full)
+      res = await b.call(command, input, full)
     } catch (e) {
       // The app quit (or restarted): the request never arrived, so it's safe to send it again.
       const code = (e as { cause?: { code?: string } }).cause?.code
       if (b.kind !== "app" || code !== "ECONNREFUSED") throw e
       this.backend = null
-      return (await this.get()).call(command, input, full)
+      res = await (await this.get()).call(command, input, full)
     }
+    const path = (input as { path?: unknown } | null)?.path
+    if (command === "open_part" && res.ok && typeof path === "string") this.part = normalizePartPath(path, ctx.cwd)
+    return res
   }
+
+  /** The part this agent opened last (absolute). */
+  private part: string | undefined
 
   async close() {
     if (this.backend) await (await this.backend.catch(() => null))?.close()

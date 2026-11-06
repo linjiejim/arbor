@@ -56,6 +56,8 @@ describe("arbor: paths and catalog", () => {
   it("normalizes part paths and derives names", () => {
     expect(normalizePartPath("parts/box", "/work")).toBe("/work/parts/box.arbor.json")
     expect(normalizePartPath("/abs/x.json")).toBe("/abs/x.json")
+    expect(normalizePartPath("./parts/../box", "/work/")).toBe("/work/box.arbor.json")
+    expect(normalizePartPath("/work//a/./b/../c.json")).toBe("/work/a/c.json")
     expect(partName("/a/b/lid.arbor.json")).toBe("lid")
     expect(notesPath("/a/lid.arbor.json")).toBe("/a/lid.notes.json")
   })
@@ -127,6 +129,50 @@ describe("arbor: the engine", () => {
     const s = engine.docState(PART)!
     expect(s.error).toMatch(/JSON/)
     expect(s.tree.params.L).toBe(100)
+  }, 30_000)
+
+  it("catches up with a save the watcher hasn't reported yet before running a command", async () => {
+    const { run, disk } = await boxEngine()
+    // Saved a moment ago, before the (debounced) watcher fired: the next command builds on it.
+    const tree = JSON.parse(disk.get(PART) as string)
+    tree.params.W = 60
+    disk.set(PART, JSON.stringify(tree))
+    const r = await run("set_params", { set: { H: 40 } })
+    expect(r.text).toMatch(/文件被直接修改：参数 W 50 → 60/)
+    expect(JSON.parse(disk.get(PART) as string).params).toMatchObject({ W: 60, H: 40 })
+  }, 30_000)
+
+  it("yields to a save made while a command runs: the file wins, the command's change is one undo away", async () => {
+    const mem = memFiles()
+    const direct = new DirectKernel()
+    let during: (() => void) | null = null
+    // The editor's save lands while the kernel rebuilds: after the command read the file, before it writes.
+    const kernel = Object.assign(Object.create(direct) as DirectKernel, {
+      rebuild: async (t: Parameters<DirectKernel["rebuild"]>[0]) => {
+        during?.()
+        during = null
+        return direct.rebuild(t)
+      },
+    })
+    const engine = new Engine({ kernel, files: mem.files })
+    const run = (name: string, input: unknown) => engine.run(name, input, AGENT)
+    await run("open_part", { path: "box", create: true })
+    await run("set_params", { set: { L: 80, t: 2 } })
+    const theirs = { params: { L: 120, t: 2 }, features: [] }
+    during = () => mem.disk.set(PART, JSON.stringify(theirs))
+    const c = await run("set_params", { set: { t: 3 } })
+    expect(c.ok).toBe(false)
+    expect(c.text).toMatch(/文件被别人保存过/)
+    expect(JSON.parse(mem.disk.get(PART) as string)).toEqual(theirs)
+    expect(engine.docState(PART)!.tree.params).toEqual(theirs.params)
+    await run("undo", {})
+    expect(engine.docState(PART)!.tree.params).toEqual({ L: 80, t: 3 })
+  }, 30_000)
+
+  it("treats one file reached by different paths as one part", async () => {
+    const { engine, run } = await boxEngine()
+    await run("open_part", { path: "parts/../box.arbor.json" })
+    expect(engine.snapshot().parts).toHaveLength(1)
   }, 30_000)
 
   it("undoes and redoes whoever made the change, and refuses a stale whole-tree write", async () => {

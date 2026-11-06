@@ -179,11 +179,19 @@ export const asNote = (n: PartNote): Note => ({
  * to the part at once (no message to send). While the agent waits for a pick,
  * the same click answers it instead.
  */
-export function useDesktopNotes(studio: Studio, doc: DocState | null, request: PickRequest | null): Annotations & { nextPin: number } {
+export function useDesktopNotes(studio: Studio, doc: DocState | null, pick: PickRequest | null): Annotations & { nextPin: number } {
   const [draft, setDraft] = React.useState<PickInfo | null>(null)
   const [focus, setFocus] = React.useState<Focus | null>(null)
   const viewDir = React.useRef(new THREE.Vector3(1, -1.1, 0.85).normalize())
   const path = doc?.path
+  // A draft belongs to the part it was picked on; a pick request only to the part it asks about.
+  const [draftPath, setDraftPath] = React.useState(path)
+  if (draftPath !== path) {
+    setDraftPath(path)
+    setDraft(null)
+    setFocus(null)
+  }
+  const request = pick && pick.path === path ? pick : null
   const notes = doc?.notes
   const open = React.useMemo(() => (notes ?? []).filter((n) => n.status === "open"), [notes])
   const pins: Pin[] = React.useMemo(() => open.map((n) => ({ n: n.n, point: n.point })), [open])

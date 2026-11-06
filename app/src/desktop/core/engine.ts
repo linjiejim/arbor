@@ -50,6 +50,8 @@ export interface Files {
   write(path: string, data: string | Uint8Array): Promise<void>
   /** Call back when the file changes on disk; returns a function that stops watching. */
   watch(path: string, onChange: () => void): () => void
+  /** The path with symlinks resolved (/tmp → /private/tmp), so one file is one part. */
+  canonical?(path: string): string
 }
 
 /** The window, when there is one: renders views for `look`. */
@@ -79,6 +81,8 @@ type Doc = {
   changes: Change[]
   notes: NotesFile
   error?: string
+  /** A save found the file changed under it this command: the result says so. */
+  conflict?: boolean
   /** The text last written or read: tells our own writes apart from someone else's. */
   written: string | null
   unwatch: () => void
@@ -109,11 +113,21 @@ export function notesPath(path: string) {
   return path.endsWith(PART_EXT) ? path.slice(0, -PART_EXT.length) + NOTES_EXT : path.replace(/\.json$/i, "") + NOTES_EXT
 }
 
-/** A part path as given by a caller: made absolute against its directory, `.arbor.json` added when there's no `.json`. */
+/**
+ * A part path as given by a caller: made absolute against its directory, `.` / `..` / repeated
+ * separators resolved (one file must be one part), `.arbor.json` added when there's no `.json`.
+ */
 export function normalizePartPath(path: string, cwd?: string) {
-  let p = path.trim()
-  if (!/^([A-Za-z]:)?[\\/]/.test(p) && cwd) p = `${cwd.replace(/[\\/]+$/, "")}/${p}`
-  p = p.replace(/\/\.\//g, "/")
+  let p = path.trim().replace(/\\/g, "/")
+  if (!/^([A-Za-z]:)?\//.test(p) && cwd) p = `${cwd.replace(/\\/g, "/").replace(/\/+$/, "")}/${p}`
+  const drive = /^[A-Za-z]:/.exec(p)?.[0] ?? ""
+  const parts: string[] = []
+  for (const seg of p.slice(drive.length).split("/")) {
+    if (!seg || seg === ".") continue
+    if (seg === "..") parts.pop()
+    else parts.push(seg)
+  }
+  p = `${drive}/${parts.join("/")}`
   if (!/\.json$/i.test(p)) p += PART_EXT
   return p
 }
@@ -267,12 +281,18 @@ export class Engine {
     try {
       if (name === "open_part") return await this.openPart(input as { path: string; create?: boolean; template?: string }, ctx)
       if (name === "list_parts") return this.listParts()
-      if (name === "close_part") return this.closePart(String(input.path))
+      if (name === "close_part") return this.closePart(this.partKey(String(input.path)))
       const doc = await this.resolveDoc(ctx)
       if (!doc) return fail("还没有打开零件：先用 open_part（path 写零件文件，新零件加 create: true）。")
+      // Catch up with the file first: an editor may have saved it a moment ago (the watcher is debounced).
+      await this.fileChanged(doc)
       // get_notes lists the new notes itself.
       const notice = ctx.actor === "agent" ? this.noticeFor(doc, name === "get_notes") : ""
-      const res = await this.onDoc(doc, name, input, ctx)
+      let res = await this.onDoc(doc, name, input, ctx)
+      if (doc.conflict) {
+        doc.conflict = false
+        res = { ok: false, text: `${res.text}\n\n⚠ 这次修改期间，文件被别人保存过：已经以文件里的版本为准，刚才的改动没有写进文件（undo 可以找回）。` }
+      }
       if (ctx.actor === "agent") this.markSeen(doc)
       return notice ? { ...res, text: `${notice}\n\n${res.text}` } : res
     } catch (e) {
@@ -387,7 +407,7 @@ export class Engine {
   // ------------------------------------------------------------------ parts
 
   private async openPart(input: { path: string; create?: boolean; template?: string }, ctx: CallContext): Promise<CommandResult> {
-    const path = normalizePartPath(input.path, ctx.cwd)
+    const path = this.partKey(input.path, ctx.cwd)
     const existed = this.docs.has(path) || (await this.opts.files.read(path)) !== null
     const doc = await this.load(path, { create: input.create, template: input.template })
     this.active = path
@@ -431,9 +451,15 @@ export class Engine {
     return this.run("open_part", { path, create }, { actor: "user" })
   }
 
+  /** One file, one part: the same file reached by different paths gets the same key. */
+  private partKey(path: string, cwd?: string) {
+    const p = normalizePartPath(path, cwd)
+    return this.opts.files.canonical?.(p) ?? p
+  }
+
   private async resolveDoc(ctx: CallContext): Promise<Doc | null> {
     if (ctx.part) {
-      const path = normalizePartPath(ctx.part, ctx.cwd)
+      const path = this.partKey(ctx.part, ctx.cwd)
       return this.docs.get(path) ?? (await this.load(path, {}))
     }
     const path = (ctx.session && this.sessions.get(ctx.session)) || this.active
@@ -515,7 +541,12 @@ export class Engine {
     if (opts.report && this.kernelDoc === doc && this.kernelTree === tree) doc.report = opts.report
     else await this.ensureKernel(doc, true)
     doc.changes = [{ rev: doc.rev, actor, at: Date.now(), summary, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
-    if (opts.save !== false) await this.save(doc)
+    if (opts.save !== false && !(await this.save(doc))) {
+      // Someone saved the file while this ran: theirs wins, ours stays one undo away.
+      doc.conflict = true
+      await this.fileChanged(doc)
+      return
+    }
     this.emitDoc(doc)
   }
 
@@ -543,10 +574,14 @@ export class Engine {
     return !!doc.report && !doc.report.paramError && doc.report.features.every((f) => f.state === "ok" || f.state === "suppressed")
   }
 
+  /** Write the tree, unless the file changed since we last read or wrote it (returns false: don't overwrite). */
   private async save(doc: Doc) {
+    const disk = await this.opts.files.read(doc.path)
+    if (disk !== null && doc.written !== null && disk !== doc.written) return false
     const text = `${JSON.stringify(doc.tree, null, 2)}\n`
     doc.written = text
     await this.opts.files.write(doc.path, text)
+    return true
   }
 
   private async saveNotes(doc: Doc) {
