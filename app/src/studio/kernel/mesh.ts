@@ -55,7 +55,12 @@ export type FaceSig = {
   center: [number, number, number]
   /** A point inside the face, on the exact surface. */
   sample: [number, number, number] | null
+  /** Bounding box of the face's triangles. */
+  box: [[number, number, number], [number, number, number]] | null
 }
+
+/** Surfaces a point projects onto cheaply. Others (B-spline, extrusion: text, lofts) are only tried nearby. */
+const ANALYTIC = new Set(["PLANE", "CYLINDRE", "CONE", "SPHERE", "TORUS"])
 
 /**
  * Geometric signature of every face (type, area, centroid) plus one interior
@@ -68,7 +73,7 @@ export function faceSignatures(faces: any[], mesh: Mesh): FaceSig[] {
   const groupByHash = new Map(mesh.faceGroups.map((g) => [g.faceId, g]))
   return faces.map((f) => {
     const c = f.center
-    const sig: FaceSig = { type: f.geomType, area: measureArea(f), center: [c.x, c.y, c.z], sample: null }
+    const sig: FaceSig = { type: f.geomType, area: measureArea(f), center: [c.x, c.y, c.z], sample: null, box: null }
     c.delete()
     const g = groupByHash.get(f.hashCode)
     if (g) {
@@ -76,10 +81,17 @@ export function faceSignatures(faces: any[], mesh: Mesh): FaceSig[] {
       const t = mesh.triangles
       let best = -1
       let bestArea = -1
+      const lo: [number, number, number] = [Infinity, Infinity, Infinity]
+      const hi: [number, number, number] = [-Infinity, -Infinity, -Infinity]
       for (let k = g.start; k < g.start + g.count; k += 3) {
         const a = t[k] * 3
         const b = t[k + 1] * 3
         const d = t[k + 2] * 3
+        for (const i of [a, b, d])
+          for (let j = 0; j < 3; j++) {
+            lo[j] = Math.min(lo[j], v[i + j])
+            hi[j] = Math.max(hi[j], v[i + j])
+          }
         const ux = v[b] - v[a]
         const uy = v[b + 1] - v[a + 1]
         const uz = v[b + 2] - v[a + 2]
@@ -95,6 +107,7 @@ export function faceSignatures(faces: any[], mesh: Mesh): FaceSig[] {
           best = k
         }
       }
+      if (g.count) sig.box = [lo, hi]
       if (best >= 0) {
         const ids = [t[best], t[best + 1], t[best + 2]]
         const p = [0, 1, 2].map((dd) => (v[ids[0] * 3 + dd] + v[ids[1] * 3 + dd] + v[ids[2] * 3 + dd]) / 3)
@@ -116,6 +129,9 @@ export function faceSignatures(faces: any[], mesh: Mesh): FaceSig[] {
 }
 
 const dist = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+/** Is `p` within `pad` of the box (no box: can't tell, so yes)? */
+const near = (box: FaceSig["box"], p: number[], pad: number) => !box || [0, 1, 2].every((j) => p[j] >= box[0][j] - pad && p[j] <= box[1][j] + pad)
 
 export type FaceStatus = "new" | "modified" | "kept"
 
@@ -146,6 +162,9 @@ export function classifyFaces(
     if (!s.sample) return { status: "new" as const, match: -1 }
     for (let i = 0; i < prevSigs.length; i++) {
       if (prevSigs[i].type !== s.type) continue
+      // Projecting onto a spline surface is costly (and grows the wasm heap): a text's
+      // hundreds of glyph walls made it 1.7 GB. Only try the ones near the point.
+      if (!ANALYTIC.has(s.type) && !near(prevSigs[i].box, s.sample, Math.max(1e-3, tol * 10))) continue
       const pnt = new oc.gp_Pnt(s.sample[0], s.sample[1], s.sample[2])
       const proj = new oc.GeomAPI_ProjectPointOnSurf(pnt, surfaces[i])
       const d = proj.NbPoints() > 0 ? proj.LowerDistance() : Infinity
