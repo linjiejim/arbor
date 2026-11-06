@@ -107,8 +107,17 @@ function createWindow(mode: "focus" | "inactive") {
 /** The window, made (without taking focus) when an agent needs one and the person closed it. */
 async function ensureWindow() {
   if (!win) createWindow("inactive")
-  await rendererReady
-  return win!
+  let timer: NodeJS.Timeout | undefined
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error("Arbor 窗口没有在 20 秒内准备好")), 20_000)
+  })
+  try {
+    await Promise.race([rendererReady, late])
+  } finally {
+    clearTimeout(timer)
+  }
+  if (!win) throw new Error("Arbor 窗口刚被关掉了")
+  return win
 }
 
 async function openForUser(file: string, create = false) {
