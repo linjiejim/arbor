@@ -1,4 +1,7 @@
 import * as React from "react"
+import { Check, ChevronRight, CircleHelp, TriangleAlert, X } from "lucide-react"
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CodeBlock } from "@/components/code-block"
 import { toBuild123d } from "../codegen"
@@ -6,18 +9,22 @@ import type { Tree } from "../dsl"
 import { drivenFeatures, paramDependents, paramUses, describeUse } from "../param-uses"
 import type { Hover } from "../scene"
 import type { Studio } from "../use-studio"
+import type { Annotations } from "../use-annotations"
+import type { CheckResult } from "../kernel/check"
 
 /**
  * Named parameters: edit a number and the whole tree rebuilds, no model
  * involved. Each says what it is (the note the model wrote) and where it's
  * used; pointing at one lights up the features it drives.
  */
-export function ParamsPanel({ studio, onHover }: { studio: Studio; onHover: (h: Hover | null) => void }) {
+export function ParamsPanel({ studio, onHover, annotations }: { studio: Studio; onHover: (h: Hover | null) => void; annotations: Annotations }) {
   const { tree } = studio
   const entries = Object.entries(tree.params)
-  if (!entries.length) return <p className="px-4 py-4 text-body text-muted-foreground">还没有参数。助教会把关键尺寸定成参数，之后可以在这里直接改。</p>
+  const checks = studio.report?.checks ?? []
+  if (!entries.length && !checks.length) return <p className="px-4 py-4 text-body text-muted-foreground">还没有参数。助教会把关键尺寸定成参数，之后可以在这里直接改。</p>
   return (
     <div className="space-y-1 px-2 py-3" onMouseLeave={() => onHover(null)}>
+      {checks.length > 0 && <Checklist rows={checks} baseline={studio.checkBaseline} rolledBack={!!studio.rollback} onHover={onHover} onFix={annotations.startMessage} />}
       <p className="px-2 pb-1 text-small text-muted-foreground">改完按 Enter，整棵特征树按新参数重算。指向一个参数，模型上会标出它的尺寸。</p>
       {studio.report?.paramError && <p className="px-2 text-small text-destructive">{studio.report.paramError}</p>}
       {entries.map(([k, v]) => {
@@ -38,6 +45,83 @@ export function ParamsPanel({ studio, onHover }: { studio: Studio; onHover: (h: 
         )
       })}
     </div>
+  )
+}
+
+type CheckState = "pass" | "drift" | "fail" | "invalid"
+
+/**
+ * 「要求核对 4/5」: the learner's numbers re-measured after every rebuild.
+ * A requirement the assistant met that the learner's own edit moved is
+ * 「已偏离」 (warning), not an error. Opens by itself when something doesn't hold.
+ */
+function Checklist({
+  rows,
+  baseline,
+  rolledBack,
+  onHover,
+  onFix,
+}: {
+  rows: CheckResult[]
+  baseline: Record<string, boolean>
+  rolledBack: boolean
+  onHover: (h: Hover | null) => void
+  onFix: (text: string) => void
+}) {
+  const state = (r: CheckResult): CheckState => (r.pass ? "pass" : r.invalid ? "invalid" : baseline[r.id] ? "drift" : "fail")
+  const states = rows.map(state)
+  const passed = states.filter((x) => x === "pass").length
+  const counted = states.filter((x) => x !== "invalid").length
+  const [open, setOpen] = React.useState<boolean | null>(null)
+  const shown = open ?? passed < counted
+  return (
+    <section aria-label="要求核对" className={cn("mb-2 rounded-md border px-2 py-1.5", rolledBack && "opacity-60")}>
+      <button type="button" className="flex w-full items-center gap-2 text-left text-small" aria-expanded={shown} onClick={() => setOpen(!shown)}>
+        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-(--duration-fast)", shown && "rotate-90")} />
+        <span className="font-medium">要求核对</span>
+        <span className={cn("tabular", passed === counted ? "text-success" : "text-muted-foreground")}>
+          {passed}/{counted}
+        </span>
+        {rolledBack && <span className="ml-auto text-caption text-faint-foreground">回滚中，按最新一步核对</span>}
+      </button>
+      {shown && (
+        <ul className="mt-1 space-y-1">
+          {rows.map((r, i) => {
+            const st = states[i]
+            return (
+              <li
+                key={r.id}
+                className="rounded-sm px-1 py-0.5 text-small hover:bg-accent"
+                onMouseEnter={() => onHover(r.faces.length || r.edges.length ? { ids: [], label: "核对量的位置", faces: r.faces, edges: r.edges } : null)}
+              >
+                <div className="flex items-start gap-1.5">
+                  {st === "pass" ? (
+                    <Check className="mt-0.5 size-3.5 shrink-0 text-success" aria-label="满足" />
+                  ) : st === "invalid" ? (
+                    <CircleHelp className="mt-0.5 size-3.5 shrink-0 text-faint-foreground" aria-label="量不了" />
+                  ) : st === "drift" ? (
+                    <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" aria-label="已偏离" />
+                  ) : (
+                    <X className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-label="不满足" />
+                  )}
+                  <span className="min-w-0 flex-1">
+                    「{r.said}」
+                    <span className="text-muted-foreground">
+                      {st === "pass" ? ` 实际 ${r.actual}` : st === "invalid" ? ` 量不了：${r.actual}（核对项写得不对，不是零件的问题）` : st === "drift" ? ` 已偏离：要求 ${r.expected}，现在 ${r.actual}（你改过参数）` : ` 要求 ${r.expected}，实际 ${r.actual}`}
+                    </span>
+                  </span>
+                </div>
+                {st === "fail" && (
+                  <Button size="sm" variant="ghost" className="mt-0.5 ml-5 h-6 px-2 text-caption" onClick={() => onFix(`核对没通过：「${r.said}」要求 ${r.expected}，现在是 ${r.actual}，请修正。`)}>
+                    让助教修正
+                  </Button>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
   )
 }
 

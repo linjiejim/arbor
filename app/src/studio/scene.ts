@@ -21,6 +21,9 @@ export type Hover = {
   feature?: string
   /** Pointing at one dimension (a row of the feature card). */
   dim?: string
+  /** Pointing at a requirement: the faces and edges it measures. */
+  faces?: number[]
+  edges?: number[]
 }
 
 /**

@@ -1,6 +1,6 @@
 import { tool, type ToolSet } from "ai"
 import { z } from "zod"
-import { EdgeSelector, FaceSelector, Feature, Num, type FeatureOp } from "./dsl"
+import { Check, EdgeSelector, FaceSelector, Feature, Num, type FeatureOp } from "./dsl"
 
 /**
  * The tools the model may call. Shared by the server (schemas + how results
@@ -66,6 +66,15 @@ export const STUDIO_TOOLS = {
   delete_feature: tool({
     description: "删除一个特征。如果后面有特征引用它，会报错并列出这些特征；cascade=true 时一起删除。",
     inputSchema: z.object({ id: z.string(), cascade: z.boolean().optional() }),
+    toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
+  }),
+  check: tool({
+    description:
+      "核对学习者提出的数值要求：每项由内核实际量出来，返回 ✓ / ✗，之后每次重建都会自动重算。学习者的话里有具体数值时，建模结束前必须调用一次，每个数值要求一项。",
+    inputSchema: z.object({
+      items: z.array(Check).max(20).optional().describe("要核对的项；期望值只写学习者给的数字，不写参数名"),
+      remove: z.array(z.string()).optional().describe("学习者不再要求的项的 id"),
+    }),
     toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
   }),
   inspect: tool({

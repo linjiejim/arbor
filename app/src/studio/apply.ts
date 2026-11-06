@@ -1,7 +1,7 @@
 // Executing a tool call: a pure edit of the feature tree, a rebuild through a
 // kernel port (a Web Worker in the browser, the Kernel directly in Node), and
 // a short plain-text result the model can act on.
-import { Feature, OP_NAMES, Tree, displayName, type FeatureOp } from "./dsl"
+import { Check, Feature, OP_NAMES, Tree, displayName, type FeatureOp } from "./dsl"
 import { resolveParams } from "./expr"
 import type { BuildReport } from "./kernel/build"
 import { InputError } from "./kernel/errors"
@@ -154,6 +154,14 @@ export async function executeTool(port: KernelPort, tree: Tree, name: string, in
       const text = await port.inspect(what, what === "faces" ? input.faces : what === "edges" ? input.edges : undefined)
       return { tree, output: { ok: true, text } }
     }
+    if (name === "check") {
+      const items = Check.array().parse(input.items ?? [])
+      const drop = new Set([...((input.remove as string[] | undefined) ?? []), ...items.map((c) => c.id)])
+      const checks = [...(tree.checks ?? []).filter((c) => !drop.has(c.id)), ...items]
+      const next: Tree = { ...tree, checks: checks.length ? checks : undefined }
+      const report = await port.rebuild(next)
+      return { tree: next, output: { ok: true, text: checkText(report) }, report }
+    }
     if (name === "look") {
       if (!look) return { tree, output: { ok: false, text: "这个环境不能渲染视图。" } }
       const views = (input.views as string[] | undefined)?.length ? (input.views as string[]) : ["iso", "front", "top", "right"]
@@ -167,6 +175,20 @@ export async function executeTool(port: KernelPort, tree: Tree, name: string, in
     if (e instanceof InputError || (e as Error)?.name === "ExprError") return { tree, output: { ok: false, text: `✗ ${(e as Error).message}` } }
     return { tree, output: { ok: false, text: `✗ 出错了：${(e as Error)?.message ?? e}` } }
   }
+}
+
+/** One line per requirement: 「✓ size「80×50×30」：实际 80 × 50 × 30」. */
+export function checkText(report: BuildReport) {
+  const rows = report.checks ?? []
+  if (!rows.length) return "没有核对项。"
+  const failed = rows.filter((r) => !r.pass && !r.invalid).length
+  const invalid = rows.filter((r) => r.invalid).length
+  return [
+    ...rows.map((r) => (r.invalid ? `? ${r.id}「${r.said}」：量不了，${r.actual}` : `${r.pass ? "✓" : "✗"} ${r.id}「${r.said}」：要求 ${r.expected}，实际 ${r.actual}`)),
+    ...(failed ? [`${failed} 项不满足：先用 edit_feature 修模型，再核对一次；修不了就在回复里直说。不要为了通过去改期望值。`] : []),
+    ...(invalid ? [`${invalid} 项量不了：是这一项的选择器写得不对（要正好选中要量的面或边，例如加上 normal、of），用同一个 id 改写这一项，不是改模型。`] : []),
+    ...(!failed && !invalid ? ["全部满足。"] : []),
+  ].join("\n")
 }
 
 function resultOk(report: BuildReport, target?: string) {

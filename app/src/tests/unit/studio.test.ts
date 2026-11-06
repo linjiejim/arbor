@@ -650,3 +650,59 @@ describe("feature card", () => {
     expect(k.faceEdges(top[0], fil)).toHaveLength(4)
   })
 })
+
+describe("requirement checks", () => {
+  let k: Kernel
+  const port: KernelPort = { rebuild: async (t) => k.rebuild(t), inspect: async (w, s) => k.inspect(w, undefined, s) }
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+  const box = STARTERS.find((s) => s.id === "box-fillet-first")!.tree
+  const flange = STARTERS.find((s) => s.id === "flange")!.tree
+
+  it("measures size, wall, holes, pitch circle, distance, angle and volume", () => {
+    const r = k.rebuild({
+      ...flange,
+      checks: [
+        { id: "size", said: "外径 120、厚 10", kind: "size", expect: [120, 120, 10] },
+        { id: "holes", said: "6 个 ⌀8 孔", kind: "holes", faces: { kind: "cylinder", radius: 4 }, count: 6, d: 8 },
+        { id: "pcd", said: "在 ⌀90 圆周上", kind: "pcd", faces: { kind: "cylinder", radius: 4 }, count: 6, expect: 90 },
+        { id: "t", said: "厚 10", kind: "distance", a: { face: { normal: "+Z", extreme: "+Z" } }, b: { face: { normal: "-Z", extreme: "-Z" } }, expect: 10 },
+        { id: "ang", said: "外圆柱面和顶面垂直", kind: "angle", a: { normal: "+Z", extreme: "+Z" }, b: { kind: "cylinder", radius: 60 }, expect: 90 },
+        { id: "vol", said: "体积不超过 100 cm³", kind: "volume", max: 100_000 },
+        { id: "wrong", said: "8 个孔", kind: "holes", faces: { kind: "cylinder", radius: 4 }, count: 8 },
+      ],
+    })
+    const by = Object.fromEntries(r.checks!.map((c) => [c.id, c]))
+    for (const id of ["size", "holes", "pcd", "t", "ang", "vol"]) expect(by[id].pass, `${id}: ${by[id].actual}`).toBe(true)
+    expect(by.holes.actual).toBe("6 个 ⌀8")
+    expect(by.pcd.actual).toBe("6 个在 ⌀90 上")
+    expect(by.wrong.pass).toBe(false)
+  })
+
+  it("measures a shelled box's wall, and says so when nothing matches", () => {
+    const r = k.rebuild({
+      ...box,
+      checks: [
+        { id: "wall", said: "壁厚 2.5", kind: "thickness", faces: { normal: "+X", extreme: "+X" }, expect: 2.5 },
+        { id: "none", said: "顶面的孔", kind: "holes", faces: { kind: "cylinder", radius: 99 }, count: 1 },
+      ],
+    })
+    expect(r.checks![0]).toMatchObject({ pass: true, actual: "2.5 mm" })
+    expect(r.checks![1].pass).toBe(false)
+    expect(r.checks![1].actual).toMatch(/没有|没找到/)
+  })
+
+  it("the check tool merges by id, removes, and re-measures after a parameter change", async () => {
+    let run = await executeTool(port, box, "check", { items: [{ id: "size", said: "60×40×30", kind: "size", expect: [60, 40, 30] }] })
+    expect(run.output.text).toMatch(/^✓ size「60×40×30」/)
+    run = await executeTool(port, run.tree, "check", { items: [{ id: "size", said: "60×40×35", kind: "size", expect: [60, 40, 35] }] })
+    expect(run.tree.checks).toHaveLength(1)
+    expect(run.output.text).toMatch(/^✗ size/)
+    const taller = k.rebuild({ ...run.tree, params: { ...run.tree.params, H: 35 } })
+    expect(taller.checks![0].pass).toBe(true)
+    run = await executeTool(port, run.tree, "check", { remove: ["size"] })
+    expect(run.tree.checks).toBeUndefined()
+  })
+})

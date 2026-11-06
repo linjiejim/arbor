@@ -248,11 +248,36 @@ export type EdgeSelector = z.infer<typeof EdgeSelector>
 export type PlaneRef = z.infer<typeof PlaneRef>
 export type SketchShape = z.infer<typeof SketchShape>
 
+const Said = z.string().describe("学习者的原话片段，如「壁厚 2」")
+const Pick = z.object({ face: FaceSelector.optional(), edge: EdgeSelector.optional() }).describe("量哪里：一个面（face）或一条边（edge），选择器要正好选中一个")
+const CheckBase = { id: z.string().describe("短英文 id，如 size、wall、holes；同 id 会覆盖原来那一项"), said: Said, tol: z.number().positive().optional().describe("容差，缺省长度 0.01 mm、角度 0.05°") }
+
+/** A requirement the learner stated, measured by the kernel on every rebuild (expected values are plain numbers). */
+export const Check = z.discriminatedUnion("kind", [
+  z.object({ ...CheckBase, kind: z.literal("size"), expect: z.array(z.number()).length(3).describe("沿 X、Y、Z 的外形尺寸"), axes: z.enum(["xyz", "any"]).optional().describe("any = 不管方向，排序后比较") }),
+  z.object({ ...CheckBase, kind: z.literal("thickness"), faces: FaceSelector.describe("壁的一侧的面（平面）"), expect: z.number() }),
+  z.object({
+    ...CheckBase,
+    kind: z.literal("holes"),
+    faces: FaceSelector.describe("孔壁的圆柱面，例如 { kind: \"cylinder\", of: \"h1\" }"),
+    count: z.number().int().positive(),
+    d: z.number().optional().describe("孔径"),
+    thread: z.string().optional().describe("螺纹规格，如 M4：按攻丝底孔核对"),
+  }),
+  z.object({ ...CheckBase, kind: z.literal("distance"), a: Pick, b: Pick, expect: z.number() }),
+  z.object({ ...CheckBase, kind: z.literal("pcd"), faces: FaceSelector.describe("各个孔的圆柱面"), count: z.number().int().positive(), expect: z.number().describe("节圆直径"), axis: z.enum(["X", "Y", "Z"]).optional() }),
+  z.object({ ...CheckBase, kind: z.literal("angle"), a: FaceSelector, b: FaceSelector, expect: z.number() }),
+  z.object({ ...CheckBase, kind: z.literal("volume"), min: z.number().optional(), max: z.number().optional() }),
+])
+export type Check = z.infer<typeof Check>
+
 export const Tree = z.object({
   params: z.record(z.string(), Num),
   /** One line per parameter for people (「总长，沿 X」); never used in calculations. */
   paramNotes: z.record(z.string(), z.string()).optional(),
   features: z.array(Feature),
+  /** The learner's numeric requirements, re-measured on every rebuild. */
+  checks: z.array(Check).optional(),
 })
 export type Tree = z.infer<typeof Tree>
 

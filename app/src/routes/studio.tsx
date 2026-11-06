@@ -136,7 +136,7 @@ export function StudioPage() {
             />
           </TabsContent>
           <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
-            <ParamsPanel studio={studio} onHover={setHover} />
+            <ParamsPanel studio={studio} onHover={setHover} annotations={annotations} />
           </TabsContent>
           <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
             <CodePanel studio={studio} />
