@@ -29,6 +29,18 @@ type V3 = [number, number, number]
 /** A press that moves less than this is a click, not a camera drag. */
 const CLICK_PX = 5
 
+/** Wording and numbering for hosts other than the web studio (the desktop app's notes). */
+export type ViewportCopy = {
+  /** The hint over an unmarked model; null hides it. */
+  hint?: string | null
+  /** The note card's button. */
+  add?: string
+  /** Number on the next pin (default: after the pending ones). */
+  next?: number
+  /** Told when a click lands while `busy`. */
+  busy?: string
+}
+
 /**
  * The studio's 3D view: the model, coloured by step status or by what's
  * highlighted; click a face or an edge to annotate it.
@@ -42,6 +54,7 @@ export function StudioViewport({
   parts = NO_PARTS_VIEW,
   onParts,
   readOnly = false,
+  copy,
 }: {
   studio: Studio
   hover: Hover | null
@@ -54,6 +67,7 @@ export function StudioViewport({
   onParts?: (v: PartsView) => void
   /** A shared link: measure and section, but no annotating (there is no chat to send it to). */
   readOnly?: boolean
+  copy?: ViewportCopy
 }) {
   const [viewer, setViewer] = React.useState<Viewer | null>(null)
   const current = React.useRef<THREE.Group | null>(null)
@@ -63,6 +77,7 @@ export function StudioViewport({
   const display = rs?.display ?? studio.display
   const { kernel } = studio
   const { focus, draft } = annotations
+  const nextPin = copy?.next ?? annotations.pending.length + 1
 
   // Measure mode: up to two picked faces / edges and what the kernel says about them.
   const [measuring, setMeasuring] = React.useState(false)
@@ -294,10 +309,10 @@ export function StudioViewport({
   // Numbered pins: annotations in the composer and of the message being answered, the draft, a located one.
   const pins = React.useMemo(() => {
     const out: (Pin & { tone: "solid" | "draft" | "ghost" })[] = annotations.pins.map((p) => ({ ...p, tone: "solid" }))
-    if (draft) out.push({ n: annotations.pending.length + 1, point: draft.point, tone: "draft" })
+    if (draft) out.push({ n: nextPin, point: draft.point, tone: "draft" })
     if (focus?.pin) out.push({ ...focus.pin, tone: "ghost" })
     return out
-  }, [annotations.pins, annotations.pending.length, draft, focus])
+  }, [annotations.pins, nextPin, draft, focus])
 
   React.useEffect(() => {
     if (!viewer) return
@@ -333,10 +348,11 @@ export function StudioViewport({
 
   // ---------------------------------------------------------------- clicking
 
-  const latest = React.useRef({ studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly })
+  const busyText = copy?.busy ?? "助教正在改模型，这一轮结束后再标注"
+  const latest = React.useRef({ studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly })
   React.useEffect(() => {
-    latest.current = { studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly }
-  }, [studio, busy, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly])
+    latest.current = { studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly }
+  }, [studio, busy, busyText, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly])
 
   React.useEffect(() => {
     if (!viewer) return
@@ -351,7 +367,7 @@ export function StudioViewport({
       if (at && Math.hypot(e.clientX - at.x, e.clientY - at.y) <= CLICK_PX) void onClick(e)
     }
     const onClick = async (e: PointerEvent) => {
-      const { studio: s, busy: isBusy, display: d, open, cancel, measuring: isMeasuring, plane: cut, reselect: rsel } = latest.current
+      const { studio: s, busy: isBusy, busyText: whyBusy, display: d, open, cancel, measuring: isMeasuring, plane: cut, reselect: rsel } = latest.current
       if (current.current?.userData.partsMode) return notify("零件炸开或隐藏时不能点选：把爆炸拖回 0，并显示全部零件")
       const mesh = current.current?.children.find((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh)
       if (!d?.mesh || !mesh || s.kernel.phase !== "ready") return
@@ -368,7 +384,7 @@ export function StudioViewport({
       }
       if (!edge && !face) return cancel()
       if (latest.current.readOnly) return
-      if (isBusy) return notify("助教正在改模型，这一轮结束后再标注")
+      if (isBusy) return notify(whyBusy)
       if (s.rollback) return notify("先回到最新一步，再在模型上标注")
       let info = edge ? await s.pick("edge", edge.hash, edge.point) : null
       // A fillet's tangent line looks like an edge but has no corner: the face under the pointer is what's meant.
@@ -430,9 +446,9 @@ export function StudioViewport({
           {rs.kind === "edge" ? "点要选的边，再点一次取消；点一个面等于选它的一圈边" : "点要选的面，再点一次取消"}。Esc 退出
         </div>
       )}
-      {display?.mesh && !readOnly && !busy && !draft && !measuring && !rs && annotations.pending.length === 0 && (
+      {display?.mesh && !readOnly && !busy && !draft && !measuring && !rs && annotations.pending.length === 0 && copy?.hint !== null && (
         <div className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border bg-background/90 px-2.5 py-1 text-center text-caption text-muted-foreground">
-          单击模型上的面或边，标注要改的地方
+          {copy?.hint ?? "单击模型上的面或边，标注要改的地方"}
         </div>
       )}
       {display?.mesh && !measuring && (
@@ -463,7 +479,8 @@ export function StudioViewport({
           key={`${draft.kind}-${draft.hash}-${draft.point.join(",")}`}
           viewer={viewer}
           draft={draft}
-          n={annotations.pending.length + 1}
+          n={nextPin}
+          addLabel={copy?.add ?? "加到消息"}
           onAdd={annotations.add}
           onCancel={annotations.cancel}
         />
@@ -545,7 +562,21 @@ function nearestEdge(viewer: Viewer, d: DisplayData, e: PointerEvent, maxPx: num
 }
 
 /** The note card next to a fresh pick. Hidden while the camera moves, then placed again. */
-function AnnotationCard({ viewer, draft, n, onAdd, onCancel }: { viewer: Viewer; draft: PickInfo; n: number; onAdd: (note: string) => void; onCancel: () => void }) {
+function AnnotationCard({
+  viewer,
+  draft,
+  n,
+  addLabel,
+  onAdd,
+  onCancel,
+}: {
+  viewer: Viewer
+  draft: PickInfo
+  n: number
+  addLabel: string
+  onAdd: (note: string) => void
+  onCancel: () => void
+}) {
   const [note, setNote] = React.useState("")
   const [moving, setMoving] = React.useState(false)
   const [place, setPlace] = React.useState(0)
@@ -615,7 +646,7 @@ function AnnotationCard({ viewer, draft, n, onAdd, onCancel }: { viewer: Viewer;
             取消
           </Button>
           <Button size="sm" variant="primary" onClick={add}>
-            加到消息
+            {addLabel}
           </Button>
         </div>
       </PopoverContent>
