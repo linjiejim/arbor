@@ -181,10 +181,13 @@ export async function executeTool(port: KernelPort, tree: Tree, name: string, in
 export function checkText(report: BuildReport) {
   const rows = report.checks ?? []
   if (!rows.length) return "没有核对项。"
-  const failed = rows.filter((r) => !r.pass).length
+  const failed = rows.filter((r) => !r.pass && !r.invalid).length
+  const invalid = rows.filter((r) => r.invalid).length
   return [
-    ...rows.map((r) => `${r.pass ? "✓" : "✗"} ${r.id}「${r.said}」：要求 ${r.expected}，实际 ${r.actual}`),
-    failed ? `${failed} 项不满足：先用 edit_feature 修模型，再核对一次；修不了就在回复里直说。不要为了通过去改期望值。` : "全部满足。",
+    ...rows.map((r) => (r.invalid ? `? ${r.id}「${r.said}」：量不了，${r.actual}` : `${r.pass ? "✓" : "✗"} ${r.id}「${r.said}」：要求 ${r.expected}，实际 ${r.actual}`)),
+    ...(failed ? [`${failed} 项不满足：先用 edit_feature 修模型，再核对一次；修不了就在回复里直说。不要为了通过去改期望值。`] : []),
+    ...(invalid ? [`${invalid} 项量不了：是这一项的选择器写得不对（要正好选中要量的面或边，例如加上 normal、of），用同一个 id 改写这一项，不是改模型。`] : []),
+    ...(!failed && !invalid ? ["全部满足。"] : []),
   ].join("\n")
 }
 

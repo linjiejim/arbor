@@ -13,6 +13,8 @@ export type CheckResult = {
   id: string
   said: string
   pass: boolean
+  /** The check itself can't be measured (its selector picks nothing or too much): the item is wrong, not the part. */
+  invalid?: boolean
   /** 「80 × 50 × 30」 */
   expected: string
   actual: string
@@ -41,7 +43,8 @@ export function runChecks(body: Shape3D, origins: string[], checks: Check[], sco
       try {
         return { ...base, ...one(c, body, origins, faces, edges, scope) }
       } catch (e) {
-        return { ...base, pass: false, expected: expectedOf(c), actual: (e as Error).message || "没找到要量的东西" }
+        const first = ((e as Error).message || "没找到要量的东西").split("\n")[0].replace(/。?候选：$/, "")
+        return { ...base, pass: false, invalid: true, expected: expectedOf(c), actual: first }
       }
     })
   } finally {

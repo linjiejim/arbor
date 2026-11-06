@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Check, ChevronRight, Eye, ImagePlus, ListChecks, Pencil, Search, SlidersHorizontal, Square, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react"
+import { Check, ChevronRight, CircleHelp, Eye, ImagePlus, ListChecks, Pencil, Search, SlidersHorizontal, Square, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react"
 import type { FileUIPart, UIMessage } from "ai"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
@@ -38,6 +38,7 @@ const TOOL_LABEL: Record<string, { label: string; op?: OpId; icon?: LucideIcon }
   sweep: { label: "扫掠", op: "sweep" },
   loft: { label: "放样", op: "loft" },
   draft: { label: "拔模", op: "draft" },
+  rib: { label: "筋", op: "rib" },
   edit_feature: { label: "修改特征", icon: Pencil },
   delete_feature: { label: "删除特征", icon: Trash2 },
   inspect: { label: "查看模型", icon: Search },
@@ -445,9 +446,10 @@ function ToolCard({ part, onSelectFeature }: { part: ToolPart; onSelectFeature: 
   const input = part.input ?? {}
   const featureId = (input.id as string | undefined) ?? undefined
   // A check card is the table itself: one row per requirement, as it stood at that moment.
-  const rows = name === "check" && part.state === "output-available" ? (part.output?.text ?? "").split("\n").filter((l) => /^[✓✗] /.test(l)) : []
+  const rows = name === "check" && part.state === "output-available" ? (part.output?.text ?? "").split("\n").filter((l) => /^[✓✗?] /.test(l)) : []
   const passed = rows.filter((l) => l.startsWith("✓")).length
-  const title = rows.length ? `${meta.label} · ${passed}/${rows.length}` : [meta.label, (input.name as string) ?? featureId].filter(Boolean).join(" · ")
+  const counted = rows.filter((l) => !l.startsWith("?")).length
+  const title = rows.length ? `${meta.label} · ${passed}/${counted}` : [meta.label, (input.name as string) ?? featureId].filter(Boolean).join(" · ")
   const running = part.state === "input-streaming" || part.state === "input-available"
   const failed = part.state === "output-error" || (part.state === "output-available" && part.output && !part.output.ok)
   const text = part.state === "output-error" ? part.errorText : part.output?.text
@@ -477,7 +479,13 @@ function ToolCard({ part, onSelectFeature }: { part: ToolPart; onSelectFeature: 
         <ul className="space-y-0.5 px-3 pb-2">
           {rows.map((l, i) => (
             <li key={i} className="flex items-start gap-1.5">
-              {l.startsWith("✓") ? <Check className="mt-0.5 size-3.5 shrink-0 text-success" aria-label="满足" /> : <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-label="不满足" />}
+              {l.startsWith("✓") ? (
+                <Check className="mt-0.5 size-3.5 shrink-0 text-success" aria-label="满足" />
+              ) : l.startsWith("?") ? (
+                <CircleHelp className="mt-0.5 size-3.5 shrink-0 text-faint-foreground" aria-label="量不了" />
+              ) : (
+                <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-label="不满足" />
+              )}
               <span className="min-w-0 text-muted-foreground">{l.slice(2).replace(/^\S+「/, "「")}</span>
             </li>
           ))}

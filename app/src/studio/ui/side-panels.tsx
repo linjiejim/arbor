@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Check, ChevronRight, TriangleAlert, X } from "lucide-react"
+import { Check, ChevronRight, CircleHelp, TriangleAlert, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -48,7 +48,7 @@ export function ParamsPanel({ studio, onHover, annotations }: { studio: Studio; 
   )
 }
 
-type CheckState = "pass" | "drift" | "fail"
+type CheckState = "pass" | "drift" | "fail" | "invalid"
 
 /**
  * 「要求核对 4/5」: the learner's numbers re-measured after every rebuild.
@@ -68,18 +68,19 @@ function Checklist({
   onHover: (h: Hover | null) => void
   onFix: (text: string) => void
 }) {
-  const state = (r: CheckResult): CheckState => (r.pass ? "pass" : baseline[r.id] ? "drift" : "fail")
+  const state = (r: CheckResult): CheckState => (r.pass ? "pass" : r.invalid ? "invalid" : baseline[r.id] ? "drift" : "fail")
   const states = rows.map(state)
   const passed = states.filter((x) => x === "pass").length
+  const counted = states.filter((x) => x !== "invalid").length
   const [open, setOpen] = React.useState<boolean | null>(null)
-  const shown = open ?? passed < rows.length
+  const shown = open ?? passed < counted
   return (
     <section aria-label="要求核对" className={cn("mb-2 rounded-md border px-2 py-1.5", rolledBack && "opacity-60")}>
       <button type="button" className="flex w-full items-center gap-2 text-left text-small" aria-expanded={shown} onClick={() => setOpen(!shown)}>
         <ChevronRight className={cn("size-3.5 shrink-0 transition-transform duration-(--duration-fast)", shown && "rotate-90")} />
         <span className="font-medium">要求核对</span>
-        <span className={cn("tabular", passed === rows.length ? "text-success" : "text-muted-foreground")}>
-          {passed}/{rows.length}
+        <span className={cn("tabular", passed === counted ? "text-success" : "text-muted-foreground")}>
+          {passed}/{counted}
         </span>
         {rolledBack && <span className="ml-auto text-caption text-faint-foreground">回滚中，按最新一步核对</span>}
       </button>
@@ -96,6 +97,8 @@ function Checklist({
                 <div className="flex items-start gap-1.5">
                   {st === "pass" ? (
                     <Check className="mt-0.5 size-3.5 shrink-0 text-success" aria-label="满足" />
+                  ) : st === "invalid" ? (
+                    <CircleHelp className="mt-0.5 size-3.5 shrink-0 text-faint-foreground" aria-label="量不了" />
                   ) : st === "drift" ? (
                     <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-warning" aria-label="已偏离" />
                   ) : (
@@ -104,7 +107,7 @@ function Checklist({
                   <span className="min-w-0 flex-1">
                     「{r.said}」
                     <span className="text-muted-foreground">
-                      {st === "pass" ? ` 实际 ${r.actual}` : st === "drift" ? ` 已偏离：要求 ${r.expected}，现在 ${r.actual}（你改过参数）` : ` 要求 ${r.expected}，实际 ${r.actual}`}
+                      {st === "pass" ? ` 实际 ${r.actual}` : st === "invalid" ? ` 量不了：${r.actual}（核对项写得不对，不是零件的问题）` : st === "drift" ? ` 已偏离：要求 ${r.expected}，现在 ${r.actual}（你改过参数）` : ` 要求 ${r.expected}，实际 ${r.actual}`}
                     </span>
                   </span>
                 </div>
