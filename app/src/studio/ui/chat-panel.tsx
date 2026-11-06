@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { OpIcon } from "@/components/op-icon"
 import type { OpId } from "@/content/ops"
+import { isDivider } from "../share"
 import { STARTERS } from "../starters"
 import type { Tree } from "../dsl"
 import type { ToolOutput } from "../tools"
@@ -39,6 +40,7 @@ const TOOL_LABEL: Record<string, { label: string; op?: OpId; icon?: LucideIcon }
   loft: { label: "放样", op: "loft" },
   draft: { label: "拔模", op: "draft" },
   rib: { label: "筋", op: "rib" },
+  split: { label: "拆件", op: "cut" },
   edit_feature: { label: "修改特征", icon: Pencil },
   delete_feature: { label: "删除特征", icon: Trash2 },
   inspect: { label: "查看模型", icon: Search },
@@ -313,6 +315,17 @@ function Message({
         : undefined,
     [notes, onShow],
   )
+  if (isDivider(m)) {
+    // The model changed under the conversation (a copied link, an import): for the learner only, never sent.
+    const text = m.parts.map((p) => (p.type === "text" ? p.text : "")).join("")
+    return (
+      <div role="separator" aria-label={text} className="flex items-center gap-3 text-caption text-faint-foreground">
+        <span className="h-px flex-1 bg-border" />
+        {text}
+        <span className="h-px flex-1 bg-border" />
+      </div>
+    )
+  }
   if (m.role === "user") {
     const text = m.parts.map((p) => (p.type === "text" ? p.text : "")).join("")
     const images = m.parts.filter((p): p is FileUIPart => p.type === "file" && p.mediaType.startsWith("image/"))

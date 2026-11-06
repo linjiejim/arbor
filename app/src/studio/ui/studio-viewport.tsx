@@ -14,7 +14,7 @@ import { circled, type PickInfo } from "../annotations"
 import type { DisplayData } from "../kernel/build"
 import type { MeasureResult, MeasureTarget } from "../kernel/measure"
 import type { Pin } from "../look"
-import { edgeHighlight, groupAt, modelObject, repaint, type Hover, type Paint } from "../scene"
+import { edgeHighlight, groupAt, modelObject, NO_PARTS_VIEW, repaint, type Hover, type Paint, type PartsView } from "../scene"
 import type { Annotations } from "../use-annotations"
 import type { Studio } from "../use-studio"
 import type { Reselect } from "../use-reselect"
@@ -39,18 +39,27 @@ export function StudioViewport({
   annotations,
   busy,
   reselect,
+  parts = NO_PARTS_VIEW,
+  onParts,
+  readOnly = false,
 }: {
   studio: Studio
   hover: Hover | null
   annotations: Annotations
   busy: boolean
-  reselect: Reselect
+  /** 「在模型上重选」 (none on a shared link). */
+  reselect?: Reselect
+  /** A split body: explode amount and hidden parts. */
+  parts?: PartsView
+  onParts?: (v: PartsView) => void
+  /** A shared link: measure and section, but no annotating (there is no chat to send it to). */
+  readOnly?: boolean
 }) {
   const [viewer, setViewer] = React.useState<Viewer | null>(null)
   const current = React.useRef<THREE.Group | null>(null)
   const fittedSize = React.useRef(0)
   // While re-picking a feature's faces or edges, the view shows the body that feature starts from.
-  const rs = reselect.state
+  const rs = reselect?.state ?? null
   const display = rs?.display ?? studio.display
   const { kernel } = studio
   const { focus, draft } = annotations
@@ -156,9 +165,10 @@ export function StudioViewport({
     paintRef.current = paint
   }, [paint])
 
+  const view = display?.parts && !rs ? parts : NO_PARTS_VIEW
   React.useEffect(() => {
     if (!viewer || !display) return
-    const g = modelObject(display, viewer.kit, paintRef.current)
+    const g = modelObject(display, viewer.kit, paintRef.current, view)
     viewer.setContent(g)
     current.current = g
     if (display.bbox) {
@@ -170,7 +180,15 @@ export function StudioViewport({
         fittedSize.current = size
       }
     } else fittedSize.current = 0
-  }, [viewer, display])
+  }, [viewer, display, view])
+
+  // Frame the pulled-apart parts once the learner lets go of the explode slider.
+  const frameExploded = React.useCallback(() => {
+    if (!viewer || !display?.bbox || !display.parts) return
+    const box = new THREE.Box3(new THREE.Vector3(...display.bbox[0]), new THREE.Vector3(...display.bbox[1]))
+    for (const p of display.parts) box.expandByPoint(new THREE.Vector3(...p.center).addScaledVector(new THREE.Vector3(...p.explode), parts.explode))
+    void viewer.fit(box, { animate: true })
+  }, [viewer, display, parts.explode])
 
   React.useEffect(() => {
     if (!viewer || !current.current) return
@@ -253,11 +271,11 @@ export function StudioViewport({
   }, [viewer, plane, display])
 
   // Esc leaves re-picking (the card's 取消 does the same).
-  const cancelReselect = reselect.cancel
+  const cancelReselect = reselect?.cancel
   React.useEffect(() => {
     if (!rs) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !(e.target as HTMLElement)?.closest?.("input, textarea")) cancelReselect()
+      if (e.key === "Escape" && !(e.target as HTMLElement)?.closest?.("input, textarea")) cancelReselect?.()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -315,10 +333,10 @@ export function StudioViewport({
 
   // ---------------------------------------------------------------- clicking
 
-  const latest = React.useRef({ studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect })
+  const latest = React.useRef({ studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly })
   React.useEffect(() => {
-    latest.current = { studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect }
-  }, [studio, busy, display, annotations.open, annotations.cancel, measuring, plane, reselect])
+    latest.current = { studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly }
+  }, [studio, busy, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly])
 
   React.useEffect(() => {
     if (!viewer) return
@@ -334,10 +352,11 @@ export function StudioViewport({
     }
     const onClick = async (e: PointerEvent) => {
       const { studio: s, busy: isBusy, display: d, open, cancel, measuring: isMeasuring, plane: cut, reselect: rsel } = latest.current
+      if (current.current?.userData.partsMode) return notify("零件炸开或隐藏时不能点选：把爆炸拖回 0，并显示全部零件")
       const mesh = current.current?.children.find((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh)
       if (!d?.mesh || !mesh || s.kernel.phase !== "ready") return
       const { edge, face } = pickTargets(viewer, d, mesh, e, cut)
-      if (rsel.state) return void rsel.toggle({ edge: edge?.hash ?? null, face: face?.hash ?? null })
+      if (rsel?.state) return void rsel.toggle({ edge: edge?.hash ?? null, face: face?.hash ?? null })
       if (isMeasuring) {
         if (s.rollback) return notify("先回到最新一步，再测量")
         if (!edge && !face) return setPicked([])
@@ -348,6 +367,7 @@ export function StudioViewport({
         return
       }
       if (!edge && !face) return cancel()
+      if (latest.current.readOnly) return
       if (isBusy) return notify("助教正在改模型，这一轮结束后再标注")
       if (s.rollback) return notify("先回到最新一步，再在模型上标注")
       let info = edge ? await s.pick("edge", edge.hash, edge.point) : null
@@ -399,6 +419,9 @@ export function StudioViewport({
           bbox={display.bbox}
           dims={{ on: showDims, shown: Math.min(DIMS_SHOWN, shownDims.total), total: shownDims.total }}
           onDims={setShowDims}
+          explode={display.parts && display.parts.length > 1 ? parts.explode : null}
+          onExplode={(explode) => onParts?.({ ...parts, explode })}
+          onExplodeEnd={frameExploded}
         />
       )}
       {rs && (
@@ -407,7 +430,7 @@ export function StudioViewport({
           {rs.kind === "edge" ? "点要选的边，再点一次取消；点一个面等于选它的一圈边" : "点要选的面，再点一次取消"}。Esc 退出
         </div>
       )}
-      {display?.mesh && !busy && !draft && !measuring && !rs && annotations.pending.length === 0 && (
+      {display?.mesh && !readOnly && !busy && !draft && !measuring && !rs && annotations.pending.length === 0 && (
         <div className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border bg-background/90 px-2.5 py-1 text-center text-caption text-muted-foreground">
           单击模型上的面或边，标注要改的地方
         </div>

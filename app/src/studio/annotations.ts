@@ -23,9 +23,15 @@ export type PickInfo = {
   selector: Record<string, unknown> | null
   /** Edges: the faces on both sides meet smoothly (a fillet's tangent line), so it can't be filleted itself. */
   smooth?: boolean
-  /** Planar faces facing along an axis: the datum plane, its offset and the click in sketch coordinates. */
-  sketch: { plane: "XY" | "XZ" | "YZ"; offset: number; uv: [number, number] } | null
+  /**
+   * Planar faces: where to sketch on them and the click in sketch coordinates.
+   * Facing along an axis: the datum plane and its offset. Inclined (`face`):
+   * the face's own frame, the same rule as `on.face` on a slope.
+   */
+  sketch: { plane: "XY" | "XZ" | "YZ"; offset: number; uv: [number, number]; face?: SlopeFrame } | null
 }
+
+export type SlopeFrame = { origin: V3; x: V3; y: V3; normal: V3 }
 
 const Short = z.string().max(300)
 
@@ -42,7 +48,12 @@ export const Annotation = z.object({
   selector: z.record(z.string(), z.unknown()).nullable(),
   smooth: z.boolean().optional(),
   sketch: z
-    .object({ plane: z.enum(["XY", "XZ", "YZ"]), offset: z.number(), uv: z.array(z.number()).length(2) })
+    .object({
+      plane: z.enum(["XY", "XZ", "YZ"]),
+      offset: z.number(),
+      uv: z.array(z.number()).length(2),
+      face: z.object({ origin: z.array(z.number()).length(3), x: z.array(z.number()).length(3), y: z.array(z.number()).length(3), normal: z.array(z.number()).length(3) }).optional(),
+    })
     .nullable(),
 })
 export type Annotation = z.infer<typeof Annotation>
@@ -72,7 +83,14 @@ export function annotationText(list: Annotation[]): string {
       const use = a.kind === "edge" && !a.smooth ? "（圆角、倒角的 edges 直接用它）" : ""
       lines.push(`- 已验证只选中它的选择器${use}：${JSON.stringify(a.selector)}`)
     } else lines.push("- 没能找到只选中它的选择器：用 inspect 和点击位置（near）确认")
-    if (a.sketch && a.selector) {
+    if (a.sketch?.face && a.selector) {
+      const { expect: _expect, ...face } = a.selector
+      const f = a.sketch.face
+      lines.push(
+        `- 在这个斜面上画草图：on = ${JSON.stringify({ plane: "XY", face })}；点击处的斜面草图坐标 (${a.sketch.uv.map(r).join(", ")})`,
+        `  （原点是这个面的中心 ${xyz(f.origin)}，x 沿 ${xyz(f.x)} 水平，y 沿 ${xyz(f.y)} 往上，法向 ${xyz(f.normal)}）`,
+      )
+    } else if (a.sketch && a.selector) {
       const { expect: _expect, ...face } = a.selector
       lines.push(
         `- 在这个面上画草图：on = ${JSON.stringify({ plane: a.sketch.plane, face })}；点击处的草图坐标 (${a.sketch.uv.map(r).join(", ")})（这个面在 ${a.sketch.plane} 基准面偏移 ${r(a.sketch.offset)} 处）`,

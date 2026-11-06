@@ -18,6 +18,7 @@ export type WorkerRequest =
   | { id: number; type: "locate"; kind: "face" | "edge"; selector: unknown; before?: number }
   | { id: number; type: "measure"; targets: MeasureTarget[] }
   | { id: number; type: "dimensions" }
+  | { id: number; type: "drawing"; iso: boolean }
   | { id: number; type: "selectorFor"; kind: "face" | "edge"; hashes: number[]; before: number }
   | { id: number; type: "faceEdges"; hash: number; before: number }
 
@@ -101,7 +102,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         result = k.inspect(req.what, undefined, req.selector)
         break
       case "export":
-        result = k.exportBody(req.format, req.index)
+        result = await k.exportBody(req.format, req.index)
         break
       case "pick":
         result = k.pick({ kind: req.kind, hash: req.hash, point: req.point })
@@ -114,6 +115,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         break
       case "dimensions":
         result = k.dimensions()
+        break
+      case "drawing":
+        result = k.drawing(req.iso)
         break
       case "selectorFor":
         result = k.selectorFor(req.kind, req.hashes, req.before)

@@ -80,7 +80,7 @@ export function moveFeature(tree: Tree, id: string, by: -1 | 1): Tree {
   return { ...tree, features }
 }
 
-export function applyEdit(tree: Tree, name: string, input: Record<string, unknown>): { tree: Tree; target?: string } {
+export function applyEdit(tree: Tree, name: string, input: Record<string, unknown>): { tree: Tree; target?: string; note?: string } {
   if (name === "set_params") {
     const params = { ...tree.params }
     const notes = { ...tree.paramNotes }
@@ -103,10 +103,18 @@ export function applyEdit(tree: Tree, name: string, input: Record<string, unknow
     const f = parsed.data
     if (tree.features.some((x) => x.id === f.id)) throw new InputError(`已经有 id 为「${f.id}」的特征了，换一个 id，或用 edit_feature 修改它`)
     const features = [...tree.features]
-    const at = after ? features.findIndex((x) => x.id === after) : features.length - 1
+    let at = after ? features.findIndex((x) => x.id === after) : features.length - 1
     if (after && at < 0) throw new InputError(`找不到特征「${after}」`)
+    // `after` that would put it before what it uses (a sketch made just now): after the last of those instead.
+    const uses = referencesOf(f).map((id) => features.findIndex((x) => x.id === id)).filter((i) => i >= 0)
+    const latest = uses.length ? Math.max(...uses) : -1
+    let note: string | undefined
+    if (latest > at) {
+      note = `after「${after}」会排在它用到的「${displayName(tree, features[latest])}」前面，已改为放在「${displayName(tree, features[latest])}」后面。after 只在要插到中间时才写。`
+      at = latest
+    }
     features.splice(at + 1, 0, f)
-    return { tree: { ...tree, features }, target: f.id }
+    return { tree: { ...tree, features }, target: f.id, note }
   }
   if (name === "edit_feature") {
     const { id, changes } = input as { id: string; changes: Record<string, unknown> }
@@ -115,7 +123,10 @@ export function applyEdit(tree: Tree, name: string, input: Record<string, unknow
     const { op: _op, id: _id, ...rest } = changes ?? {}
     void _op
     void _id
-    const parsed = Feature.safeParse({ ...tree.features[i], ...rest })
+    // null removes a field: { "thin": null } turns a thin wall back into a plain extrusion.
+    const merged: Record<string, unknown> = { ...tree.features[i], ...rest }
+    for (const [k, v] of Object.entries(rest)) if (v === null) delete merged[k]
+    const parsed = Feature.safeParse(merged)
     if (!parsed.success) throw new InputError(`修改后的特征不合法：${parsed.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("；")}`)
     const features = [...tree.features]
     features[i] = parsed.data
@@ -168,9 +179,9 @@ export async function executeTool(port: KernelPort, tree: Tree, name: string, in
       const images = await look(views, input.highlight as string | undefined)
       return { tree, output: { ok: true, text: `视图：${views.join("、")}（蓝色 = 高亮的特征，灰色 = 其余）`, images } }
     }
-    const { tree: next, target } = applyEdit(tree, name, input)
+    const { tree: next, target, note } = applyEdit(tree, name, input)
     const report = await port.rebuild(next)
-    return { tree: next, output: { ok: resultOk(report, target), text: resultText(name, report, target) }, report, focus: target }
+    return { tree: next, output: { ok: resultOk(report, target), text: [note && `⚠ ${note}`, resultText(name, report, target)].filter(Boolean).join("\n") }, report, focus: target }
   } catch (e) {
     if (e instanceof InputError || (e as Error)?.name === "ExprError") return { tree, output: { ok: false, text: `✗ ${(e as Error).message}` } }
     return { tree, output: { ok: false, text: `✗ 出错了：${(e as Error)?.message ?? e}` } }
@@ -185,7 +196,7 @@ export function checkText(report: BuildReport) {
   const invalid = rows.filter((r) => r.invalid).length
   return [
     ...rows.map((r) => (r.invalid ? `? ${r.id}「${r.said}」：量不了，${r.actual}` : `${r.pass ? "✓" : "✗"} ${r.id}「${r.said}」：要求 ${r.expected}，实际 ${r.actual}`)),
-    ...(failed ? [`${failed} 项不满足：先用 edit_feature 修模型，再核对一次；修不了就在回复里直说。不要为了通过去改期望值。`] : []),
+    ...(failed ? [`${failed} 项不满足：先确认量的位置对不对（size 是整个零件的外形；局部尺寸用 distance / thickness，选择器要正好选中那个面）。量错了就用同一个 id 改写这一项；确实没做到再用 edit_feature 修模型，然后再核对。不要为了通过去改期望值。`] : []),
     ...(invalid ? [`${invalid} 项量不了：是这一项的选择器写得不对（要正好选中要量的面或边，例如加上 normal、of），用同一个 id 改写这一项，不是改模型。`] : []),
     ...(!failed && !invalid ? ["全部满足。"] : []),
   ].join("\n")
@@ -200,6 +211,7 @@ function resultOk(report: BuildReport, target?: string) {
 export function bodyLine(report: BuildReport) {
   const b = report.body
   if (!b) return "还没有实体。"
+  if (report.parts) return `实体：${b.size.join(" × ")} mm，${report.parts.length} 个零件：${report.parts.map((p) => `${p.name}（${p.size.join(" × ")} mm，${r1(p.volume / 1000)} cm³）`).join("、")}。`
   const solids = b.solids > 1 ? `，${b.solids} 个不相连的实体` : ""
   return `实体：${b.size.join(" × ")} mm，体积 ${r1(b.volume / 1000)} cm³${solids}。`
 }

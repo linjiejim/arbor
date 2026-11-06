@@ -31,16 +31,52 @@ export type Hover = {
  * (painted by this step's new / modified status, or by provenance when a
  * feature is highlighted), its edges, and the sketch outline if any.
  */
-export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint): THREE.Group {
+export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view: PartsView = NO_PARTS_VIEW): THREE.Group {
   const root = new THREE.Group()
   root.name = "studio-model"
+  const materials = [kit.model, kit.highlight, kit.modified, kit.ghost, kit.modelDark]
+  // Parts pulled apart or hidden: one mesh (and edge set) per part, moved along its explode vector.
+  if (d.parts && (view.explode > 0 || view.hidden.size)) {
+    d.parts.forEach((part, k) => {
+      if (view.hidden.has(k) || !d.mesh) return
+      const groups = d.groups.filter((g) => g.part === k)
+      const index: number[] = []
+      const own = groups.map((g) => {
+        const start = index.length
+        for (let i = g.start; i < g.start + g.count; i++) index.push(d.mesh!.triangles[i])
+        return { ...g, start }
+      })
+      const geo = new THREE.BufferGeometry()
+      geo.setAttribute("position", new THREE.BufferAttribute(d.mesh.vertices, 3))
+      geo.setAttribute("normal", new THREE.BufferAttribute(d.mesh.normals, 3))
+      geo.setIndex(index)
+      for (const g of own) geo.addGroup(g.start, g.count, materialIndex(g, paint))
+      const mesh = new THREE.Mesh(geo, materials)
+      mesh.userData.groups = own
+      mesh.userData.part = k
+      const at = new THREE.Vector3(...part.explode).multiplyScalar(view.explode)
+      mesh.position.copy(at)
+      root.add(mesh)
+      if (d.edges) {
+        const pts: number[] = []
+        for (const g of d.edgeGroups) if (g.part === k) for (let i = g.start * 3; i < (g.start + g.count) * 3; i++) pts.push(d.edges[i])
+        const eg = new THREE.BufferGeometry()
+        eg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3))
+        const lines = new THREE.LineSegments(eg, kit.edge)
+        lines.position.copy(at)
+        root.add(lines)
+      }
+    })
+    root.userData.partsMode = true
+    return root
+  }
   if (d.mesh) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute("position", new THREE.BufferAttribute(d.mesh.vertices, 3))
     geo.setAttribute("normal", new THREE.BufferAttribute(d.mesh.normals, 3))
     geo.setIndex(new THREE.BufferAttribute(d.mesh.triangles, 1))
     for (const g of d.groups) geo.addGroup(g.start, g.count, materialIndex(g, paint))
-    const mesh = new THREE.Mesh(geo, [kit.model, kit.highlight, kit.modified, kit.ghost])
+    const mesh = new THREE.Mesh(geo, materials)
     mesh.userData.groups = d.groups
     root.add(mesh)
   }
@@ -81,11 +117,17 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint): THR
 }
 
 function materialIndex(g: DisplayData["groups"][number], paint: Paint) {
-  if (paint.faces) return paint.faces.includes(g.hash) ? 1 : 0
-  if (paint.highlight) return (typeof paint.highlight === "string" ? g.origin === paint.highlight : paint.highlight.includes(g.origin)) ? 1 : 0
-  if (!paint.status) return 0
-  return g.status === "new" ? 1 : g.status === "modified" ? 2 : 0
+  // Parts alternate between the model grey and a darker one; new / modified colours go on top.
+  const rest = g.part !== undefined && g.part % 2 === 1 ? 4 : 0
+  if (paint.faces) return paint.faces.includes(g.hash) ? 1 : rest
+  if (paint.highlight) return (typeof paint.highlight === "string" ? g.origin === paint.highlight : paint.highlight.includes(g.origin)) ? 1 : rest
+  if (!paint.status) return rest
+  return g.status === "new" ? 1 : g.status === "modified" ? 2 : rest
 }
+
+/** How a split body is shown: parts pulled apart (0–1 of their explode vectors) and hidden ones. */
+export type PartsView = { explode: number; hidden: Set<number> }
+export const NO_PARTS_VIEW: PartsView = { explode: 0, hidden: new Set() }
 
 /** Re-paint an existing model object without rebuilding geometry. */
 export function repaint(root: THREE.Object3D, paint: Paint) {

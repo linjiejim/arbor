@@ -14,6 +14,7 @@ app/src/studio/
     mesh.ts        网格化与几何分类（移植自 spikes/replicad-kernel）
     measure.ts     测量：一个面或边的尺寸，两个之间的距离、角度
     features2.ts   第二批特征：成形到（下一面 / 某个面）、薄壁（封闭轮廓 / 开放的线）、拉伸拔模、筋
+    drawing.ts     工程图：第一角三视图（可加轴测图），消隐、去重的虚线、中心线、尺寸投影
     check.ts       需求核对：外形、壁厚、孔、距离、节圆、角度、体积，由内核量出来
     dims.ts        尺寸：每个建成的特征有哪些数、来自哪里、画在模型的哪里
     topo.ts        列出面、边、实体（按哈希去重，替代 replicad 的 O(n²) 列举）和面的面积、中心
@@ -42,9 +43,15 @@ app/src/studio/
   holes.ts         标准孔：公制螺钉的过孔、攻丝底孔、沉孔、埋头孔
   section.ts       剖视的平面
   evals.ts         17 道评测题和自动检查
+  limits.ts        别人给的特征树的上限（大小、特征数、字符串长度、阵列个数），服务器和浏览器共用
+  share.ts         分享链接的浏览器端：按白名单构造快照、读回时再校验、删除口令
+  import.ts        导入特征树 JSON（导出的特征树，或分享快照的原始 JSON）
+  codegen.ts       特征树 → build123d 代码；表达式解析后重新生成，注释去换行
 app/server/        对话 API（Hono + AI SDK 7），只转发对话，不碰几何
   models.ts        走哪条路调模型（OpenRouter / DeepSeek 直连）以及每次花了多少钱
-app/routes/studio.tsx
+  shares.ts        分享链接：存、取、删、清理、限速
+app/routes/studio.tsx         工作台（分享、导入、导出）
+app/routes/studio-share.tsx   分享链接的只读页 /studio/s/:id
 ```
 
 ## 一次对话怎么走
@@ -81,6 +88,8 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
 
 或者不配服务端 key，在页面右上角的钥匙图标里填自己的 key（只存浏览器本地）。
 
+5287 或 18914 被别的检出占着时，换端口：`PORT=18927 npm run dev:api`，再 `STUDIO_API_PORT=18927 npx vite --port 5391`（vite 的 `/api` 代理读 `STUDIO_API_PORT`）。冒烟测试同理：`E2E_PORT=4398 E2E_API_PORT=18928 npx playwright test`。
+
 脚本模型（`server/mock.ts`）每次请求发一个工具调用，按顺序建一个带圆角、抽壳、底孔的盒子，再调一次 `look`。它用来测整条链路，不代表真实模型的表现。
 
 ## 在模型上标注
@@ -99,6 +108,8 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
 5. **回看**：消息里的标签和回复里的 ①②，都会用 `locate` 在当前模型上重新解析选择器并高亮；解析不到就提示。
 
 评测里带 `start` 和 `notes` 的题会先建好起始模型，在 Node 内核里按同样的方式点选，再把标注文字发给模型。
+
+- **斜面**：点在斜面上时，`pick` 给出这个斜面自己的草图坐标（原点在面中心，x 水平，y 沿坡往上），和 `on.face` 贴斜面的规则是同一个函数 `faceFrame`；发给模型的文字写成「在这个斜面上画草图 … 点击处的斜面草图坐标 (u, v)」，并附三维方向。
 
 ## 界面
 
@@ -125,6 +136,11 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
   - 对话里的「核对要求 · 4/5」卡片记的是那一刻；参数页顶部的「要求核对」是实时的，有不满足的会自动展开，指向一行时模型上高亮量的面和边。
   - 助教最后一步时满足、之后被学习者自己改参数改到不满足的，标黄色「已偏离」，不算错（`use-studio.ts` 的 `checkBaseline`）；其余不满足的是红色，可以「让助教修正」。
   - 评测输出里多了一列：助教列了几项核对、最后是否都满足、有没有先 ✗ 再修好（caught）。
+- **工程图**（顶栏「3D｜工程图」，`kernel/drawing.ts`、`ui/drawing-sheet.tsx`）：
+  - 内核用 OpenCascade 的消隐（`makeProjectedEdges`）出主视图（从 −Y 看）、俯视图（从 +Z 看）、左视图（从 −X 看），边离散成线段；和看得见的线重合的虚线去掉；圆柱面画中心线（正对时十字，侧看时轴线）。
+  - 尺寸用尺寸模型（`dims.ts`），每个尺寸放进最能看清它的那个视图，同样的字只标一次；总长、总宽、总高从包围盒补上，已有同值尺寸时不重复。
+  - 刻字模型用第一个刻字特征之前的实体出图，注「文字见模型」（文字有上千条边）。
+  - 排版在浏览器里：第一角排布（俯视图在主视图下，左视图在主视图右），从优先比例里挑 A4 能放下的最大一个，放不下用 A3；标题栏是简化的 GB 格式。导出 SVG；打印在新窗口里，可以存成 PDF。
 - **测量**（视图右侧工具栏）：点一个面或边看它的尺寸，再点一个看两者之间，第三下重新开始，再点同一个就取消。
   - 由内核的 `measure` 算：BRepExtrema 求最短距离和两端点（画成一条线），平面、直线、圆或圆柱之间再算夹角、平行面间距、圆心距、轴线间距。
   - Esc 退出。
@@ -139,6 +155,53 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
   - 对话只在停在底部时才跟随滚动，往上翻着看时不会被拽下去。跟随靠 ResizeObserver，所以流式文字、工具卡片、`look` 的图片撑高内容时都会跟上。
   - 文字流入时最多每 40 ms 更新一次。Markdown 按段切开，写完的段不再重渲；最后一段里没写完的 `**`、`` ` `` 和代码块先补上。
 - **工具卡片**：改模型的步骤有浅蓝底色，`inspect` / `look` 没有底色，失败的是浅红底。
+
+## 分享与导入
+
+方案见 `docs/specs/2026-11-07-studio-share.md`。
+
+### 分享链接
+
+1. **生成**：顶栏的分享图标打开 `ui/share-dialog.tsx`：标题（预填第一个非草图特征的名字）、说明（可选，≤ 200 字）、「附上和助教的对话（只含文字）」（默认不勾）。
+   - `share.ts` 的 `sharePayload` 按白名单逐字段构造快照：特征树再过一遍 `Tree.parse`（去掉 schema 以外的字段），对话只取文字（`chatLines`：没有图片、思考、工具调用，也没有分隔线），再加上构建版本（`__APP_VERSION__`，vite 在构建时写入 `GITHUB_SHA` 的前 7 位，本地是 `dev`）。
+   - localStorage 里的东西（学习者的 key、整段对话）从不整体拷贝。
+   - `POST /api/studio/share` 返回 `{ id, url, deleteToken }`。删除口令存在本浏览器的 `ft-studio-shares-v1`，服务器只存它的 sha256。
+2. **打开** `/studio/s/:id`（`routes/studio-share.tsx`）：
+   - 拿到快照后用 `limits.ts` 的 `checkTree` 再校验一次，和服务器同样的上限；不过关就写明原因，给「下载原始 JSON」。
+   - 页面复用工作台的视口、特征树、参数和代码面板：`useStudio(shared)` 从快照开始、不写 localStorage，参数可以试、可以撤销，刷新就回到原样。
+   - `TreeOverlay` 和 `StudioViewport` 的 `readOnly`：单击特征是回滚到那一步（不开编辑卡片），单击模型不标注（测量、剖视照常）。
+   - 「说明」页：标题、说明、对话回放。用户消息是纯文字，助教回复走 `Markdown`（不渲染原始 HTML）；不用 `dangerouslySetInnerHTML`。
+   - `<head>` 里动态加 `<meta name="robots" content="noindex">`，离开页面时去掉。服务器上不改 Caddy：`try_files … /index.html` 已经把 `/studio/s/*` 回落到单页应用。
+   - 链接是本浏览器生成的（有删除口令）时，「说明」页底部能删除它。
+3. **复制到我的工作台**：带着当前的树（试过的参数也算）`navigate("/studio", { state: { incoming } })`。工作台等内核就绪后 `studio.load` 替换（原来的树进撤销历史），弹「已替换当前模型 · 撤销」，再把 router state 清掉，刷新不会再替换一次。
+4. **对话里的分隔线**：换模型（复制、导入）时 `chat.addDivider` 插一条 `metadata.divider` 的消息，只给人看：发给模型前过滤掉（每条用户消息本来就带着当时的特征树），也不进分享快照。对话为空时不插。
+
+### 服务器（`server/shares.ts`）
+
+- 一份快照一个文件：`$STUDIO_DATA_DIR/shares/<id 前两位>/<id>.json`，先写临时文件再改名。id 是 10 位 base62（`crypto.randomBytes`，拒绝采样），拼路径前用 `^[0-9A-Za-z]{10}$` 校验。
+- 「最后打开时间」是文件的 mtime，打开时如果不是今天（北京时间）就更新。启动时和之后每天清理一次：一年没打开的删掉，同时重算总量。
+- 上限（`src/studio/limits.ts` 的 `LIMITS`）：请求体 512 KB，特征树 200 KB、≤ 200 个特征、≤ 100 个参数、任何字符串 ≤ 500 字，对话 300 KB、≤ 200 条。超了 413「模型太大，不能分享」。格式不对 400，并说明是哪个特征的哪个字段。
+- 请求体里有形如 `sk-…` 的长串就拒绝（400「内容里像是有密钥」）。
+- 限速（每个 IP，内存里，重启清零）：创建 20 次 / 小时，打开 300 次，删除 60 次；超了 429，写几分钟后再试。
+- 总量超过 2 GB 不再接受新分享（503），并在错误日志里报警。
+- 日志每次创建、打开、删除、清理记一行 JSON：`{"share":"create","id":…,"bytes":…,"ip":"<12 位哈希>"}`。IP 加了进程级随机盐再哈希，不记内容。
+- `shareRoutes(store, { limiters, log })` 是独立的 Hono 应用，单元测试直接 `app.request(...)`。
+
+### 导入
+
+- 「导出与导入」菜单的「导入特征树（JSON）…」，或者把 `.json` 拖进 3D 视图。
+- `import.ts` 收两种：导出的特征树，或分享快照的原始 JSON（取其中的 `tree` 和 `title`）。同样过 `checkTree`；文件 ≤ 1 MB。
+- 校验通过直接替换，可以撤销，提示「已导入「名字」· 撤销」；失败时在视图顶部写明哪里不对（例如「第 2 个特征（拉伸1）缺少 sketch 字段」），不自动消失，模型不变。
+
+### 别人的特征树进来以后
+
+- **导出代码**（`codegen.ts` 的 `buildCode`）：
+  - 表达式先用 `expr.ts` 的 `parse` 解析，再从语法树重新打印成 Python：只有数字、已有的参数名、`pi`、运算符和 `expr.ts` 允许的函数。解析不了的、引用了不存在的名字（比如 `__import__`）的，都写成 `None`。
+  - 参数名必须是合法的 Python 名字，不能是关键字、不能以 `__` 开头、不能和文件里的辅助函数重名；特征 id 必须是 `^[A-Za-z][A-Za-z0-9_]*$`。
+  - 注释（特征名、设计意图、参数说明）去掉换行和其他控制字符；文字用 `JSON.stringify`，标题在文档字符串里转义引号。
+  - 写成 `None` 的地方逐条列在文件开头（只说哪个特征的哪个字段、为什么，不抄原文）。「导出 build123d 代码」遇到这种情况不下载，弹出第一条原因。
+- **内核上限**：阵列个数、多边形边数这类可以写表达式的数，算出来以后不能超过 `MAX_COUNT`（500）。线性阵列两个方向的乘积也算；阵列、镜像一个本身就有很多实体的特征（比如阵列过的孔）时，按这一步复制出的实体总数算。超了这一步报错。
+  - 个数上限挡住的是成倍放大；互相重叠的几何本身就慢（法兰盘上 100 个互相重叠的孔重建约 23 秒）。重建在 Worker 里，页面不会卡住，但模型要等，没有超时。
 
 ## 文字（刻字、凸字）
 
@@ -166,11 +229,15 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
 ## 特征树格式
 
 - 参数：`{ "L": 80, "inner": "L - 2*t" }`，任何数值字段都可以写参数名或表达式。
-- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`rib`。
+- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`rib`、`split`。
 - 拉伸的几种写法（`kernel/features2.ts`）：
   - `distance`、`through`、`until` 三者正好写一个。`until: "next"`：拉得很长，加料时减去实体、切除时与实体求交，只留贴着草图平面的那几块，所以挡住它的面是斜的、弯的都行；`until: { face }`：平行的面就是算好的距离，斜面用 replicad 的 `extrudeUntil`。
   - `thin`：封闭轮廓用 `Drawing.offset` 偏出一圈（向外偏时凸角会变圆）；开放的线（草图图形 `path`，圆弧按 5 µm 离散）按折线偏移、端头平齐，`inside` 是线拐弯的那一侧。
   - `draft`：先直拉，再把不平行于草图平面的面拔模；拔模失败（例如圆柱面）就改为原轮廓和内缩轮廓之间的直纹放样。
+- 拆件 `split`（`build.ts` 的 `split`、`onParts`）：用一个平面把实体（或 `of` 指定的零件）切成两个有名字的零件，背面一侧在前。每一步存一张零件表 `parts`，`body` 是各零件拼成的整体（`topo.ts` 的 `compoundOf`，不能用 replicad 的 makeCompound，它会释放传进去的形状），选择、显示、测量照旧用整体。
+  - 拆开以后的改实体特征在每个零件上各跑一次：写了 `part` 的只改那个零件；切除和孔改到所有碰到的零件；加料必须正好接上一个零件；抽壳、拔模、整体镜像必须写 `part`。
+  - 爆炸：每个零件带一个位移向量，切开时法向一侧的零件沿法向移开（至少 15 mm）。视图里炸开或隐藏零件时，每个零件单独成网格，这时不能点选。
+  - 导出：STEP 里每个零件是一个带名字的实体（非 ASCII 的名字转成 `\X2\…\X0\`）；STL 是一个 zip，每个零件一个文件（`zip.ts`，只存储不压缩，不加依赖）。build123d 导出用一个 `parts` 字典。
 - 筋 `rib`：一条 `path` 两端延长很远，在线的一侧围成一大块，厚 `t` 横跨草图平面；和实体包围盒求交、减去实体，只留不碰包围盒外框的块（被实体围住的空腔）。两侧都有时取靠近实体中心的一侧，`flip` 换另一侧。字段见 `dsl.ts`，每个字段都有中文 `describe`，同时也是给模型看的说明。
 - 阵列个数、多边形边数也可以写参数或表达式，结果必须是整数。
 - `paramNotes`：每个参数一句说明，只给人看，不参与计算。
@@ -246,6 +313,7 @@ node --env-file=… node_modules/.bin/tsx scripts/studio-eval.ts flange mug --th
 
   改完执行 `pm2 restart featuretree-api --update-env`。
 - 花费：服务端日志每次请求记一行用量和成本（不记内容）。走 OpenRouter 时用它返回的实际花费，直连 DeepSeek 时按价目表估算。`/root/featuretree/api/data/budget.json` 是当天累计。
+- 分享快照：`/root/featuretree/api/data/shares/`（`STUDIO_DATA_DIR` 在 `ecosystem.config.cjs` 里设好，工作流每次发布 `mkdir -p` 这个目录，只切换 `releases/`，不动 `data/`）。不单独备份，丢了只是链接失效。分享相关的日志行带 `"share"` 字段，`grep '"share":"create"'` 就能数出当天新建了几个。
 
 ### OpenRouter 的路由
 

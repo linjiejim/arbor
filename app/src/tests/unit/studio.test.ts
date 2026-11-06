@@ -15,6 +15,7 @@ import { describeUse, drivenFeatures, paramDependents, paramUses } from "@/studi
 import { standardHole } from "@/studio/holes"
 import { dimSource } from "@/studio/dim-source"
 import { selectorWords } from "@/studio/selector-words"
+import { project } from "@/studio/kernel/drawing"
 import { glyphArea } from "./glyph-area"
 
 describe("parameter expressions", () => {
@@ -811,5 +812,189 @@ describe("more features: up to, thin, taper, rib", () => {
       { id: "r", op: "rib", sketch: "p", t: 4 },
     ] } as unknown as Tree)
     for (const s of ["trace(path_p, line_width=3)", "until=Until.NEXT", "taper=3", "def rib(", "tool_r = rib(part, plane_p, pts_p, 4)"]) expect(code).toContain(s)
+  })
+})
+
+describe("annotations on a slope", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+  const wedge = (hiRight: number): Tree =>
+    ({
+      params: {},
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XZ" }, shapes: [{ type: "polyline", points: [[-20, 0], [20, 0], [20, hiRight], [-20, 10]] }] },
+        { id: "w", op: "extrude", sketch: "s", distance: 40, direction: "both" },
+      ],
+    }) as unknown as Tree
+
+  for (const [name, hi] of [["27°", 30], ["1°", 10 + 40 * Math.tan(Math.PI / 180)]] as const) {
+    it(`gives the slope's own sketch coordinates, and a hole drilled there passes through the click (${name})`, () => {
+      const tree = wedge(hi)
+      k.rebuild(tree)
+      const z = (x: number) => 10 + ((hi - 10) * (x + 20)) / 40
+      for (const [x, y] of [[0, 0], [8, -12], [-12, 9]]) {
+        k.rebuild(tree)
+        const point: [number, number, number] = [x, y, z(x)]
+        const [hash] = k.locate("face", { near: point })!
+        const info = k.pick({ kind: "face", hash, point })!
+        expect(info.sketch?.face, "an inclined face gets its own frame").toBeTruthy()
+        const { expect: _e, ...face } = info.selector!
+        const r = k.rebuild({
+          ...tree,
+          features: [
+            ...tree.features,
+            { id: "hs", op: "sketch", on: { plane: "XY", face }, shapes: [{ type: "circle", d: 2, center: info.sketch!.uv }] },
+            { id: "h", op: "extrude", sketch: "hs", distance: 3, mode: "cut", direction: "reverse" },
+          ] as Tree["features"],
+        })
+        expect(r.features.every((f) => f.state === "ok"), JSON.stringify(r.features.map((f) => f.message))).toBe(true)
+        const c = [...k.inspect("faces", undefined, { kind: "cylinder", radius: 1 }).matchAll(/中心\(([^)]+)\)/g)].map((m) => m[1].split(",").map(Number))[0]
+        const n = info.sketch!.face!.normal
+        const d = [point[0] - c[0], point[1] - c[1], point[2] - c[2]]
+        const off = Math.hypot(d[1] * n[2] - d[2] * n[1], d[2] * n[0] - d[0] * n[2], d[0] * n[1] - d[1] * n[0])
+        expect(off, `axis misses the click at (${x}, ${y})`).toBeLessThan(0.02)
+      }
+    })
+  }
+
+  it("says so in the text the model reads", () => {
+    const text = annotationText([
+      { n: 1, note: "在这里打孔", kind: "face", what: "平面", where: "来自「w」", origins: ["w"], facts: "", point: [0, 0, 20], selector: { of: "w", near: [0, 0, 20], expect: 1 }, sketch: { plane: "XY", offset: 0, uv: [1, 2], face: { origin: [0, 0, 20], x: [0, -1, 0], y: [0.89, 0, 0.45], normal: [-0.45, 0, 0.89] } } },
+    ])
+    expect(text).toContain("在这个斜面上画草图")
+    expect(text).toContain("点击处的斜面草图坐标 (1, 2)")
+  })
+})
+
+describe("split into parts", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+  const box = (extra: Record<string, unknown>[], Hs: number | string = "Hs"): Tree =>
+    ({
+      params: { L: 80, W: 50, H: 30, t: 2, Hs: 20 },
+      features: [
+        { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W" }] },
+        { id: "box", op: "extrude", sketch: "sk", distance: "H" },
+        { id: "sk2", op: "sketch", on: { plane: "XY", offset: "t" }, shapes: [{ type: "rect", w: "L-2*t", h: "W-2*t" }] },
+        { id: "cav", op: "extrude", sketch: "sk2", distance: "H-2*t", mode: "cut" },
+        { id: "sp", op: "split", by: { plane: "XY", offset: Hs }, parts: ["底壳", "上盖"] },
+        ...extra,
+      ],
+    }) as unknown as Tree
+  const shell = 80 * 50 * 30 - 76 * 46 * 26
+
+  it("cuts a closed enclosure into a base and a lid, volumes adding up, heights following the parameter", () => {
+    const r = k.rebuild(box([]))
+    expect(r.parts!.map((p) => p.name)).toEqual(["底壳", "上盖"])
+    expect(r.parts![0].volume + r.parts![1].volume).toBeCloseTo(shell, 3)
+    expect(r.parts![0].size[2]).toBe(20)
+    const lower = k.rebuild({ ...box([]), params: { L: 80, W: 50, H: 30, t: 2, Hs: 12 } })
+    expect(lower.parts![0].size[2]).toBe(12)
+    expect(k.rebuild(box([], 40)).features.at(-1)!.message).toMatch(/切面没有碰到实体：.*0–30.*40/)
+  })
+
+  it("applies later features per part: a lid hole, a hole through both, a fillet on one part; asks which part for a shell", () => {
+    const lid = k.rebuild(box([
+      { id: "bs", op: "sketch", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, shapes: [{ type: "circle", d: 10 }] },
+      { id: "btn", op: "extrude", sketch: "bs", distance: 5, mode: "cut", direction: "reverse" },
+    ]))
+    expect(lid.features.at(-1)!.summary).toMatch(/· 上盖$/)
+    expect(lid.parts![0].volume + lid.parts![1].volume).toBeCloseTo(shell - Math.PI * 25 * 2, 2)
+    const through = k.rebuild(box([{ id: "h", op: "hole", on: { plane: "XY" }, reverse: true, at: [[30, 15]], d: 3 }]))
+    expect(through.features.at(-1)!.summary).toMatch(/底壳、上盖$/)
+    const fil = k.rebuild(box([{ id: "f", op: "fillet", part: "上盖", edges: { parallel: "Z" }, r: 3 }]))
+    expect(fil.parts![0].volume).toBeCloseTo(k.rebuild(box([])).parts![0].volume, 6)
+    expect(k.rebuild(box([{ id: "s", op: "shell", open: { normal: "+Z", extreme: "+Z" }, t: 1 }])).features.at(-1)!.message).toMatch(/要写 part/)
+  })
+
+  it("explodes the lid upwards and exports named parts", async () => {
+    k.rebuild(box([]))
+    const d = k.display()
+    expect(d.parts!.map((p) => p.name)).toEqual(["底壳", "上盖"])
+    expect(d.parts![0].explode).toEqual([0, 0, 0])
+    expect(d.parts![1].explode[2]).toBeGreaterThan(0)
+    expect(d.groups.every((g) => g.part === 0 || g.part === 1)).toBe(true)
+    const step = await (await k.exportBody("step"))!.text()
+    expect(step).toContain("\\X2\\5E9558F3\\X0\\") // 底壳
+    const zip = (await k.exportBody("stl"))!
+    expect(zip.type).toBe("application/zip")
+    expect(new TextDecoder().decode(new Uint8Array(await zip.arrayBuffer()).slice(30, 30 + 10))).toBe("底壳.stl")
+  })
+
+  it("exports the split and per-part features to build123d", () => {
+    const code = toBuild123d(box([{ id: "h", op: "hole", on: { plane: "XY" }, reverse: true, at: [[30, 15]], d: 3 }, { id: "f", op: "fillet", part: "上盖", edges: { parallel: "Z" }, r: 3 }]))
+    expect(code).toContain('parts = {"底壳": split(part, bisect_by=split_plane, keep=Keep.BOTTOM), "上盖": split(part, bisect_by=split_plane, keep=Keep.TOP)}')
+    expect(code).toContain("parts = {k: v - tool_h for k, v in parts.items()}")
+    expect(code).toContain('parts["上盖"] = fillet(parts["上盖"].edges()')
+  })
+})
+
+describe("after that would come too early", () => {
+  it("puts a feature after the sketch it uses, and says so", () => {
+    const t: Tree = { params: { H: 10 }, features: [
+      { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 10, h: 10 }] },
+      { id: "body", op: "extrude", sketch: "sk", distance: "H" },
+      { id: "cav", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 4, h: 4 }] },
+    ] } as unknown as Tree
+    const r = applyEdit(t, "extrude", { id: "hole", sketch: "cav", distance: 5, mode: "cut", after: "body" })
+    expect(r.tree.features.map((f) => f.id)).toEqual(["sk", "body", "cav", "hole"])
+    expect(r.note).toMatch(/已改为放在/)
+  })
+})
+
+describe("engineering drawings", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+
+  it("projects first-angle: front sees X and Z, top X and Y, left −Y and Z", () => {
+    expect(project([1, 2, 3], "front")).toEqual([1, 3])
+    expect(project([1, 2, 3], "top")).toEqual([1, 2])
+    expect(project([1, 2, 3], "left").map((x) => x + 0)).toEqual([-2, 3])
+  })
+
+  it("draws a holed block: the hole hidden in the front view, a visible circle with a centre cross on top", () => {
+    k.rebuild({ params: {}, features: [
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 40, h: 30 }, { type: "circle", d: 10, cut: true }] },
+      { id: "e", op: "extrude", sketch: "s", distance: 10 },
+    ] } as unknown as Tree)
+    const d = k.drawing(false)!
+    const front = d.views.find((v) => v.name === "front")!
+    const top = d.views.find((v) => v.name === "top")!
+    expect(front.hidden.length, "the hole shows as hidden lines").toBeGreaterThan(0)
+    for (let i = 0; i < front.hidden.length; i += 4) expect(Math.abs(front.hidden[i] - front.hidden[i + 2])).toBeLessThan(1e-3)
+    expect(top.hidden, "nothing behind the top face but the hole, which is seen").toEqual([])
+    expect(top.centre.length / 4, "a cross on the hole").toBe(2)
+    expect(front.bbox[1][0] - front.bbox[0][0]).toBeCloseTo(40)
+    expect(top.bbox[1][1] - top.bbox[0][1]).toBeCloseTo(30)
+  })
+
+  it("puts the flange's pitch circle and holes in the top view, once each", () => {
+    k.rebuild(STARTERS.find((s) => s.id === "flange")!.tree)
+    const top = k.drawing(false)!.views.find((v) => v.name === "top")!
+    const words = top.dims.map((x) => x.plain)
+    expect(words).toContain("⌀90")
+    expect(words).toContain("⌀8")
+    const all = k.drawing(false)!.views.flatMap((v) => v.dims.map((x) => x.plain))
+    expect(new Set(all).size).toBe(all.length)
+  })
+})
+
+describe("edit_feature null", () => {
+  it("removes a field", () => {
+    const t: Tree = { params: {}, features: [
+      { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 10, h: 10 }] },
+      { id: "e", op: "extrude", sketch: "sk", distance: 5, thin: { t: 1 } },
+    ] } as unknown as Tree
+    const r = applyEdit(t, "edit_feature", { id: "e", changes: { thin: null } })
+    expect("thin" in r.tree.features[1]).toBe(false)
   })
 })

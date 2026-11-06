@@ -1,4 +1,5 @@
-import { ArrowLeftRight, Ruler, RulerDimensionLine, ScissorsLineDashed, X } from "lucide-react"
+import * as React from "react"
+import { ArrowLeftRight, Expand, Ruler, RulerDimensionLine, ScissorsLineDashed, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { IconButton } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
@@ -17,6 +18,9 @@ export function ViewTools({
   bbox,
   dims,
   onDims,
+  explode,
+  onExplode,
+  onExplodeEnd,
 }: {
   measuring: boolean
   onMeasuring: (on: boolean) => void
@@ -26,7 +30,12 @@ export function ViewTools({
   /** 「显示尺寸」: on or off, and how many of how many it shows. */
   dims: { on: boolean; shown: number; total: number }
   onDims: (on: boolean) => void
+  /** 0–1 when the body has parts, else null (no parts to pull apart). */
+  explode: number | null
+  onExplode: (f: number) => void
+  onExplodeEnd: () => void
 }) {
+  const [exploding, setExploding] = React.useState(false)
   return (
     <>
       <div className="absolute top-40 right-3 flex flex-col gap-1 rounded-md border bg-background/90 p-0.5">
@@ -45,8 +54,53 @@ export function ViewTools({
             <Ruler />
           </IconButton>
         </Tooltip>
+        <Tooltip content={explode === null ? "爆炸：拆件以后可以把零件分开看" : "爆炸：把零件分开看"} side="left">
+          <IconButton
+            label="爆炸"
+            size="icon-sm"
+            aria-pressed={exploding}
+            className={cn(exploding && "bg-selected text-primary")}
+            disabled={explode === null}
+            onClick={() => {
+              if (exploding) onExplode(0)
+              setExploding(!exploding)
+            }}
+          >
+            <Expand />
+          </IconButton>
+        </Tooltip>
       </div>
       {section && bbox && <SectionPanel section={section} onChange={onSection} bbox={bbox} />}
+      {exploding && explode !== null && (
+        <div role="group" aria-label="爆炸" className="absolute right-14 top-40 flex w-56 flex-col gap-2 rounded-md border bg-background/95 p-2.5 text-small shadow-popover">
+          <div className="flex items-center gap-2">
+            <span className="font-medium">爆炸</span>
+            <span className="ml-auto font-mono text-caption tabular text-muted-foreground">{Math.round(explode * 100)}%</span>
+            <IconButton
+              label="合上并关闭"
+              size="icon-sm"
+              onClick={() => {
+                onExplode(0)
+                setExploding(false)
+              }}
+            >
+              <X />
+            </IconButton>
+          </div>
+          <input
+            type="range"
+            aria-label="零件分开的程度"
+            min={0}
+            max={1}
+            step={0.01}
+            value={explode}
+            onChange={(e) => onExplode(Number(e.target.value))}
+            onPointerUp={onExplodeEnd}
+            onKeyUp={onExplodeEnd}
+            className="h-5 cursor-pointer accent-primary"
+          />
+        </div>
+      )}
     </>
   )
 }

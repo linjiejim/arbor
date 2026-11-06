@@ -55,89 +55,124 @@ function lex(src: string): Tok[] {
 /** Models sometimes double-encode a name as "\"d\""; the quotes carry no meaning. */
 export const unquote = (src: string) => src.replace(/^\s*(["'])(.*)\1\s*$/, "$2")
 
+// Own keys only: "constructor" is not a function an expression may call.
+const isFunc = (name: string) => Object.hasOwn(FUNCS, name)
+const isConst = (name: string) => Object.hasOwn(CONSTS, name)
+
+/** Functions and constants an expression may use (what exported code has to provide). */
+export const FUNC_NAMES = Object.keys(FUNCS)
+export const CONST_NAMES = Object.keys(CONSTS)
+
 /** Names referenced by an expression (for dependency order and "unknown parameter" errors). */
 export function namesIn(src: string): string[] {
   return lex(unquote(src))
-    .filter((t): t is { t: "id"; v: string } => t.t === "id" && !(t.v in FUNCS) && !(t.v in CONSTS))
+    .filter((t): t is { t: "id"; v: string } => t.t === "id" && !isFunc(t.v) && !isConst(t.v))
     .map((t) => t.v)
 }
 
-export function evaluate(raw: string, scope: Scope): number {
+/** A parsed expression. `name` is a parameter or a constant; `call` only ever names one of FUNCS. */
+export type ExprNode =
+  | { k: "num"; v: number }
+  | { k: "name"; v: string }
+  | { k: "neg"; a: ExprNode }
+  | { k: "bin"; op: "+" | "-" | "*" | "/" | "^"; a: ExprNode; b: ExprNode }
+  | { k: "call"; f: string; args: ExprNode[] }
+
+/** Syntax only: bad syntax throws, unknown names don't (that needs a scope). */
+export function parse(raw: string): ExprNode {
   const src = unquote(raw)
   const toks = lex(src)
   let p = 0
   const peek = () => toks[p]
+  const isOp = (...ops: string[]) => peek()?.t === "op" && ops.includes(String(peek().v))
   const eat = (v?: string) => {
     const t = toks[p]
     if (!t || (v !== undefined && !(t.t === "op" && t.v === v))) throw new ExprError(`表达式不完整：${src}`)
     p++
     return t
   }
-  const expr = (): number => {
-    let v = term()
-    while (peek()?.t === "op" && (peek().v === "+" || peek().v === "-")) {
-      const op = eat().v
-      const r = term()
-      v = op === "+" ? v + r : v - r
+  const expr = (): ExprNode => {
+    let a = term()
+    while (isOp("+", "-")) {
+      const op = eat().v as "+" | "-"
+      a = { k: "bin", op, a, b: term() }
     }
-    return v
+    return a
   }
-  const term = (): number => {
-    let v = power()
-    while (peek()?.t === "op" && (peek().v === "*" || peek().v === "/")) {
-      const op = eat().v
-      const r = power()
-      v = op === "*" ? v * r : v / r
+  const term = (): ExprNode => {
+    let a = power()
+    while (isOp("*", "/")) {
+      const op = eat().v as "*" | "/"
+      a = { k: "bin", op, a, b: power() }
     }
-    return v
+    return a
   }
-  const power = (): number => {
-    const base = unary()
-    if (peek()?.t === "op" && peek().v === "^") {
+  const power = (): ExprNode => {
+    const a = unary()
+    if (!isOp("^")) return a
+    eat()
+    return { k: "bin", op: "^", a, b: power() }
+  }
+  const unary = (): ExprNode => {
+    if (isOp("-")) {
       eat()
-      return base ** power()
+      return { k: "neg", a: unary() }
     }
-    return base
-  }
-  const unary = (): number => {
-    if (peek()?.t === "op" && peek().v === "-") {
-      eat()
-      return -unary()
-    }
-    if (peek()?.t === "op" && peek().v === "+") {
+    if (isOp("+")) {
       eat()
       return unary()
     }
     return atom()
   }
-  const atom = (): number => {
+  const atom = (): ExprNode => {
     const t = eat()
-    if (t.t === "num") return t.v
+    if (t.t === "num") return { k: "num", v: t.v }
     if (t.t === "op" && t.v === "(") {
       const v = expr()
       eat(")")
       return v
     }
     if (t.t === "id") {
-      if (t.v in FUNCS) {
-        eat("(")
-        const args = [expr()]
-        while (peek()?.t === "op" && peek().v === ",") {
-          eat()
-          args.push(expr())
-        }
-        eat(")")
-        return FUNCS[t.v](...args)
+      if (!isFunc(t.v)) return { k: "name", v: t.v }
+      eat("(")
+      const args = [expr()]
+      while (isOp(",")) {
+        eat()
+        args.push(expr())
       }
-      if (t.v in CONSTS) return CONSTS[t.v]
-      if (t.v in scope) return scope[t.v]
-      throw new ExprError(`没有名为「${t.v}」的参数`)
+      eat(")")
+      return { k: "call", f: t.v, args }
     }
     throw new ExprError(`表达式不完整：${src}`)
   }
-  const v = expr()
+  const node = expr()
   if (p !== toks.length) throw new ExprError(`表达式多了内容：${src}`)
-  if (!Number.isFinite(v)) throw new ExprError(`表达式的结果不是有限数：${src}`)
+  return node
+}
+
+function run(n: ExprNode, scope: Scope): number {
+  switch (n.k) {
+    case "num":
+      return n.v
+    case "name":
+      if (isConst(n.v)) return CONSTS[n.v]
+      if (Object.hasOwn(scope, n.v)) return scope[n.v]
+      throw new ExprError(`没有名为「${n.v}」的参数`)
+    case "neg":
+      return -run(n.a, scope)
+    case "call":
+      return FUNCS[n.f](...n.args.map((a) => run(a, scope)))
+    case "bin": {
+      const a = run(n.a, scope)
+      const b = run(n.b, scope)
+      return n.op === "+" ? a + b : n.op === "-" ? a - b : n.op === "*" ? a * b : n.op === "/" ? a / b : a ** b
+    }
+  }
+}
+
+export function evaluate(raw: string, scope: Scope): number {
+  const v = run(parse(raw), scope)
+  if (!Number.isFinite(v)) throw new ExprError(`表达式的结果不是有限数：${unquote(raw)}`)
   return v
 }
 

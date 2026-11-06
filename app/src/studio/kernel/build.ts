@@ -11,7 +11,9 @@ import {
   Drawing,
   drawCircle,
   drawPolysides,
+  drawRectangle,
   drawRoundedRectangle,
+  exportSTEP,
   getOC,
   makeCompound,
   makePlane,
@@ -25,16 +27,19 @@ import {
   type Shape3D,
 } from "replicad"
 import type { PickInfo } from "../annotations"
-import { displayName, EMPTY_TREE, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type SketchShape, type Tree } from "../dsl"
+import { displayName, EMPTY_TREE, OP_NAMES, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
+import { MAX_COUNT } from "../limits"
 import { referencesOf } from "../apply"
 import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
 import { measure, type MeasureResult, type MeasureTarget } from "./measure"
-import { countOf, edgesOf, facesOf, solidsOf } from "./topo"
+import { compoundOf, countOf, edgesOf, facesOf, solidsOf } from "./topo"
 import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
 import { runChecks, type CheckResult } from "./check"
 import { pathPoints, planeFace, ribTool, tapered, thinProfile, untilNext } from "./features2"
+import { stepAscii, zipStore } from "../zip"
+import { makeDrawing, type DrawingData } from "./drawing"
 import { standardHole } from "../holes"
 import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
@@ -136,17 +141,21 @@ export type BuildReport = {
   body: BodyStats | null
   /** The learner's requirements (`tree.checks`) measured on the latest body. */
   checks?: CheckResult[]
+  /** After a split: each part's name, volume and size. */
+  parts?: { name: string; volume: number; size: V3 }[]
   ms: number
 }
 
 export type DisplayData = {
   index: number
   mesh: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array } | null
-  /** One per B-rep face, in mesh order. `hash` identifies the face for picking. */
-  groups: { start: number; count: number; status: FaceStatus; origin: string; hash: number }[]
+  /** One per B-rep face, in mesh order. `hash` identifies the face for picking; `part` indexes `parts`. */
+  groups: { start: number; count: number; status: FaceStatus; origin: string; hash: number; part?: number }[]
   edges: Float32Array | null
   /** One per edge: a run of points in `edges` (segment pairs). */
-  edgeGroups: { start: number; count: number; hash: number }[]
+  edgeGroups: { start: number; count: number; hash: number; part?: number }[]
+  /** After a split: the parts, with where each moves at full explode. */
+  parts?: { name: string; explode: V3; center: V3 }[]
   /** Outline of the sketch, when the shown step is a sketch. */
   sketch: Float32Array | null
   /** Cosmetic threads: a ring at the nominal diameter at each end of a tapped hole. */
@@ -172,9 +181,22 @@ type Step = {
   threads?: Thread[]
   /** Where this step's dimensions go (kernel/dims.ts). */
   geom?: StepGeom
+  /** After a split: the parts (`body` is their compound), and each part's face origins. */
+  parts?: Part[]
+  partOrigins?: string[][]
 }
 
 type Thread = { r: number; major: number }
+
+/**
+ * A named part after a split. `explode`: where it moves at full explode (each
+ * split moves the normal side along the normal). `owned`: made by this step
+ * (else carried over, and freed by the step that made it).
+ */
+type Part = { name: string; body: Shape3D; explode: V3; owned: boolean }
+
+/** Features that change the body; after a split they run on each part (see `onParts`). */
+const BODY_OPS = new Set<FeatureOp>(["extrude", "revolve", "fillet", "chamfer", "shell", "hole", "linear_pattern", "circular_pattern", "mirror", "sweep", "loft", "draft", "rib"])
 
 export class Kernel {
   private steps: Step[] = []
@@ -244,6 +266,7 @@ export class Kernel {
       lastOk,
       body: last?.body ? stats(last.body) : null,
       checks: tree.checks?.length && last?.body ? runChecks(last.body, last.origins, tree.checks, this.scope) : undefined,
+      parts: last?.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, volume: r2(measureShapeVolumeProperties(p.body).volume), size: stats(p.body).size })) : undefined,
       ms: performance.now() - t0,
     }
   }
@@ -277,6 +300,23 @@ export class Kernel {
       const bb = body.body.boundingBox.bounds as [V3, V3]
       out.bbox = [[...bb[0]], [...bb[1]]] as [V3, V3]
       out.threads = this.threadRings(this.steps.indexOf(body), body)
+      if (body.parts && body.parts.length > 1) {
+        // Which part each face and edge belongs to, for colouring, hiding and exploding parts.
+        const faceToPart = new Map<number, number>()
+        const edgeToPart = new Map<number, number>()
+        out.parts = body.parts.map((p, k) => {
+          const fs = facesOf(p.body)
+          const es = edgesOf(p.body)
+          fs.forEach((f) => faceToPart.set(f.hashCode, k))
+          es.forEach((e) => edgeToPart.set(e.hashCode, k))
+          fs.forEach((f) => f.delete())
+          es.forEach((e) => e.delete())
+          const [a, b] = p.body.boundingBox.bounds as [V3, V3]
+          return { name: p.name, explode: p.explode, center: mul(add(a, b), 0.5) }
+        })
+        out.groups = out.groups.map((g) => ({ ...g, part: faceToPart.get(g.hash) }))
+        out.edgeGroups = out.edgeGroups.map((g) => ({ ...g, part: edgeToPart.get(g.hash) }))
+      }
     }
     return out
   }
@@ -342,6 +382,16 @@ export class Kernel {
         `包围盒 X ${fmt(s.bbox[0][0])}…${fmt(s.bbox[1][0])}，Y ${fmt(s.bbox[0][1])}…${fmt(s.bbox[1][1])}，Z ${fmt(s.bbox[0][2])}…${fmt(s.bbox[1][2])}`,
         `尺寸 ${s.size.map(fmt).join(" × ")} mm，体积 ${fmt(s.volume / 1000)} cm³，质心 (${s.centerOfMass.map(fmt).join(", ")})`,
         `${s.solids} 个实体，${s.faces} 个面，${s.edges} 条边`,
+        ...(step.parts && step.parts.length > 1
+          ? [
+              `零件：${step.parts
+                .map((p) => {
+                  const ps = stats(p.body)
+                  return `${p.name}（${ps.size.map(fmt).join(" × ")} mm，Z ${fmt(ps.bbox[0][2])}…${fmt(ps.bbox[1][2])}，体积 ${fmt(ps.volume / 1000)} cm³）`
+                })
+                .join("；")}`,
+            ]
+          : []),
       ].join("\n")
     }
     const faces = faceInfos(step.body, step.origins)
@@ -373,6 +423,25 @@ export class Kernel {
   pick(target: { kind: "face" | "edge"; hash: number; point: V3 }): PickInfo | null {
     const step = this.lastBuilt(this.steps.length)
     if (!step?.body) return null
+    const info = this.pickOn(step, target)
+    const part = info && this.partOf(step, target.kind, target.hash)
+    return info && part ? { ...info, where: `${part} · ${info.where}` } : info
+  }
+
+  /** The part a face or edge of a split body belongs to. */
+  private partOf(step: Step, kind: "face" | "edge", hash: number): string | null {
+    if (!step.parts || step.parts.length < 2) return null
+    for (const p of step.parts) {
+      const items = kind === "face" ? facesOf(p.body) : edgesOf(p.body)
+      const hit = items.some((x) => x.hashCode === hash)
+      items.forEach((x) => x.delete())
+      if (hit) return p.name
+    }
+    return null
+  }
+
+  private pickOn(step: Step, target: { kind: "face" | "edge"; hash: number; point: V3 }): PickInfo | null {
+    if (!step.body) return null
     const faces = faceInfos(step.body, step.origins)
     const name = (id: string) => {
       const f = this.tree.features.find((x) => x.id === id)
@@ -398,7 +467,12 @@ export class Kernel {
           origins,
           facts: `面积 ${fmt(measureArea(face.face))} mm²`,
           selector: uniqueFaceSelector(face, faces, this.scope, target.point),
-          sketch: plane && n ? { plane, offset: r2(face.center["XYZ".indexOf(n[1])]), uv: uv(target.point).map(r2) as [number, number] } : null,
+          sketch:
+            plane && n
+              ? { plane, offset: r2(face.center["XYZ".indexOf(n[1])]), uv: uv(target.point).map(r2) as [number, number] }
+              : face.kind === "plane" && face.normal
+                ? slopeSketch(face.center, face.normal, target.point)
+                : null,
         }
       }
       const edges = edgeInfos(step.body, faces)
@@ -501,6 +575,25 @@ export class Kernel {
     }
   }
 
+  /**
+   * An engineering drawing of the latest body (kernel/drawing.ts). Text has
+   * thousands of edges and is a note on a drawing anyway: the views are made
+   * from the body before the first lettering feature.
+   */
+  drawing(withIso: boolean): DrawingData | null {
+    const usesText = (f: Feature) => {
+      const sk = "sketch" in f && typeof f.sketch === "string" ? this.tree.features.find((x) => x.id === f.sketch) : undefined
+      return sk?.op === "sketch" && sk.shapes.some((x) => x.type === "text")
+    }
+    const cut = this.tree.features.findIndex(usesText)
+    const until = cut >= 0 ? cut : this.steps.length
+    const step = this.lastBuilt(until)
+    if (!step?.body) return null
+    const before = new Set(this.tree.features.slice(0, until).map((f) => f.id))
+    const dims = this.dimensions().filter((d) => before.has(d.feature))
+    return makeDrawing(step.body, step.origins, dims, withIso, cut >= 0 ? "文字见模型" : undefined)
+  }
+
   /** Dimensions of every feature that built (kernel/dims.ts). */
   dimensions(): Dim[] {
     const geoms = new Map<string, StepGeom>()
@@ -518,10 +611,20 @@ export class Kernel {
     return measure(step.body, step.origins, targets.slice(0, 2))
   }
 
-  exportBody(format: "step" | "stl", index?: number): Blob | null {
+  /** STEP or STL of the body; after a split, one STEP with a named solid per part, or a zip of one STL per part. */
+  async exportBody(format: "step" | "stl", index?: number): Promise<Blob | null> {
     const step = this.lastBuilt(index === undefined ? this.steps.length : index + 1)
     if (!step?.body) return null
-    return format === "step" ? step.body.blobSTEP() : (step.body.blobSTL({ binary: true }) as Blob)
+    const parts = step.parts && step.parts.length > 1 ? step.parts : null
+    if (!parts) return format === "step" ? step.body.blobSTEP() : (step.body.blobSTL({ binary: true }) as Blob)
+    if (format === "step") {
+      const blob = exportSTEP(parts.map((p) => ({ shape: p.body, name: p.name })))
+      return new Blob([stepAscii(await blob.text())], { type: "application/STEP" })
+    }
+    const files = await Promise.all(
+      parts.map(async (p) => ({ name: `${p.name.replace(/[\\/:*?"<>|]/g, "_")}.stl`, data: new Uint8Array(await (p.body.blobSTL({ binary: true }) as Blob).arrayBuffer()) })),
+    )
+    return zipStore(files)
   }
 
   dispose() {
@@ -539,6 +642,7 @@ export class Kernel {
   private disposeFrom(i: number) {
     for (const s of this.steps.slice(i)) {
       if (s.ownsBody) s.body?.delete()
+      s.parts?.forEach((p) => p.owned && p.body.delete())
       s.tools?.forEach((t) => t.tool.delete())
     }
     this.steps.length = Math.min(this.steps.length, i)
@@ -556,6 +660,8 @@ export class Kernel {
       sigs: prev?.sigs ?? [],
       mesh: prev?.mesh ?? null,
       edges: prev?.edges ?? null,
+      parts: prev?.parts?.map((p) => ({ ...p, owned: false })),
+      partOrigins: prev?.partOrigins,
     }
   }
 
@@ -570,13 +676,25 @@ export class Kernel {
     try {
       const dup = tree.features.findIndex((x) => x.id === f.id)
       if (tree.features[dup] !== f) throw new InputError(`特征 id「${f.id}」重复了`)
-      const out = this.apply(f, prev, warnings)
+      const out =
+        f.op === "split" ? this.split(f, prev) : prev?.parts && prev.parts.length > 1 && BODY_OPS.has(f.op) ? this.onParts(f, prev, prev.parts, warnings) : this.apply(f, prev, warnings)
+      if (out.parts) step.parts = out.parts
       Object.assign(step.result, { summary: out.summary, selected: out.selected })
       if (out.sketch) step.sketch = out.sketch
       if (out.tools) step.tools = out.tools
       if (out.threads) step.threads = out.threads
       if (out.geom) step.geom = out.geom
       if (out.body) this.commitBody(step, prev, out.body, f.id)
+      // Each part's faces are a run of the compound's, in part order.
+      if (out.body && step.parts) {
+        let at = 0
+        step.partOrigins = step.parts.map((p) => {
+          const n = countOf(p.body, "face")
+          const o = step.origins.slice(at, at + n)
+          at += n
+          return o
+        })
+      }
     } catch (e) {
       const ex = explain(f.op, describeError(e))
       Object.assign(step.result, { state: "error", message: ex.message, hint: ex.hint })
@@ -624,9 +742,8 @@ export class Kernel {
           if (sel.length > 1) throw new InputError("斜面只能选一个：加 near 或 expect: 1")
           if (ref.tilt) throw new InputError("贴在斜面上时不用 tilt")
           const f = sel[0]
-          const normal = unit(f.normal!)
-          const x = Math.abs(normal[2]) < 0.999 ? unit(cross([0, 0, 1], normal)) : ([1, 0, 0] as V3)
-          return { name: ref.plane, origin: add(f.center, mul(normal, coord)), x, y: cross(normal, x), normal, label: `斜面（${describeFace(f).split(" 来自")[0]}）`, custom: true }
+          const fr = faceFrame(f.center, f.normal!)
+          return { name: ref.plane, origin: add(fr.origin, mul(fr.normal, coord)), x: fr.x, y: fr.y, normal: fr.normal, label: `斜面（${describeFace(f).split(" 来自")[0]}）`, custom: true }
         }
         const coords = new Set(sel.map((x) => r2(x.center[P.axis])))
         if (coords.size > 1) throw new InputError("选中的面不在同一高度，加 near 或 expect 只选一个")
@@ -680,7 +797,7 @@ export class Kernel {
     f: Feature,
     prev: Step | null,
     warnings: string[],
-  ): { body?: Shape3D; summary: string; selected?: number; sketch?: Step["sketch"]; tools?: Tool[]; threads?: Thread[]; geom?: StepGeom } {
+  ): ApplyOut {
     const n = (v: number | string) => num(v, this.scope)
     const int = (v: number | string, min: number, what: string) => count(n(v), min, what)
     const body = prev?.body ?? null
@@ -888,6 +1005,7 @@ export class Kernel {
           const v2 = f.dir2 && f.count2 !== undefined && f.spacing2 !== undefined ? mul(DIRS[f.dir2], n(f.spacing2)) : null
           const c1 = int(f.count, 2, "个数")
           const c2 = v2 ? int(f.count2!, 2, "第二方向的个数") : 1
+          if (c1 * c2 > MAX_COUNT) throw new InputError(`两个方向一共最多 ${MAX_COUNT} 个，现在是 ${c1} × ${c2}`)
           for (let i = 0; i < c1; i++)
             for (let j = 0; j < c2; j++) {
               if (i === 0 && j === 0) continue
@@ -963,6 +1081,8 @@ export class Kernel {
           disposeInfos(faces)
         }
       }
+      case "split":
+        throw new InputError("拆件不在这里处理")
       case "rib": {
         if (!body) throw new InputError("还没有实体，筋要长在实体上")
         const sk = this.sketchOf(f.sketch)
@@ -992,7 +1112,105 @@ export class Kernel {
     }
   }
 
+  /** Cut the body (or one part of it) in two by a plane: two named parts. */
+  private split(f: Extract<Feature, { op: "split" }>, prev: Step | null): ApplyOut {
+    if (!prev?.body) throw new InputError("还没有实体，没有可以拆的")
+    const parts: Part[] = prev.parts ?? [{ name: "", body: prev.body, explode: [0, 0, 0], owned: false }]
+    const i = parts.length > 1 ? parts.findIndex((p) => p.name === f.of) : 0
+    if (i < 0) throw new InputError(f.of ? `没有叫「${f.of}」的零件：现在有 ${parts.map((p) => p.name).join("、")}` : `已经有 ${parts.length} 个零件，要用 of 指定拆哪一个`)
+    const [back, front] = f.parts
+    if (back === front) throw new InputError("两个零件要起不同的名字")
+    const clash = parts.filter((_, k) => k !== i).find((p) => p.name === back || p.name === front)
+    if (clash) throw new InputError(`已经有叫「${clash.name}」的零件了`)
+    const plane = this.plane(f.by, prev)
+    const target = parts[i].body
+    const big = 2 * this.bigLength(target)
+    // The half space on the normal side, as a big slab starting at the plane.
+    const pl = new Plane(plane.origin, plane.x, plane.normal)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const slab = (drawRectangle(4 * big, 4 * big).sketchOnPlane(pl) as any).extrude(2 * big) as Shape3D
+    pl.delete()
+    const upper = target.intersect(slab)
+    const lower = target.cut(slab)
+    slab.delete()
+    const vol = (x: Shape3D) => measureShapeVolumeProperties(x).volume
+    const [vl, vu] = [vol(lower), vol(upper)]
+    if (vl < 1e-6 || vu < 1e-6) {
+      lower.delete()
+      upper.delete()
+      const [lo, hi] = target.boundingBox.bounds as [V3, V3]
+      const along = [lo, hi].flatMap((a) => [lo, hi].map((b) => dot([a[0], b[1], (a[2] + b[2]) / 2], plane.normal)))
+      const at = dot(plane.origin, plane.normal)
+      throw new InputError(`切面没有碰到实体：沿切面法向的范围大约是 ${fmt(Math.min(...along))}–${fmt(Math.max(...along))}，现在切在 ${fmt(at)}`)
+    }
+    // Explode: the normal side moves off along the normal by most of the part's size across the cut.
+    const [lo, hi] = target.boundingBox.bounds as [V3, V3]
+    const across = Math.abs(dot(sub(hi, lo), plane.normal))
+    const d = Math.max(15, 0.6 * across)
+    const base = parts[i].explode
+    const next: Part[] = [
+      ...parts.slice(0, i).map((p) => ({ ...p, owned: false })),
+      { name: back, body: lower, explode: base, owned: true },
+      { name: front, body: upper, explode: add(base, mul(plane.normal, d)), owned: true },
+      ...parts.slice(i + 1).map((p) => ({ ...p, owned: false })),
+    ]
+    const body = compoundOf(next.map((p) => p.body))
+    return { body, parts: next, geom: { op: "sketch", plane: frameOf(plane) }, summary: `拆成 ${back}（V=${fmt(vl)}）、${front}（V=${fmt(vu)}）` }
+  }
+
+  /**
+   * A body feature after a split, run on the parts: `part` picks one; else a
+   * cut changes every part it reaches, an addition must join exactly one part,
+   * and shell / draft / whole-body mirror must say which part.
+   */
+  private onParts(f: Feature, prev: Step, parts: Part[], warnings: string[]): ApplyOut {
+    const names = parts.map((p) => p.name).join("、")
+    const named = f.part ? parts.filter((p) => p.name === f.part) : parts
+    if (f.part && !named.length) throw new InputError(`没有叫「${f.part}」的零件：现在有 ${names}`)
+    if (!f.part && (f.op === "shell" || f.op === "draft" || (f.op === "mirror" && !f.features?.length)))
+      throw new InputError(`拆件之后${OP_NAMES[f.op]}要写 part，指定作用在哪个零件上（${names}）`)
+    const runs: { p: Part; out: ApplyOut; w: string[] }[] = []
+    let firstError: unknown = null
+    for (const p of named) {
+      const k = parts.indexOf(p)
+      const own: Step = { ...prev, body: p.body, origins: prev.partOrigins?.[k] ?? [], parts: undefined }
+      const w: string[] = []
+      try {
+        runs.push({ p, out: this.apply(f, own, w), w })
+      } catch (e) {
+        firstError ??= e
+      }
+    }
+    if (!runs.length) throw firstError
+    const vol = (x: Shape3D) => measureShapeVolumeProperties(x).volume
+    const changed = runs.filter((r) => r.out.body && Math.abs(vol(r.out.body) - vol(r.p.body)) > 1e-6 * Math.max(1, vol(r.p.body)))
+    const adds = f.op === "rib" || runs.some((r) => r.out.tools?.some((t) => t.mode === "add"))
+    let used = changed
+    if (adds && !f.part) {
+      used = changed.filter((r) => countOf(r.out.body!, "solid") === countOf(r.p.body, "solid"))
+      if (used.length !== 1) {
+        for (const r of runs) if (r.out.body && r.out.body !== r.p.body) r.out.body.delete()
+        throw new InputError(used.length ? `加的料碰到了 ${used.map((r) => r.p.name).join("、")}：写 part 指定加在哪个零件上` : `加的料没有接上任何零件：写 part 指定加在哪个零件上（${names}）`)
+      }
+    }
+    if (!used.length) warnings.push("这一步没有改到任何零件")
+    for (const r of used) warnings.push(...r.w.filter((w) => !/没有碰到实体|不相连的实体/.test(w)))
+    // Outputs not used, and the tools of all but the first run, are freed.
+    for (const r of runs) if (!used.includes(r) && r.out.body && r.out.body !== r.p.body) r.out.body.delete()
+    runs.slice(1).forEach((r) => r.out.tools?.forEach((t) => t.tool.delete()))
+    const next: Part[] = parts.map((p) => {
+      const r = used.find((x) => x.p === p)
+      return r ? { ...p, body: r.out.body!, owned: true } : { ...p, owned: false }
+    })
+    const body = compoundOf(next.map((p) => p.body))
+    const first = (used[0] ?? runs[0]).out
+    return { ...first, body, parts: next, summary: `${first.summary} · ${used.length ? used.map((r) => r.p.name).join("、") : "没有改到零件"}` }
+  }
+
   private copyTools(body: Shape3D, sources: Tool[], moves: ((s: Shape3D) => Shape3D)[], summary: string, warnings: string[]) {
+    // A pattern of a pattern (or of a many-hole feature) multiplies: count the bodies this step makes.
+    const made = sources.reduce((n, s) => n + countOf(s.tool, "solid"), 0) * moves.length
+    if (made > MAX_COUNT) throw new InputError(`这一步要复制出 ${made} 个实体，最多 ${MAX_COUNT} 个`)
     let cur = body
     const tools: Tool[] = []
     for (const { tool, mode } of sources) {
@@ -1012,6 +1230,27 @@ function regionOf(sk: NonNullable<Step["sketch"]>, id: string): Drawing {
   if (!sk.drawing) throw new InputError(`草图「${id}」只有开放的线：开放的线只能做薄壁拉伸（thin）或筋（rib）`)
   return sk.drawing
 }
+
+/**
+ * The sketch frame of an inclined plane face, the one rule `on.face` and
+ * annotations share: origin at the face's centre, x level (Z × n; X when the
+ * face is nearly flat, made square to n), y = n × x, up the slope.
+ */
+function faceFrame(center: V3, n: V3): Frame {
+  const normal = unit(n)
+  const x = Math.abs(normal[2]) < 0.999 ? unit(cross([0, 0, 1], normal)) : unit(sub([1, 0, 0], mul(normal, normal[0])))
+  return { origin: center, x, y: cross(normal, x), normal }
+}
+
+/** A click on an inclined face, in that face's own sketch coordinates. */
+function slopeSketch(center: V3, n: V3, p: V3): PickInfo["sketch"] {
+  const fr = faceFrame(center, n)
+  const d = sub(p, fr.origin)
+  const r = (v: V3) => v.map(r2) as V3
+  return { plane: "XY", offset: 0, uv: [r2(dot(d, fr.x)), r2(dot(d, fr.y))], face: { origin: r(fr.origin), x: r(fr.x), y: r(fr.y), normal: r(fr.normal) } }
+}
+
+type ApplyOut = { body?: Shape3D; summary: string; selected?: number; sketch?: Step["sketch"]; tools?: Tool[]; threads?: Thread[]; geom?: StepGeom; parts?: Part[] }
 
 const frameOf = (p: ResolvedPlane): Frame => ({ origin: p.origin, x: p.x, y: p.y, normal: p.normal })
 
@@ -1074,10 +1313,11 @@ function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut", war
   return next
 }
 
-/** Counts may be expressions; they must land on a whole number. */
+/** Counts may be expressions; they must land on a whole number, and not one that would freeze the tab. */
 function count(v: number, min: number, what: string): number {
   const r = Math.round(v)
   if (Math.abs(v - r) > 1e-6 || r < min) throw new InputError(`${what}要是不小于 ${min} 的整数，现在是 ${fmt(v)}`)
+  if (r > MAX_COUNT) throw new InputError(`${what}最多 ${MAX_COUNT}，现在是 ${r}`)
   return r
 }
 

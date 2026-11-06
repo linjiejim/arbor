@@ -11,7 +11,7 @@ type V3 = [number, number, number]
 export type EvalNote = { kind: "face" | "edge"; match: (p: PickInfo) => boolean; point?: V3; note: string }
 
 /** Read access to the finished model, for checks the generic ones can't express. */
-export type EvalQuery = { inspect: (what: "faces" | "edges", selector: unknown) => string }
+export type EvalQuery = { inspect: (what: "body" | "faces" | "edges", selector: unknown) => string }
 
 export type EvalCase = {
   id: string
@@ -67,6 +67,30 @@ export const EVALS: EvalCase[] = [
       const c = centres(q.inspect("faces", { kind: "cylinder", radius: 4 }))
       const ok = c.length === 1 && Math.abs(c[0][0] - 25) < 1 && Math.abs(c[0][1] - 10) < 1
       return [{ name: "孔在点的位置", pass: ok, detail: c.map((x) => `(${x.join(", ")})`).join(" ") || "没有 R4 的孔" }]
+    },
+  },
+  {
+    id: "anno-slope",
+    prompt: "按标注修改。",
+    start: {
+      params: {},
+      features: [
+        { id: "s", op: "sketch", name: "楔形截面", on: { plane: "XZ" }, shapes: [{ type: "polyline", points: [[-20, 0], [20, 0], [20, 30], [-20, 10]] }] },
+        { id: "w", op: "extrude", name: "楔形块", sketch: "s", distance: 40, direction: "both" },
+      ],
+    },
+    notes: [{ kind: "face", match: (p) => p.sketch?.face !== undefined, point: [8, -10, 24], note: "在这里开一个 ⌀6、深 5 的孔，孔垂直于斜面" }],
+    size: [40, 40, 30],
+    upright: true,
+    extra: (q) => {
+      const c = centres(q.inspect("faces", { kind: "cylinder", radius: 3 }))
+      // The hole's axis is the slope's normal; it must pass within 1 mm of the click.
+      const n = [-0.447, 0, 0.894]
+      const off = c.map((x) => {
+        const d = [8 - x[0], -10 - x[1], 24 - x[2]]
+        return Math.hypot(d[1] * n[2] - d[2] * n[1], d[2] * n[0] - d[0] * n[2], d[0] * n[1] - d[1] * n[0])
+      })
+      return [{ name: "孔在点的位置、垂直斜面", pass: c.length === 1 && off[0] < 1, detail: c.map((x, i) => `(${x.join(", ")}) 偏 ${off[i].toFixed(2)}`).join(" ") || "没有 R3 的孔" }]
     },
   },
   {
@@ -169,6 +193,37 @@ export const EVALS: EvalCase[] = [
     volume: 60 * 30 * 6 + 6 * 30 * 44 + (34 * 34) / 2 * 4,
     uses: "rib",
   },
+  {
+    id: "split-enclosure",
+    prompt: "做一个 80×50×30 的封闭外壳（长沿 X、宽沿 Y），壁厚 2，在离底 20 mm 处拆成底壳和上盖；上盖顶面中间开一个 ⌀10 的按键孔。",
+    size: [80, 50, 30],
+    upright: true,
+    volume: 80 * 50 * 30 - 76 * 46 * 26 - PI * 25 * 2,
+    uses: "split",
+    extra: (q) => {
+      const body = q.inspect("body", undefined)
+      const parts = body.match(/零件：(.*)/)?.[1] ?? ""
+      const ok = /底壳（80 × 50 × 20 mm/.test(parts) && /上盖（80 × 50 × 10 mm/.test(parts)
+      const hole = centres(q.inspect("faces", { kind: "cylinder", radius: 5 }))
+      return [
+        { name: "两个零件：底壳高 20、上盖高 10", pass: ok, detail: parts || "没有零件" },
+        { name: "按键孔只在上盖", pass: hole.length === 1 && hole[0][2] > 25, detail: hole.map((x) => `(${x.join(", ")})`).join(" ") || "没有 R5 的孔" },
+      ]
+    },
+  },
+  {
+    id: "split-long",
+    prompt: "做一根 300×20×20 的方杆（长沿 X，中心在原点）。打印机最长只能打 200，从中间把它拆成两段。",
+    size: [300, 20, 20],
+    upright: true,
+    volume: 300 * 20 * 20,
+    uses: "split",
+    extra: (q) => {
+      const parts = q.inspect("body", undefined).match(/零件：(.*)/)?.[1] ?? ""
+      const sizes = [...parts.matchAll(/（(\d+(?:\.\d+)?) × 20 × 20 mm/g)].map((m) => Number(m[1]))
+      return [{ name: "两段，各长 150", pass: sizes.length === 2 && sizes.every((x) => Math.abs(x - 150) < 0.5), detail: parts || "没有零件" }]
+    },
+  },
   { id: "rib-plate", prompt: "做一块 120×80×4 的底板，顶面上沿 X 方向等距放 3 条加强筋（每条长 100、宽 3、高 12），筋间距 25，中间那条在 Y=0。", size: [120, 80, 16], upright: true, volume: 120 * 80 * 4 + 3 * 100 * 3 * 12 },
 ]
 
@@ -187,7 +242,9 @@ export function checkCase(c: EvalCase, tree: Tree, report: BuildReport, q?: Eval
   out.push({ name: "尺寸", pass: sz.every((x, i) => close(x, want[i])), detail: `${b.size.join("×")} vs ${c.size.join("×")}` })
   if (c.upright) out.push({ name: "方向", pass: b.size.every((x, i) => close(x, c.size[i])), detail: `X/Y/Z = ${b.size.join(" / ")}` })
   if (c.volume) out.push({ name: "体积", pass: close(b.volume, c.volume, 0.02), detail: `${Math.round(b.volume)} vs ${Math.round(c.volume)}` })
-  out.push({ name: "单一实体", pass: b.solids === 1, detail: `${b.solids}` })
+  // After a split each part is one solid.
+  const wantSolids = report.parts?.length ?? 1
+  out.push({ name: report.parts ? `每个零件一个实体（${wantSolids} 个零件）` : "单一实体", pass: b.solids === wantSolids, detail: `${b.solids}` })
   out.push({ name: "参数化", pass: Object.keys(tree.params).length >= 2, detail: `${Object.keys(tree.params).length} 个参数` })
   if (c.maxVolume) out.push({ name: "空心", pass: b.volume <= c.maxVolume, detail: `${Math.round(b.volume)} ≤ ${Math.round(c.maxVolume)}` })
   if (c.ops) {

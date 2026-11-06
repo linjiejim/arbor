@@ -139,6 +139,7 @@ const Base = {
   name: z.string().optional().describe('中文显示名，例如 "底座拉伸"'),
   intent: z.string().optional().describe("一句话设计意图：为什么这样做"),
   suppressed: z.boolean().optional().describe("压缩：暂时不参与重建（学习者在特征树里设置）"),
+  part: z.string().optional().describe("拆件之后：只作用在这个零件上（零件名）。不写时切除和孔作用在碰到的所有零件上，加料要正好接上一个零件"),
 }
 const Mode = z.enum(["add", "cut"]).optional().describe("add = 加料（默认），cut = 切除")
 
@@ -158,15 +159,15 @@ export const Feature = z.discriminatedUnion("op", [
         z.object({ face: FaceSelector.describe("成形到这个面（要正好选中一个）"), offset: Num.optional().describe("停在离这个面多远的地方，正值 = 还没到") }),
       ])
       .optional()
-      .describe("成形到：设计意图是「到那个面为止」，不用自己算距离（不写 distance）"),
+      .describe("成形到：设计意图是「到那个面为止」，不用自己算距离（不写 distance）。不需要就不要写这个字段"),
     thin: z
       .object({
         t: Num.describe("壁厚"),
         side: z.enum(["center", "inside", "outside"]).optional().describe("厚度加在线的哪一侧：center = 两侧各一半（缺省）；inside = 向里（封闭轮廓向内，开放的线向拐弯的那一侧）"),
       })
       .optional()
-      .describe("薄壁拉伸：只沿着轮廓线长出一圈等厚的壁；草图可以是开放的线（path）"),
-    draft: Num.optional().describe("拔模角（度）：正值让侧壁沿拉伸方向向内收，一步拉出锥形凸台或带斜度的槽"),
+      .describe("薄壁拉伸：只沿着轮廓线长出一圈等厚的壁；草图可以是开放的线（path）。普通的实心拉伸不要写这个字段"),
+    draft: Num.optional().describe("拔模角（度）：正值让侧壁沿拉伸方向向内收，一步拉出锥形凸台或带斜度的槽。不需要斜度就不要写"),
   }),
   z.object({
     ...Base,
@@ -258,6 +259,13 @@ export const Feature = z.discriminatedUnion("op", [
   }),
   z.object({
     ...Base,
+    op: z.literal("split"),
+    by: PlaneRef.describe("切面：写法和草图平面一样（基准面加偏移，或贴在一个平面上）"),
+    parts: z.array(z.string().min(1).max(20)).length(2).describe("切开后两侧的零件名：先写切面法向背面一侧的，再写法向一侧的（XY 的法向是 +Z：先下后上）"),
+    of: z.string().optional().describe("已经有多个零件时，要拆哪一个"),
+  }),
+  z.object({
+    ...Base,
     op: z.literal("rib"),
     sketch: z.string().describe("只含一条开放的线（path）的草图，画在筋所在的平面上；线的两端可以不碰到实体，会自动延长到墙"),
     t: Num.describe("筋厚，在草图平面两侧各一半"),
@@ -330,6 +338,7 @@ export const OP_NAMES: Record<FeatureOp, string> = {
   loft: "放样",
   draft: "拔模",
   rib: "筋",
+  split: "拆件",
 }
 
 /** Display name: the model's own name, else 「拉伸2」 style numbering. */

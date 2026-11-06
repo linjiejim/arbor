@@ -45,6 +45,14 @@ const router = createBrowserRouter([
       return import("@/routes/studio")
     }, "StudioPage"),
   },
+  {
+    // A shared link: the same studio, read-only.
+    path: "/studio/s/:id",
+    lazy: lazy(() => {
+      void import("@/studio/boot").then((b) => b.startKernel())
+      return import("@/routes/studio-share")
+    }, "StudioSharePage"),
+  },
 ])
 
 // Per-route <title>, matching the prerendered HTML (lib/page-meta.ts).
