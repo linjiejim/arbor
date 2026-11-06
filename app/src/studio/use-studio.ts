@@ -30,9 +30,13 @@ export type KernelState = { phase: "loading"; loadedMB: number } | { phase: "rea
  * Studio state: the feature tree (source of truth, persisted), the kernel
  * worker, the latest build report, what the viewport shows, and undo.
  * Tool calls from the model run through `runTool`, one at a time.
+ *
+ * With `shared` (a shared link) the page starts from that tree and nothing is
+ * persisted: parameters can be tried and undone, a reload restores the link.
  */
-export function useStudio() {
-  const [saved] = React.useState(loadSaved)
+export function useStudio(shared?: Tree) {
+  const [saved] = React.useState<Saved>(() => (shared ? { tree: shared, history: [] } : loadSaved()))
+  const persist = !shared
   const [tree, setTreeState] = React.useState<Tree>(saved.tree)
   const [history, setHistory] = React.useState<Tree[]>(saved.history)
   const [report, setReport] = React.useState<BuildReport | null>(null)
@@ -92,7 +96,7 @@ export function useStudio() {
         setKernel({ phase: "ready" })
         // /studio?start=<id> opens a ready-made tree (from a teardown, or a shared link).
         const url = new URL(location.href)
-        const starter = STARTERS.find((x) => x.id === url.searchParams.get("start"))
+        const starter = persist ? STARTERS.find((x) => x.id === url.searchParams.get("start")) : undefined
         if (starter) {
           url.searchParams.delete("start")
           window.history.replaceState(null, "", url)
@@ -109,15 +113,16 @@ export function useStudio() {
       c.dispose()
       client.current = null
     }
-  }, [commit])
+  }, [commit, persist])
 
   React.useEffect(() => {
+    if (!persist) return
     try {
       localStorage.setItem(STORE, JSON.stringify({ tree, history: history.slice(-30) }))
     } catch {
       /* quota: not fatal */
     }
-  }, [tree, history])
+  }, [tree, history, persist])
 
   /** Remember the current tree so the next change can be undone. */
   const checkpoint = React.useCallback(() => {
@@ -134,13 +139,13 @@ export function useStudio() {
     void commit(prev)
   }, [commit])
 
-  /** Open a ready-made tree (undoable). */
+  /** Replace the tree with a ready-made one (a starter, a shared link, an imported file): undoable. */
   const load = React.useCallback(
     (t: Tree) => {
       checkpoint()
       rollbackRef.current = null
       setRollback(null)
-      void commit(t)
+      return commit(t)
     },
     [checkpoint, commit],
   )

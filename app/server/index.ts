@@ -3,6 +3,7 @@
 //
 //   POST /api/studio/chat    AI SDK UI message stream
 //   GET  /api/studio/status  model, whether a hosted key is available
+//   /api/studio/share        shared links (shares.ts)
 //   GET  /api/health
 //
 // Env (hosted quota, both optional; OpenRouter wins when both are set):
@@ -20,23 +21,29 @@ import { Tree } from "../src/studio/dsl"
 import { SYSTEM_PROMPT, TEACH_PROMPT, statePrompt, withState } from "../src/studio/prompt"
 import { STUDIO_TOOLS } from "../src/studio/tools"
 import { trimMessages } from "../src/studio/trim"
-import { Budget, RateLimiter } from "./limits"
+import { Budget, clientIp, RateLimiter } from "./limits"
 import { mockModel } from "./mock"
 import { deepseekRoute, hostedRoute } from "./models"
+import { scheduleCleanup, ShareStore, shareRoutes } from "./shares"
 
 const env = process.env
 const MOCK = env.STUDIO_MOCK === "1"
 const THINKING = env.STUDIO_THINKING === "disabled" ? "disabled" : "enabled"
 const HOSTED = hostedRoute(env, THINKING)
 const BYOK_MODEL = env.STUDIO_MODEL ?? "deepseek-flash"
-const budget = new Budget(env.STUDIO_DATA_DIR ?? "./data", Number(env.DAILY_BUDGET_USD ?? 3))
+const DATA_DIR = env.STUDIO_DATA_DIR ?? "./data"
+const budget = new Budget(DATA_DIR, Number(env.DAILY_BUDGET_USD ?? 3))
 // A user message starts a turn; each tool round-trip is another request.
 const turns = new RateLimiter(Number(env.TURNS_PER_HOUR ?? 30), 3600_000)
 const requests = new RateLimiter(Number(env.REQUESTS_PER_HOUR ?? 400), 3600_000)
+const shares = new ShareStore(DATA_DIR)
+scheduleCleanup(shares)
 
 const app = new Hono()
 
 app.get("/api/health", (c) => c.json({ ok: true }))
+
+app.route("/", shareRoutes(shares))
 
 app.get("/api/studio/status", (c) =>
   c.json({
@@ -48,7 +55,7 @@ app.get("/api/studio/status", (c) =>
 )
 
 app.post("/api/studio/chat", bodyLimit({ maxSize: 6 * 1024 * 1024 }), async (c) => {
-  const ip = c.req.header("x-forwarded-for")?.split(",")[0]?.trim() || c.req.header("x-real-ip") || "local"
+  const ip = clientIp((h) => c.req.header(h))
   const userKey = c.req.header("x-deepseek-key")?.trim() || undefined
   const body = (await c.req.json().catch(() => null)) as { messages?: UIMessage[]; tree?: unknown; summary?: unknown; mode?: unknown } | null
   if (!body || !Array.isArray(body.messages) || !body.messages.length) return c.json({ error: "bad-request", message: "请求格式不对" }, 400)

@@ -31,7 +31,20 @@ const CLICK_PX = 5
  * The studio's 3D view: the model, coloured by step status or by what's
  * highlighted; click a face or an edge to annotate it.
  */
-export function StudioViewport({ studio, hover, annotations, busy }: { studio: Studio; hover: Hover | null; annotations: Annotations; busy: boolean }) {
+export function StudioViewport({
+  studio,
+  hover,
+  annotations,
+  busy,
+  readOnly = false,
+}: {
+  studio: Studio
+  hover: Hover | null
+  annotations: Annotations
+  busy: boolean
+  /** A shared link: measure and section, but no annotating (there is no chat to send it to). */
+  readOnly?: boolean
+}) {
   const [viewer, setViewer] = React.useState<Viewer | null>(null)
   const current = React.useRef<THREE.Group | null>(null)
   const fittedSize = React.useRef(0)
@@ -282,10 +295,10 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
 
   // ---------------------------------------------------------------- clicking
 
-  const latest = React.useRef({ studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane })
+  const latest = React.useRef({ studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, readOnly })
   React.useEffect(() => {
-    latest.current = { studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane }
-  }, [studio, busy, display, annotations.open, annotations.cancel, measuring, plane])
+    latest.current = { studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, readOnly }
+  }, [studio, busy, display, annotations.open, annotations.cancel, measuring, plane, readOnly])
 
   React.useEffect(() => {
     if (!viewer) return
@@ -314,6 +327,7 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
         return
       }
       if (!edge && !face) return cancel()
+      if (latest.current.readOnly) return
       if (isBusy) return notify("助教正在改模型，这一轮结束后再标注")
       if (s.rollback) return notify("先回到最新一步，再在模型上标注")
       let info = edge ? await s.pick("edge", edge.hash, edge.point) : null
@@ -367,7 +381,7 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
           onDims={setShowDims}
         />
       )}
-      {display?.mesh && !busy && !draft && !measuring && annotations.pending.length === 0 && (
+      {display?.mesh && !readOnly && !busy && !draft && !measuring && annotations.pending.length === 0 && (
         <div className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border bg-background/90 px-2.5 py-1 text-center text-caption text-muted-foreground">
           单击模型上的面或边，标注要改的地方
         </div>
