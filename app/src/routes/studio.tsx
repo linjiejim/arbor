@@ -15,6 +15,7 @@ import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
 import type { Hover } from "@/studio/scene"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
 import { ConnectorOverlay } from "@/studio/ui/connector-overlay"
+import { useReselect } from "@/studio/use-reselect"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
 import { useAnnotations } from "@/studio/use-annotations"
 import { useStudio } from "@/studio/use-studio"
@@ -33,6 +34,14 @@ export function StudioPage() {
     if (!chat.busy) clearSent()
   }, [chat.busy, clearSent])
   const [hover, setHover] = React.useState<Hover | null>(null)
+  const reselect = useReselect(studio)
+  // A message started from a feature card brings the conversation forward.
+  const [tab, setTab] = React.useState("chat")
+  const [seenPrefill, setSeenPrefill] = React.useState(annotations.prefill)
+  if (seenPrefill !== annotations.prefill) {
+    setSeenPrefill(annotations.prefill)
+    if (annotations.prefill) setTab("chat")
+  }
   const [confirmNew, setConfirmNew] = React.useState(false)
   const [status, setStatus] = React.useState<Status | null>(null)
   const ready = studio.kernel.phase === "ready"
@@ -97,13 +106,14 @@ export function StudioPage() {
 
       <div className="flex min-h-0 flex-1 max-lg:flex-col">
         <main className="relative min-h-0 min-w-0 flex-1">
-          <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={chat.busy} />
-          <TreeOverlay studio={studio} onHover={setHover} />
+          <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={chat.busy} reselect={reselect} />
+          <TreeOverlay studio={studio} onHover={setHover} reselect={reselect} annotations={annotations} busy={chat.busy} />
         </main>
         <ConnectorOverlay param={hover?.param ?? null} row={hover?.row ?? null} />
 
         <Tabs
-          defaultValue="chat"
+          value={tab}
+          onValueChange={setTab}
           style={{ "--panel-w": `${panel.width}px` } as React.CSSProperties}
           className="relative flex shrink-0 flex-col border-l lg:w-(--panel-w) max-lg:h-[55dvh] max-lg:w-full max-lg:border-t max-lg:border-l-0"
         >

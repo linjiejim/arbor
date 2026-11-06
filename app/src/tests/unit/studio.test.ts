@@ -14,6 +14,7 @@ import { closeOpen, splitBlocks } from "@/studio/md-blocks"
 import { describeUse, drivenFeatures, paramDependents, paramUses } from "@/studio/param-uses"
 import { standardHole } from "@/studio/holes"
 import { dimSource } from "@/studio/dim-source"
+import { selectorWords } from "@/studio/selector-words"
 import { glyphArea } from "./glyph-area"
 
 describe("parameter expressions", () => {
@@ -611,5 +612,41 @@ describe("dimensions on the model", () => {
     expect((p.features.find((f) => f.id === "ch") as { d: unknown }).d).toBe("c")
     expect(k.rebuild(p).body!.volume).toBeCloseTo(before)
     expect(() => promoteToParam(flange, "ch", ["d"], "pcd", "", 1)).toThrow(/已经有参数/)
+  })
+})
+
+describe("feature card", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+  const box = STARTERS.find((s) => s.id === "box-fillet-first")!.tree
+  const fil = box.features.findIndex((f) => f.id === "fil1")
+
+  it("puts selectors in plain words", () => {
+    expect(selectorWords({ not: { extreme: "+Z" } }, "edge", box)).toBe("除了最上面一圈以外的边")
+    expect(selectorWords({ parallel: "Z", of: "ext1", expect: 4 }, "edge", box)).toBe("平行于 Z 的边 · 来自 拉伸1 · 4 条")
+    expect(selectorWords({ normal: "+Z", extreme: "+Z" }, "face", box)).toBe("最上面那个朝上的平面")
+  })
+
+  it("turns clicked edges on the body a fillet starts from into one selector that survives a resize", () => {
+    k.rebuild(box)
+    const vertical = k.locate("edge", { parallel: "Z" }, fil)!
+    expect(vertical).toHaveLength(4)
+    const four = k.selectorFor("edge", vertical, fil)!
+    expect(four.count).toBe(4)
+    expect(four.selector).toMatchObject({ parallel: "Z", expect: 4 })
+    // Two of them: narrowed by a side.
+    const front = k.locate("edge", { parallel: "Z", extreme: "-Y" }, fil)!
+    const two = k.selectorFor("edge", front, fil)!
+    expect(two.selector).toMatchObject({ extreme: "-Y", expect: 2 })
+    // The same selector on a longer box still picks four vertical edges.
+    k.rebuild({ ...box, params: { ...box.params, L: 90 } })
+    expect(k.locate("edge", four.selector, fil)).toHaveLength(4)
+    // A face in an edge box means its rim.
+    k.rebuild(box)
+    const top = k.locate("face", { normal: "+Z", extreme: "+Z" }, fil)!
+    expect(k.faceEdges(top[0], fil)).toHaveLength(4)
   })
 })

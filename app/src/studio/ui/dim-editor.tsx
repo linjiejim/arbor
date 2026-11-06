@@ -2,7 +2,7 @@ import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
-import { promoteToParam, setFieldAt } from "../apply"
+import { applyDimEdit } from "../dim-edit"
 import { fmtDim } from "../dim-source"
 import type { Dim } from "../kernel/dims"
 import { describeUse, paramUses } from "../param-uses"
@@ -20,7 +20,6 @@ export function DimEditor({ dim, anchor, studio, onClose }: { dim: Dim; anchor: 
   })
   const src = dim.source
   const param = src.type === "param" || src.type === "factor" ? src.name : null
-  const k = src.type === "factor" ? src.k : 1
   const [draft, setDraft] = React.useState(fmtDim(dim.value))
   const [error, setError] = React.useState<string | null>(null)
   const [promote, setPromote] = React.useState(false)
@@ -28,12 +27,7 @@ export function DimEditor({ dim, anchor, studio, onClose }: { dim: Dim; anchor: 
   const uses = param ? paramUses(studio.tree, param) : []
 
   const apply = async () => {
-    const v = Number(draft)
-    if (!Number.isFinite(v)) return setError("请输入一个数")
-    let err: string | null
-    if (param) err = await studio.setParam(param, Math.round((v / k) * 1e9) / 1e9)
-    else if (promote) err = await studio.editTree((t) => promoteToParam(t, dim.feature, dim.path, name.trim(), dim.label, v))
-    else err = await studio.editTree((t) => setFieldAt(t, dim.feature, dim.path, v))
+    const err = await applyDimEdit(studio, dim, draft, promote ? name : undefined)
     if (err) setError(err)
     else onClose()
   }

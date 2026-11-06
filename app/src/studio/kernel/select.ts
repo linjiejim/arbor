@@ -333,3 +333,84 @@ export function uniqueEdgeSelector(target: EdgeInfo, edges: EdgeInfo[], faces: F
   ]
   return firstUnique(candidates, (sel) => selectEdges(sel as EdgeSelector, edges, faces, scope), (e) => e.index === target.index)
 }
+
+/**
+ * A selector for exactly these items (several clicked edges or faces): what
+ * they share (kind, direction, radius, the feature they come from), then
+ * narrowed by an extreme, a coordinate, or "all but the outermost ring". Every
+ * candidate is run; the first that picks exactly this set wins. null when no
+ * plain description fits.
+ */
+export function groupEdgeSelector(targets: EdgeInfo[], edges: EdgeInfo[], faces: FaceInfo[], scope: Scope): Sel | null {
+  if (!targets.length) return null
+  if (targets.length === 1) return uniqueEdgeSelector(targets[0], edges, faces, scope, targets[0].mid)
+  const base: Sel = {}
+  const kind = shared(targets, (t) => t.kind)
+  if (kind) base.kind = kind
+  const parallel = shared(targets, (t) => (t.dir ? axisDir(t.dir)?.[1] : undefined))
+  if (parallel) base.parallel = parallel
+  const radius = shared(targets, (t) => (t.radius !== undefined ? round3(t.radius) : undefined))
+  if (radius !== undefined) base.radius = radius
+  const originSets = targets.map((t) => new Set(t.faces.map((i) => faces[i]?.origin).filter((o): o is string => !!o && o !== "?")))
+  const common = [...originSets[0]].filter((o) => originSets.every((s) => s.has(o)))
+  const ats = commonAts(targets.map((t) => [t.start, t.mid, t.end]))
+  const want = new Set(targets.map((t) => t.index))
+  return firstExact(candidatesFor(base, common, ats), (sel) => selectEdges(sel as EdgeSelector, edges, faces, scope).map((e) => e.index), want)
+}
+
+export function groupFaceSelector(targets: FaceInfo[], faces: FaceInfo[], scope: Scope): Sel | null {
+  if (!targets.length) return null
+  if (targets.length === 1) return uniqueFaceSelector(targets[0], faces, scope, targets[0].center)
+  const base: Sel = {}
+  const kind = shared(targets, (t) => (t.kind === "plane" ? undefined : t.kind))
+  if (kind) base.kind = kind
+  const normal = shared(targets, (t) => (t.normal ? (axisDir(t.normal) ?? undefined) : undefined))
+  if (normal) base.normal = normal
+  const radius = shared(targets, (t) => (t.radius !== undefined ? round3(t.radius) : undefined))
+  if (radius !== undefined) base.radius = radius
+  const common = shared(targets, (t) => (t.origin && t.origin !== "?" ? t.origin : undefined))
+  const ats = normal ? commonAts(targets.map((t) => [t.center])) : []
+  const want = new Set(targets.map((t) => t.index))
+  return firstExact(candidatesFor(base, common ? [common] : [], ats), (sel) => selectFaces(sel as FaceSelector, faces, scope).map((f) => f.index), want)
+}
+
+/** The value every item has in common, or undefined. */
+function shared<T, V>(items: T[], f: (t: T) => V | undefined): V | undefined {
+  const vs = items.map(f)
+  return vs.every((v) => v !== undefined && JSON.stringify(v) === JSON.stringify(vs[0])) ? vs[0] : undefined
+}
+
+/** Axes on which every point of every item sits at one coordinate (a rim at Z = 30). */
+function commonAts(pointSets: V3[][]): { axis: "X" | "Y" | "Z"; value: number }[] {
+  return (["X", "Y", "Z"] as const).flatMap((axis, k) => {
+    const v = pointSets.flat().map((p) => p[k])
+    return Math.max(...v) - Math.min(...v) < 1e-6 ? [{ axis, value: round3(v[0]) }] : []
+  })
+}
+
+function candidatesFor(base: Sel, origins: string[], ats: { axis: string; value: number }[]): Sel[] {
+  const bases = [base, ...origins.map((o) => ({ of: o, ...base }))]
+  return [
+    ...bases,
+    ...bases.flatMap((b) => SIX.map((e) => ({ ...b, extreme: e }))),
+    ...bases.flatMap((b) => ats.map((at) => ({ ...b, at }))),
+    ...bases.flatMap((b) => SIX.map((e) => ({ ...b, not: { extreme: e } }))),
+    ...bases.flatMap((b) => ats.flatMap((at) => SIX.map((e) => ({ ...b, at, extreme: e })))),
+  ]
+}
+
+function firstExact(candidates: Sel[], run: (sel: Sel) => number[], want: Set<number>): Sel | null {
+  const seen = new Set<string>()
+  for (const c of candidates) {
+    const key = JSON.stringify(c)
+    if (seen.has(key)) continue
+    seen.add(key)
+    try {
+      const got = run(c)
+      if (got.length === want.size && got.every((i) => want.has(i))) return { ...c, expect: want.size }
+    } catch {
+      /* nothing matched */
+    }
+  }
+  return null
+}

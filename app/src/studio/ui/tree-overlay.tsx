@@ -7,7 +7,9 @@ import type { OpId } from "@/content/ops"
 import type { FeatureResult } from "../kernel/build"
 import { displayName, OP_NAMES, type Feature, type Tree } from "../dsl"
 import type { Hover } from "../scene"
-import { FeatureEditor } from "./feature-editor"
+import { FeatureCard } from "./feature-card"
+import type { Annotations } from "../use-annotations"
+import type { Reselect } from "../use-reselect"
 import type { Studio } from "../use-studio"
 
 const OP_ICON: Record<Feature["op"], OpId> = {
@@ -38,7 +40,19 @@ type Peek = { id: string; top: number; bound: number }
  * a row lifts on hover and lights up the faces it made, details open beside
  * it. Click a row to edit that feature by hand.
  */
-export function TreeOverlay({ studio, onHover }: { studio: Studio; onHover: (h: Hover | null) => void }) {
+export function TreeOverlay({
+  studio,
+  onHover,
+  reselect,
+  annotations,
+  busy,
+}: {
+  studio: Studio
+  onHover: (h: Hover | null) => void
+  reselect: Reselect
+  annotations: Annotations
+  busy: boolean
+}) {
   const { tree, report, rollback } = studio
   const root = React.useRef<HTMLElement>(null)
   const [peek, setPeek] = React.useState<Peek | null>(null)
@@ -116,7 +130,20 @@ export function TreeOverlay({ studio, onHover }: { studio: Studio; onHover: (h: 
       {editing && edited && (
         <div className="pointer-events-none absolute inset-y-0 left-full ml-1 flex w-80 max-w-[calc(100vw-5rem)] flex-col">
           <div className="pointer-events-auto flex min-h-0 flex-col" style={{ marginTop: Math.max(0, Math.min(editing.top, editing.bound - 380)) }}>
-            <FeatureEditor key={JSON.stringify(edited)} studio={studio} feature={edited} onClose={() => setEditing(null)} />
+            <FeatureCard
+              key={edited.id}
+              studio={studio}
+              feature={edited}
+              result={report?.features[tree.features.indexOf(edited)]}
+              reselect={reselect}
+              annotations={annotations}
+              busy={busy}
+              onClose={() => {
+                if (reselect.state?.feature === edited.id) reselect.cancel()
+                setEditing(null)
+              }}
+              onPointDim={(id) => onHover(id ? { ids: [], label: "", dim: id } : null)}
+            />
           </div>
         </div>
       )}
@@ -178,7 +205,7 @@ function FeaturePeek({ tree, f, r, active, top, bound }: { tree: Tree; f: Featur
           {[r.faces && `新面 ${r.faces.new}`, r.faces?.modified && `改动 ${r.faces.modified} 个面`, `用时 ${Math.round(r.ms)} ms`].filter(Boolean).join(" · ")}
         </div>
       )}
-      <div className="mt-2 border-t pt-2 text-caption text-faint-foreground">{active ? "正在这一步查看 · 单击编辑" : "单击编辑这一步"}</div>
+      <div className="mt-2 border-t pt-2 text-caption text-faint-foreground">{active ? "正在这一步查看 · 单击看尺寸和选择" : "单击看尺寸和选择"}</div>
     </div>
   )
 }
