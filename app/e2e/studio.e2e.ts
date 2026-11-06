@@ -181,6 +181,100 @@ test.describe("工作台", () => {
     await expect(page.getByRole("menuitem", { name: "导出 STL（zip，每个零件一个文件）" })).toBeVisible()
   })
 
+  test("/studio 分享链接：另一个浏览器打开、试参数、复制到工作台、撤销", async ({ page, browser }) => {
+    await page.goto("/studio?start=flange")
+    await expect(page.getByText("5 个特征").first()).toBeVisible({ timeout: 90_000 })
+    await page.getByRole("button", { name: "分享模型" }).click()
+    const dialog = page.getByRole("dialog", { name: "分享模型" })
+    await dialog.getByLabel("标题").fill("法兰盘")
+    await dialog.getByLabel("说明").fill("第三课作业")
+    await dialog.getByRole("button", { name: "生成链接" }).click()
+    const link = dialog.getByLabel("分享链接")
+    await expect(link).toHaveValue(/\/studio\/s\/[0-9A-Za-z]{10}$/)
+    const url = await link.inputValue()
+
+    // Someone else: a fresh context shares nothing with the sharer's browser.
+    const other = await browser.newContext({ locale: "zh-CN", viewport: { width: 1440, height: 900 } })
+    const viewer = await other.newPage()
+    const problems: string[] = []
+    viewer.on("pageerror", (e) => problems.push(`pageerror: ${e.message}`))
+    viewer.on("console", (m) => m.type() === "error" && problems.push(`console.error: ${m.text()}`))
+    await viewer.goto(url)
+    await expect(viewer.getByRole("heading", { name: "法兰盘" })).toBeVisible()
+    await expect(viewer.getByText("第三课作业")).toBeVisible()
+    await expect(viewer.locator('meta[name="robots"]'), "kept out of search results").toHaveAttribute("content", "noindex")
+    const tree = viewer.getByRole("navigation", { name: "特征树" })
+    await expect(tree.getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
+    await expectRendered(viewer.locator("canvas").first(), "/studio/s shared model")
+
+    // Parameters keep their notes; trying one rebuilds the model, a reload puts it back.
+    await viewer.getByRole("tab", { name: "参数" }).click()
+    await expect(viewer.getByText("螺栓孔所在圆的直径（节圆）")).toBeVisible()
+    await viewer.getByLabel("n", { exact: true }).fill("4")
+    await viewer.getByLabel("n", { exact: true }).press("Enter")
+    await tree.getByRole("button", { name: /孔阵列/ }).hover()
+    await expect(viewer.getByRole("tooltip").getByText(/^×4/), "the tried parameter rebuilt the pattern").toBeVisible()
+    await viewer.reload()
+    await expect(tree.getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
+    await tree.getByRole("button", { name: /孔阵列/ }).hover()
+    await expect(viewer.getByRole("tooltip").getByText(/^×6/), "nothing was saved").toBeVisible()
+
+    // Copy: replaces this browser's (empty) model, undoably.
+    await viewer.getByRole("button", { name: "复制到我的工作台" }).first().click()
+    await expect(viewer).toHaveURL(/\/studio$/)
+    await expect(viewer.getByText("已替换当前模型")).toBeVisible({ timeout: 90_000 })
+    await expect(tree.getByText("5 个特征")).toBeVisible()
+    await viewer.getByRole("button", { name: "撤销上一步" }).click()
+    await expect(tree, "undo brings back the empty model").toHaveCount(0)
+    expect(problems, "viewer page errors / console.error").toEqual([])
+    await other.close()
+
+    // The sharer can take the link back.
+    await dialog.getByRole("button", { name: "删除这个链接" }).click()
+    await page.getByRole("alertdialog").getByRole("button", { name: "删除链接" }).click()
+    await expect(page.getByText("已删除链接")).toBeVisible()
+    const id = url.split("/").pop()
+    expect((await page.request.get(`/api/studio/share/${id}`)).status()).toBe(404)
+  })
+
+  test("/studio 导入特征树 JSON：好的替换可撤销，坏的在原处说明", async ({ page }) => {
+    await page.goto("/studio?start=flange")
+    const tree = page.getByRole("navigation", { name: "特征树" })
+    await expect(tree.getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
+    const pad = {
+      params: { L: 30 },
+      features: [
+        { id: "sk", op: "sketch", name: "草图1", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: 20 }] },
+        { id: "e1", op: "extrude", name: "拉伸1", sketch: "sk", distance: 5 },
+      ],
+    }
+
+    // From the menu.
+    const chooser = page.waitForEvent("filechooser")
+    await page.getByRole("button", { name: "导出与导入" }).click()
+    await page.getByRole("menuitem", { name: "导入特征树（JSON）…" }).click()
+    await (await chooser).setFiles({ name: "垫块.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(pad)) })
+    await expect(page.getByText("已导入「垫块」")).toBeVisible()
+    await expect(tree.getByText("2 个特征")).toBeVisible()
+
+    // Dropped on the view: a broken file is explained where it was dropped, and changes nothing.
+    const { sketch: _sketch, ...noSketch } = pad.features[1]
+    const bad = JSON.stringify({ ...pad, features: [pad.features[0], noSketch] })
+    const files = await page.evaluateHandle((text) => {
+      const dt = new DataTransfer()
+      dt.items.add(new File([text], "坏的.json", { type: "application/json" }))
+      return dt
+    }, bad)
+    await page.locator("main").dispatchEvent("dragover", { dataTransfer: files })
+    await page.locator("main").dispatchEvent("drop", { dataTransfer: files })
+    const alert = page.getByRole("alert").filter({ hasText: "没能导入「坏的.json」" })
+    await expect(alert).toContainText("第 2 个特征（拉伸1）缺少 sketch 字段")
+    await expect(tree.getByText("2 个特征"), "the model is unchanged").toBeVisible()
+
+    await page.getByRole("button", { name: "撤销上一步" }).click()
+    await expect(tree.getByText("5 个特征"), "undo brings the flange back").toBeVisible()
+  })
+
   test("/studio?start=flange 现成特征树与改参数", async ({ page }) => {
     await page.goto("/studio?start=flange")
     await expect(page.getByText("5 个特征").first()).toBeVisible({ timeout: 90_000 })

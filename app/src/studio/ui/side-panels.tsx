@@ -17,14 +17,14 @@ import type { CheckResult } from "../kernel/check"
  * involved. Each says what it is (the note the model wrote) and where it's
  * used; pointing at one lights up the features it drives.
  */
-export function ParamsPanel({ studio, onHover, annotations }: { studio: Studio; onHover: (h: Hover | null) => void; annotations: Annotations }) {
+export function ParamsPanel({ studio, onHover, annotations }: { studio: Studio; onHover: (h: Hover | null) => void; annotations?: Annotations }) {
   const { tree } = studio
   const entries = Object.entries(tree.params)
   const checks = studio.report?.checks ?? []
   if (!entries.length && !checks.length) return <p className="px-4 py-4 text-body text-muted-foreground">还没有参数。助教会把关键尺寸定成参数，之后可以在这里直接改。</p>
   return (
     <div className="space-y-1 px-2 py-3" onMouseLeave={() => onHover(null)}>
-      {checks.length > 0 && <Checklist rows={checks} baseline={studio.checkBaseline} rolledBack={!!studio.rollback} onHover={onHover} onFix={annotations.startMessage} />}
+      {checks.length > 0 && <Checklist rows={checks} baseline={studio.checkBaseline} rolledBack={!!studio.rollback} onHover={onHover} onFix={annotations?.startMessage} />}
       <p className="px-2 pb-1 text-small text-muted-foreground">改完按 Enter，整棵特征树按新参数重算。指向一个参数，模型上会标出它的尺寸。</p>
       {studio.report?.paramError && <p className="px-2 text-small text-destructive">{studio.report.paramError}</p>}
       {entries.map(([k, v]) => {
@@ -66,7 +66,8 @@ function Checklist({
   baseline: Record<string, boolean>
   rolledBack: boolean
   onHover: (h: Hover | null) => void
-  onFix: (text: string) => void
+  /** 「让助教修正」: not on a shared link, which has no chat. */
+  onFix?: (text: string) => void
 }) {
   const state = (r: CheckResult): CheckState => (r.pass ? "pass" : r.invalid ? "invalid" : baseline[r.id] ? "drift" : "fail")
   const states = rows.map(state)
@@ -111,7 +112,7 @@ function Checklist({
                     </span>
                   </span>
                 </div>
-                {st === "fail" && (
+                {st === "fail" && onFix && (
                   <Button size="sm" variant="ghost" className="mt-0.5 ml-5 h-6 px-2 text-caption" onClick={() => onFix(`核对没通过：「${r.said}」要求 ${r.expected}，现在是 ${r.actual}，请修正。`)}>
                     让助教修正
                   </Button>

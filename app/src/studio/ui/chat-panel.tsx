@@ -8,6 +8,7 @@ import { Textarea } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { OpIcon } from "@/components/op-icon"
 import type { OpId } from "@/content/ops"
+import { isDivider } from "../share"
 import { STARTERS } from "../starters"
 import type { Tree } from "../dsl"
 import type { ToolOutput } from "../tools"
@@ -314,6 +315,17 @@ function Message({
         : undefined,
     [notes, onShow],
   )
+  if (isDivider(m)) {
+    // The model changed under the conversation (a copied link, an import): for the learner only, never sent.
+    const text = m.parts.map((p) => (p.type === "text" ? p.text : "")).join("")
+    return (
+      <div role="separator" aria-label={text} className="flex items-center gap-3 text-caption text-faint-foreground">
+        <span className="h-px flex-1 bg-border" />
+        {text}
+        <span className="h-px flex-1 bg-border" />
+      </div>
+    )
+  }
   if (m.role === "user") {
     const text = m.parts.map((p) => (p.type === "text" ? p.text : "")).join("")
     const images = m.parts.filter((p): p is FileUIPart => p.type === "file" && p.mediaType.startsWith("image/"))

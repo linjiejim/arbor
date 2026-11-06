@@ -29,6 +29,7 @@ import {
 import type { PickInfo } from "../annotations"
 import { displayName, EMPTY_TREE, OP_NAMES, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
+import { MAX_COUNT } from "../limits"
 import { referencesOf } from "../apply"
 import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
@@ -984,6 +985,7 @@ export class Kernel {
           const v2 = f.dir2 && f.count2 !== undefined && f.spacing2 !== undefined ? mul(DIRS[f.dir2], n(f.spacing2)) : null
           const c1 = int(f.count, 2, "个数")
           const c2 = v2 ? int(f.count2!, 2, "第二方向的个数") : 1
+          if (c1 * c2 > MAX_COUNT) throw new InputError(`两个方向一共最多 ${MAX_COUNT} 个，现在是 ${c1} × ${c2}`)
           for (let i = 0; i < c1; i++)
             for (let j = 0; j < c2; j++) {
               if (i === 0 && j === 0) continue
@@ -1186,6 +1188,9 @@ export class Kernel {
   }
 
   private copyTools(body: Shape3D, sources: Tool[], moves: ((s: Shape3D) => Shape3D)[], summary: string, warnings: string[]) {
+    // A pattern of a pattern (or of a many-hole feature) multiplies: count the bodies this step makes.
+    const made = sources.reduce((n, s) => n + countOf(s.tool, "solid"), 0) * moves.length
+    if (made > MAX_COUNT) throw new InputError(`这一步要复制出 ${made} 个实体，最多 ${MAX_COUNT} 个`)
     let cur = body
     const tools: Tool[] = []
     for (const { tool, mode } of sources) {
@@ -1288,10 +1293,11 @@ function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut", war
   return next
 }
 
-/** Counts may be expressions; they must land on a whole number. */
+/** Counts may be expressions; they must land on a whole number, and not one that would freeze the tab. */
 function count(v: number, min: number, what: string): number {
   const r = Math.round(v)
   if (Math.abs(v - r) > 1e-6 || r < min) throw new InputError(`${what}要是不小于 ${min} 的整数，现在是 ${fmt(v)}`)
+  if (r > MAX_COUNT) throw new InputError(`${what}最多 ${MAX_COUNT}，现在是 ${r}`)
   return r
 }
 
