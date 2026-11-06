@@ -15,6 +15,7 @@ import { describeUse, drivenFeatures, paramDependents, paramUses } from "@/studi
 import { standardHole } from "@/studio/holes"
 import { dimSource } from "@/studio/dim-source"
 import { selectorWords } from "@/studio/selector-words"
+import { project } from "@/studio/kernel/drawing"
 import { glyphArea } from "./glyph-area"
 
 describe("parameter expressions", () => {
@@ -944,5 +945,45 @@ describe("after that would come too early", () => {
     const r = applyEdit(t, "extrude", { id: "hole", sketch: "cav", distance: 5, mode: "cut", after: "body" })
     expect(r.tree.features.map((f) => f.id)).toEqual(["sk", "body", "cav", "hole"])
     expect(r.note).toMatch(/已改为放在/)
+  })
+})
+
+describe("engineering drawings", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+
+  it("projects first-angle: front sees X and Z, top X and Y, left −Y and Z", () => {
+    expect(project([1, 2, 3], "front")).toEqual([1, 3])
+    expect(project([1, 2, 3], "top")).toEqual([1, 2])
+    expect(project([1, 2, 3], "left").map((x) => x + 0)).toEqual([-2, 3])
+  })
+
+  it("draws a holed block: the hole hidden in the front view, a visible circle with a centre cross on top", () => {
+    k.rebuild({ params: {}, features: [
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 40, h: 30 }, { type: "circle", d: 10, cut: true }] },
+      { id: "e", op: "extrude", sketch: "s", distance: 10 },
+    ] } as unknown as Tree)
+    const d = k.drawing(false)!
+    const front = d.views.find((v) => v.name === "front")!
+    const top = d.views.find((v) => v.name === "top")!
+    expect(front.hidden.length, "the hole shows as hidden lines").toBeGreaterThan(0)
+    for (let i = 0; i < front.hidden.length; i += 4) expect(Math.abs(front.hidden[i] - front.hidden[i + 2])).toBeLessThan(1e-3)
+    expect(top.hidden, "nothing behind the top face but the hole, which is seen").toEqual([])
+    expect(top.centre.length / 4, "a cross on the hole").toBe(2)
+    expect(front.bbox[1][0] - front.bbox[0][0]).toBeCloseTo(40)
+    expect(top.bbox[1][1] - top.bbox[0][1]).toBeCloseTo(30)
+  })
+
+  it("puts the flange's pitch circle and holes in the top view, once each", () => {
+    k.rebuild(STARTERS.find((s) => s.id === "flange")!.tree)
+    const top = k.drawing(false)!.views.find((v) => v.name === "top")!
+    const words = top.dims.map((x) => x.plain)
+    expect(words).toContain("⌀90")
+    expect(words).toContain("⌀8")
+    const all = k.drawing(false)!.views.flatMap((v) => v.dims.map((x) => x.plain))
+    expect(new Set(all).size).toBe(all.length)
   })
 })

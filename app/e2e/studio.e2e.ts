@@ -275,6 +275,26 @@ test.describe("工作台", () => {
     await expect(tree.getByText("5 个特征"), "undo brings the flange back").toBeVisible()
   })
 
+  test("/studio 工程图：三视图、尺寸、标题栏，导出 SVG", async ({ page }) => {
+    await page.goto("/studio?start=flange")
+    await expect(page.getByRole("navigation", { name: "特征树" }).getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
+    await page.getByRole("radio", { name: "工程图" }).click()
+    const sheet = page.getByRole("img", { name: /工程图/ })
+    await expect(sheet).toBeVisible()
+    await expect(sheet.getByText("⌀90")).toBeVisible()
+    await expect(sheet.getByText("第一角投影").first()).toBeVisible()
+    await expect(page.getByText(/A4 横版 · 比例 1:2/)).toBeVisible()
+    // Parameter names on: the pitch circle says which parameter it is.
+    await page.getByRole("switch", { name: "显示参数名" }).click()
+    await expect(sheet.getByText("⌀90（pcd）")).toBeVisible()
+    const download = page.waitForEvent("download")
+    await page.getByRole("button", { name: "导出 SVG" }).click()
+    expect((await download).suggestedFilename()).toMatch(/工程图\.svg$/)
+    // Back to 3D.
+    await page.getByRole("radio", { name: "3D" }).click()
+    await expect(sheet).toHaveCount(0)
+  })
+
   test("/studio?start=flange 现成特征树与改参数", async ({ page }) => {
     await page.goto("/studio?start=flange")
     await expect(page.getByText("5 个特征").first()).toBeVisible({ timeout: 90_000 })

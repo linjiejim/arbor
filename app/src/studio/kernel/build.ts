@@ -39,6 +39,7 @@ import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
 import { runChecks, type CheckResult } from "./check"
 import { pathPoints, planeFace, ribTool, tapered, thinProfile, untilNext } from "./features2"
 import { stepAscii, zipStore } from "../zip"
+import { makeDrawing, type DrawingData } from "./drawing"
 import { standardHole } from "../holes"
 import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
@@ -572,6 +573,25 @@ export class Kernel {
     } finally {
       disposeInfos(faces)
     }
+  }
+
+  /**
+   * An engineering drawing of the latest body (kernel/drawing.ts). Text has
+   * thousands of edges and is a note on a drawing anyway: the views are made
+   * from the body before the first lettering feature.
+   */
+  drawing(withIso: boolean): DrawingData | null {
+    const usesText = (f: Feature) => {
+      const sk = "sketch" in f && typeof f.sketch === "string" ? this.tree.features.find((x) => x.id === f.sketch) : undefined
+      return sk?.op === "sketch" && sk.shapes.some((x) => x.type === "text")
+    }
+    const cut = this.tree.features.findIndex(usesText)
+    const until = cut >= 0 ? cut : this.steps.length
+    const step = this.lastBuilt(until)
+    if (!step?.body) return null
+    const before = new Set(this.tree.features.slice(0, until).map((f) => f.id))
+    const dims = this.dimensions().filter((d) => before.has(d.feature))
+    return makeDrawing(step.body, step.origins, dims, withIso, cut >= 0 ? "文字见模型" : undefined)
   }
 
   /** Dimensions of every feature that built (kernel/dims.ts). */

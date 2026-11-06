@@ -241,6 +241,9 @@ export function useStudio(shared?: Tree) {
   const selectorFor = React.useCallback(async (kind: "face" | "edge", hashes: number[], before: number) => client.current?.selectorFor(kind, hashes, before) ?? null, [])
   const faceEdges = React.useCallback(async (hash: number, before: number) => client.current?.faceEdges(hash, before) ?? [], [])
 
+  /** An engineering drawing of the latest body (computed on demand: hidden-line removal takes tens of ms per view). */
+  const drawing = React.useCallback(async (iso: boolean) => client.current?.drawing(iso) ?? null, [])
+
   const measure = React.useCallback(async (targets: MeasureTarget[]) => (rollbackRef.current ? null : (client.current?.measure(targets) ?? null)), [])
 
   const setPins = React.useCallback((pins: Pin[]) => {
@@ -272,6 +275,7 @@ export function useStudio(shared?: Tree) {
     pick,
     locate,
     stepInput,
+    drawing,
     locateBefore,
     selectorFor,
     faceEdges,

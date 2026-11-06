@@ -23,6 +23,8 @@ import type { Hover } from "@/studio/scene"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
 import { ConnectorOverlay } from "@/studio/ui/connector-overlay"
 import { NO_PARTS_VIEW, type PartsView } from "@/studio/scene"
+import { Segmented } from "@/components/ui/segmented"
+import { DrawingSheet } from "@/studio/ui/drawing-sheet"
 import { useReselect } from "@/studio/use-reselect"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
 import { useAnnotations } from "@/studio/use-annotations"
@@ -51,6 +53,8 @@ export function StudioPage() {
   const [partsView, setPartsView] = React.useState<PartsView>(NO_PARTS_VIEW)
   // A message started from a feature card brings the conversation forward.
   const [tab, setTab] = React.useState("chat")
+  /** 「工程图」: the drawing sheet over the 3D view; the side panel stays, so parameters can be changed while looking at it. */
+  const [sheet, setSheet] = React.useState(false)
   const [seenPrefill, setSeenPrefill] = React.useState(annotations.prefill)
   if (seenPrefill !== annotations.prefill) {
     setSeenPrefill(annotations.prefill)
@@ -130,7 +134,18 @@ export function StudioPage() {
           Beta
         </Badge>
         {status && <span className="font-mono text-caption text-faint-foreground max-md:hidden">{status.model}</span>}
-        <div className="ml-auto flex items-center gap-1">
+        <Segmented
+          size="sm"
+          aria-label="视图"
+          className="mx-auto"
+          value={sheet ? "drawing" : "3d"}
+          onValueChange={(v) => setSheet(v === "drawing")}
+          options={[
+            { value: "3d", label: "3D" },
+            { value: "drawing", label: "工程图" },
+          ]}
+        />
+        <div className="flex items-center gap-1">
           <IconButton label="撤销上一步" disabled={!studio.canUndo || chat.busy} onClick={studio.undo}>
             <Undo2 />
           </IconButton>
@@ -195,6 +210,11 @@ export function StudioPage() {
         >
           <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={chat.busy} reselect={reselect} parts={partsView} onParts={setPartsView} />
           <TreeOverlay studio={studio} onHover={setHover} reselect={reselect} annotations={annotations} busy={chat.busy} parts={partsView} onParts={setPartsView} />
+          {sheet && (
+            <div className="absolute inset-0 z-30 bg-background">
+              <DrawingSheet studio={studio} title={studio.tree.features.length ? "零件" : ""} />
+            </div>
+          )}
           {dragging && (
             <div className="pointer-events-none absolute inset-3 z-20 grid place-items-center rounded-lg border-2 border-dashed border-primary bg-background/80 text-body font-medium">
               松开鼠标，导入这个特征树（JSON）

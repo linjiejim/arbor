@@ -18,6 +18,7 @@ export type WorkerRequest =
   | { id: number; type: "locate"; kind: "face" | "edge"; selector: unknown; before?: number }
   | { id: number; type: "measure"; targets: MeasureTarget[] }
   | { id: number; type: "dimensions" }
+  | { id: number; type: "drawing"; iso: boolean }
   | { id: number; type: "selectorFor"; kind: "face" | "edge"; hashes: number[]; before: number }
   | { id: number; type: "faceEdges"; hash: number; before: number }
 
@@ -114,6 +115,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         break
       case "dimensions":
         result = k.dimensions()
+        break
+      case "drawing":
+        result = k.drawing(req.iso)
         break
       case "selectorFor":
         result = k.selectorFor(req.kind, req.hashes, req.before)
