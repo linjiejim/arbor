@@ -6,6 +6,7 @@ import { setOC } from "replicad"
 import type { Tree } from "./dsl"
 import { Kernel } from "./kernel/build"
 import { ensureFonts } from "./kernel/fonts"
+import type { MeasureTarget } from "./kernel/measure"
 
 export type WorkerRequest =
   | { id: number; type: "init" }
@@ -15,6 +16,7 @@ export type WorkerRequest =
   | { id: number; type: "export"; format: "step" | "stl"; index?: number }
   | { id: number; type: "pick"; kind: "face" | "edge"; hash: number; point: [number, number, number] }
   | { id: number; type: "locate"; kind: "face" | "edge"; selector: unknown }
+  | { id: number; type: "measure"; targets: MeasureTarget[] }
 
 export type WorkerMessage =
   | { id: number; ok: true; result: unknown; heapMB: number }
@@ -103,6 +105,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         break
       case "locate":
         result = k.locate(req.kind, req.selector)
+        break
+      case "measure":
+        result = k.measure(req.targets)
         break
     }
     post({ id: req.id, ok: true, result, heapMB: oc.wasmMemory.buffer.byteLength / 1048576 }, transfer)

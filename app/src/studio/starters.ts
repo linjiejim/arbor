@@ -13,6 +13,7 @@ export const STARTERS: { id: string; title: string; note: string; teardown?: str
     teardown: "box_fillet_first",
     tree: {
       params: { L: 60, W: 40, H: 30, r: 4, t: 2.5 },
+      paramNotes: { L: "外形长，沿 X", W: "外形宽，沿 Y", H: "总高，沿 Z", r: "外圆角半径", t: "壁厚（抽壳向内）" },
       features: [
         { id: "sk1", op: "sketch", name: "草图1", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W" }], intent: "盒子外轮廓画在上视基准面上" },
         { id: "ext1", op: "extrude", name: "拉伸1", sketch: "sk1", distance: "H", intent: "先得到实心的盒体" },
@@ -27,6 +28,7 @@ export const STARTERS: { id: string; title: string; note: string; teardown?: str
     note: "孔先做一个，再用圆周阵列复制；改 n 和 pcd 看阵列怎么跟着变。",
     tree: {
       params: { D: 120, T: 10, d0: 40, pcd: 90, bolt: 8, n: 6 },
+      paramNotes: { D: "盘的外径", T: "盘厚", d0: "中心孔直径", pcd: "螺栓孔所在圆的直径（节圆）", bolt: "螺栓孔直径", n: "螺栓孔个数" },
       features: [
         { id: "sk", op: "sketch", name: "盘面草图", on: { plane: "XY" }, shapes: [{ type: "circle", d: "D" }, { type: "circle", d: "d0", cut: true }], intent: "外圆和中心孔一起画，拉伸一次就有通孔" },
         { id: "disc", op: "extrude", name: "盘体", sketch: "sk", distance: "T" },
@@ -42,6 +44,7 @@ export const STARTERS: { id: string; title: string; note: string; teardown?: str
     note: "旋转出杯身，抽壳，再沿 C 形路径扫掠出把手。",
     tree: {
       params: { R: 40, H: 100, t: 3, rb: 5 },
+      paramNotes: { R: "杯身外半径", H: "杯高", t: "杯壁厚", rb: "杯底外缘圆角半径" },
       features: [
         { id: "s", op: "sketch", name: "杯身半截面", on: { plane: "XZ" }, shapes: [{ type: "rect", w: "R", h: "H", center: ["R/2", "H/2"] }], intent: "回转体只画轴一侧的半截面" },
         { id: "body", op: "revolve", name: "杯身", sketch: "s", axis: "Z" },

@@ -121,6 +121,29 @@ export const EVALS: EvalCase[] = [
       return [{ name: "刻在背面里 0.5", pass: floor.length > 0, detail: `${floor.length} 个字底面在 y=19.5` }]
     },
   },
+  {
+    id: "tapped-plate",
+    prompt: "做一块 60×40×8 的板，四角各一个 M4 螺纹孔，孔中心离两条边各 6 mm，螺纹孔深 6。",
+    size: [60, 40, 8],
+    upright: true,
+    extra: (q) => {
+      // Tapped M4: the tap drill is ⌀3.3, from the standard table rather than a guess.
+      const c = centres(q.inspect("faces", { kind: "cylinder", radius: 1.65 }))
+      const corners = c.filter((p) => Math.abs(Math.abs(p[0]) - 24) < 0.5 && Math.abs(Math.abs(p[1]) - 14) < 0.5)
+      return [{ name: "四个 M4 底孔 ⌀3.3", pass: corners.length === 4, detail: `${c.length} 个 R1.65 的孔面，${corners.length} 个在角上` }]
+    },
+  },
+  {
+    id: "slope-boss",
+    prompt: "做一个楔形块：底面 40×40（中心在原点），X=-20 那头高 10、X=20 那头高 30，顶面是一个斜面。在斜面中心放一个 ⌀10、高 3 的圆柱凸台，凸台轴线垂直于斜面。",
+    size: [40, 40, 30],
+    upright: true,
+    extra: (q) => {
+      const c = centres(q.inspect("faces", { kind: "cylinder", radius: 5 }))
+      const ok = c.length === 1 && Math.abs(c[0][0]) < 2 && Math.abs(c[0][1]) < 1 && c[0][2] > 20
+      return [{ name: "凸台立在斜面中心", pass: ok, detail: c.map((x) => `(${x.join(", ")})`).join(" ") || "没有 R5 的圆柱面" }]
+    },
+  },
   { id: "rib-plate", prompt: "做一块 120×80×4 的底板，顶面上沿 X 方向等距放 3 条加强筋（每条长 100、宽 3、高 12），筋间距 25，中间那条在 Y=0。", size: [120, 80, 16], upright: true, volume: 120 * 80 * 4 + 3 * 100 * 3 * 12 },
 ]
 

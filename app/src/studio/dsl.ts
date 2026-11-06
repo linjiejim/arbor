@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { SCREW_SIZES } from "./holes"
 
 /**
  * The studio's model: a parameter table plus an ordered feature tree, as plain
@@ -69,7 +70,13 @@ export const PlaneRef = z
       "XY = 上视基准面（草图 x→X, y→Y，法向 +Z）；XZ = 前视基准面（x→X, y→Z，法向 -Y）；YZ = 右视基准面（x→Y, y→Z，法向 +X）",
     ),
     offset: Num.optional().describe("沿该基准面的坐标轴平移：XY 为 Z 值、XZ 为 Y 值、YZ 为 X 值"),
-    face: FaceSelector.optional().describe("贴在这个平面上（必须与 plane 平行），offset 从该面再算"),
+    face: FaceSelector.optional().describe(
+      "贴在这个平面上。与 plane 平行时坐标沿用基准面，offset 从该面再算；不平行（斜面）时草图原点在这个面的中心，x 沿面内的水平方向，y 沿面往上，法向朝外",
+    ),
+    tilt: z
+      .object({ axis: Axis, angle: Num.describe("角度，右手定则") })
+      .optional()
+      .describe("斜的基准面：把（平移后的）基准面绕过原点的这根坐标轴转一个角度"),
   })
   .describe("草图平面")
 
@@ -124,6 +131,7 @@ const Base = {
   id: z.string().regex(/^[A-Za-z][A-Za-z0-9_]*$/).describe('特征 id，英文，例如 "base", "pocket1"'),
   name: z.string().optional().describe('中文显示名，例如 "底座拉伸"'),
   intent: z.string().optional().describe("一句话设计意图：为什么这样做"),
+  suppressed: z.boolean().optional().describe("压缩：暂时不参与重建（学习者在特征树里设置）"),
 }
 const Mode = z.enum(["add", "cut"]).optional().describe("add = 加料（默认），cut = 切除")
 
@@ -159,7 +167,15 @@ export const Feature = z.discriminatedUnion("op", [
     op: z.literal("hole"),
     on: PlaneRef.describe("孔口所在平面，孔沿法向的反方向钻进去"),
     at: z.array(Vec2).min(1).describe("孔中心，草图坐标"),
-    d: Num.describe("孔径"),
+    d: Num.optional().describe("孔径；用 standard 时不填"),
+    standard: z
+      .object({
+        size: z.enum(SCREW_SIZES).describe("公制螺纹规格"),
+        fit: z.enum(["clearance", "close", "tap"]).optional().describe("clearance = 普通过孔（缺省），close = 精配过孔，tap = 螺纹孔：钻攻丝底孔并标出装饰螺纹"),
+        head: z.enum(["cbore", "csink"]).optional().describe("过孔加沉头：cbore = 内六角圆柱头螺钉的沉孔，csink = 沉头螺钉的锥口"),
+      })
+      .optional()
+      .describe("标准孔：按 ISO 公制螺钉自动定孔径、沉孔和螺纹，不用自己查表"),
     depth: Num.optional().describe("孔深，缺省贯穿"),
     cbore: z.object({ d: Num, depth: Num }).optional().describe("沉头孔（柱形沉孔）"),
     csink: z.object({ d: Num, angle: Num.optional() }).optional().describe("埋头孔（锥形，缺省 90°）"),
@@ -234,6 +250,8 @@ export type SketchShape = z.infer<typeof SketchShape>
 
 export const Tree = z.object({
   params: z.record(z.string(), Num),
+  /** One line per parameter for people (「总长，沿 X」); never used in calculations. */
+  paramNotes: z.record(z.string(), z.string()).optional(),
   features: z.array(Feature),
 })
 export type Tree = z.infer<typeof Tree>

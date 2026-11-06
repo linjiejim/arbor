@@ -2,24 +2,77 @@ import * as React from "react"
 import { Input } from "@/components/ui/input"
 import { CodeBlock } from "@/components/code-block"
 import { toBuild123d } from "../codegen"
+import type { Tree } from "../dsl"
+import { drivenFeatures, paramDependents, paramUses, describeUse } from "../param-uses"
+import type { Hover } from "../scene"
 import type { Studio } from "../use-studio"
 
-/** Named parameters: edit a number and the whole tree rebuilds, no model involved. */
-export function ParamsPanel({ studio }: { studio: Studio }) {
-  const entries = Object.entries(studio.tree.params)
+/**
+ * Named parameters: edit a number and the whole tree rebuilds, no model
+ * involved. Each says what it is (the note the model wrote) and where it's
+ * used; pointing at one lights up the features it drives.
+ */
+export function ParamsPanel({ studio, onHover }: { studio: Studio; onHover: (h: Hover | null) => void }) {
+  const { tree } = studio
+  const entries = Object.entries(tree.params)
   if (!entries.length) return <p className="px-4 py-4 text-body text-muted-foreground">还没有参数。助教会把关键尺寸定成参数，之后可以在这里直接改。</p>
   return (
-    <div className="space-y-3 px-4 py-4">
-      <p className="text-small text-muted-foreground">改完按 Enter，整棵特征树按新参数重算。</p>
-      {studio.report?.paramError && <p className="text-small text-destructive">{studio.report.paramError}</p>}
-      {entries.map(([k, v]) => (
-        <ParamRow key={k} name={k} value={v} computed={studio.report?.params[k]} onCommit={(x) => studio.setParam(k, x)} />
-      ))}
+    <div className="space-y-1 px-2 py-3" onMouseLeave={() => onHover(null)}>
+      <p className="px-2 pb-1 text-small text-muted-foreground">改完按 Enter，整棵特征树按新参数重算。指向一个参数，模型上会标出它影响的特征。</p>
+      {studio.report?.paramError && <p className="px-2 text-small text-destructive">{studio.report.paramError}</p>}
+      {entries.map(([k, v]) => {
+        const uses = paramUses(tree, k)
+        const deps = paramDependents(tree, k)
+        const driven = drivenBy(tree, k)
+        return (
+          <ParamRow
+            key={k}
+            name={k}
+            value={v}
+            note={tree.paramNotes?.[k]}
+            uses={[...uses.map((u) => describeUse(tree, u)), ...deps.map((d) => `参数 ${d}`)]}
+            computed={studio.report?.params[k]}
+            onCommit={(x) => studio.setParam(k, x)}
+            onPoint={() => onHover(driven.length ? { ids: driven, label: `受 ${k} 影响的特征` } : null)}
+          />
+        )
+      })}
     </div>
   )
 }
 
-function ParamRow({ name, value, computed, onCommit }: { name: string; value: number | string; computed?: number; onCommit: (v: number | string) => Promise<string | null> }) {
+/** Features a parameter drives, directly or through parameters computed from it. */
+function drivenBy(tree: Tree, name: string): string[] {
+  const names = new Set([name])
+  for (let grew = true; grew; ) {
+    grew = false
+    for (const n of [...names])
+      for (const d of paramDependents(tree, n))
+        if (!names.has(d)) {
+          names.add(d)
+          grew = true
+        }
+  }
+  return [...new Set([...names].flatMap((n) => drivenFeatures(tree, paramUses(tree, n))))]
+}
+
+function ParamRow({
+  name,
+  value,
+  note,
+  uses,
+  computed,
+  onCommit,
+  onPoint,
+}: {
+  name: string
+  value: number | string
+  note?: string
+  uses: string[]
+  computed?: number
+  onCommit: (v: number | string) => Promise<string | null>
+  onPoint: () => void
+}) {
   const [draft, setDraft] = React.useState(String(value))
   const [error, setError] = React.useState<string | null>(null)
   const [shown, setShown] = React.useState(value)
@@ -34,25 +87,31 @@ function ParamRow({ name, value, computed, onCommit }: { name: string; value: nu
   }
   const isExpr = typeof value === "string"
   return (
-    <label className="block">
-      <span className="flex items-baseline gap-2">
-        <span className="font-mono text-small font-medium">{name}</span>
-        {isExpr && computed !== undefined && <span className="text-caption tabular text-faint-foreground">= {Math.round(computed * 100) / 100}</span>}
-      </span>
-      <Input
-        className="mt-1 font-mono tabular"
-        value={draft}
-        inputMode={isExpr ? "text" : "decimal"}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => void commit()}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") void commit()
-          if (e.key === "Escape") setDraft(String(value))
-        }}
-        aria-invalid={error ? true : undefined}
-      />
+    <div className="rounded-md px-2 py-2 transition-colors duration-(--duration-fast) hover:bg-accent focus-within:bg-accent" onMouseEnter={onPoint} onFocus={onPoint}>
+      <label className="block">
+        <span className="flex items-baseline gap-2">
+          <span className="font-mono text-small font-medium">{name}</span>
+          {note && <span className="min-w-0 truncate text-small text-muted-foreground">{note}</span>}
+          {isExpr && computed !== undefined && <span className="ml-auto shrink-0 text-caption tabular text-faint-foreground">= {Math.round(computed * 100) / 100}</span>}
+        </span>
+        <Input
+          className="mt-1 font-mono tabular"
+          value={draft}
+          inputMode={isExpr ? "text" : "decimal"}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => void commit()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void commit()
+            if (e.key === "Escape") setDraft(String(value))
+          }}
+          aria-invalid={error ? true : undefined}
+          aria-label={name}
+          aria-description={note}
+        />
+      </label>
       {error && <span className="mt-1 block text-small text-destructive">{error}</span>}
-    </label>
+      <p className="mt-1 text-caption text-faint-foreground">{uses.length ? `用在：${uses.join("、")}` : "还没有特征用到它"}</p>
+    </div>
   )
 }
 

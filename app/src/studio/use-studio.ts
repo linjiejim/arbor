@@ -3,6 +3,7 @@ import { applyEdit, executeTool, treeText, type ToolRun } from "./apply"
 import { KernelClient } from "./client"
 import { EMPTY_TREE, Tree } from "./dsl"
 import type { BuildReport, DisplayData } from "./kernel/build"
+import type { MeasureTarget } from "./kernel/measure"
 import { renderViews, type Pin } from "./look"
 import { STARTERS } from "./starters"
 
@@ -181,6 +182,21 @@ export function useStudio() {
     [checkpoint, commit],
   )
 
+  /** A hand edit of the tree (feature editor, reorder, suppress, delete): undoable; returns an error message or null. */
+  const editTree = React.useCallback(
+    async (change: (t: Tree) => Tree) => {
+      try {
+        const next = change(treeRef.current)
+        checkpoint()
+        await commit(next)
+        return null
+      } catch (e) {
+        return (e as Error).message
+      }
+    },
+    [checkpoint, commit],
+  )
+
   const showFeature = React.useCallback(
     (id: string | null) => {
       rollbackRef.current = id
@@ -203,6 +219,8 @@ export function useStudio() {
 
   const locate = React.useCallback(async (kind: "face" | "edge", selector: unknown) => client.current?.locate(kind, selector) ?? null, [])
 
+  const measure = React.useCallback(async (targets: MeasureTarget[]) => (rollbackRef.current ? null : (client.current?.measure(targets) ?? null)), [])
+
   const setPins = React.useCallback((pins: Pin[]) => {
     pinsRef.current = pins
   }, [])
@@ -224,10 +242,12 @@ export function useStudio() {
     load,
     runTool,
     setParam,
+    editTree,
     showFeature,
     exportBody,
     pick,
     locate,
+    measure,
     setPins,
   }
 }

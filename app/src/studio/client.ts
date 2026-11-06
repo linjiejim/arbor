@@ -1,3 +1,4 @@
+import type { MeasureResult, MeasureTarget } from "./kernel/measure"
 import type { KernelPort } from "./apply"
 import type { Tree } from "./dsl"
 import type { PickInfo } from "./annotations"
@@ -69,6 +70,10 @@ export class KernelClient implements KernelPort {
 
   locate(kind: "face" | "edge", selector: unknown): Promise<number[] | null> {
     return this.call("locate", { type: "locate", kind, selector })
+  }
+
+  measure(targets: MeasureTarget[]): Promise<MeasureResult | null> {
+    return this.call("measure", { type: "measure", targets })
   }
 
   exportBody(format: "step" | "stl", index?: number): Promise<Blob | null> {

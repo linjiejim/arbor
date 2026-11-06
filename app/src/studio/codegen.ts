@@ -2,6 +2,7 @@
 // one block per feature, so learners can carry it to a real toolchain and
 // compare it with the teardowns' code. Selectors become build123d filters;
 // `of` (provenance) is approximated by "lies on that feature's tool body".
+import { standardHole } from "./holes"
 import type { EdgeSelector, FaceSelector, Feature, PlaneRef, SketchShape, Tree } from "./dsl"
 import { displayName } from "./dsl"
 import { namesIn, unquote } from "./expr"
@@ -31,11 +32,16 @@ function plane(ref: { plane: "XY" | "XZ" | "YZ"; offset?: N }, extra?: string) {
 }
 
 function sketchPlane(on: PlaneRef) {
-  if (!on.face) return plane(on)
+  if (!on.face) {
+    if (!on.tilt) return plane(on)
+    const a = py(on.tilt.angle)
+    return `${plane(on)}.move(Rot(${on.tilt.axis}=${a}))`
+  }
   const axis = { XY: "Z", XZ: "Y", YZ: "X" }[on.plane]
   const sign = on.plane === "XZ" ? "-" : ""
-  // The face's coordinate along the plane's axis, then the plane through it.
-  return `${plane(on, `${sign}${faces(on.face)}[0].center().${axis}`)}`
+  // The face's coordinate along the plane's axis, then the plane through it; an inclined face gets its own plane.
+  const face = `${faces(on.face)}[0]`
+  return `on_face(${face}, ${plane(on, `${sign}${face}.center().${axis}`)}, ${on.offset !== undefined ? py(on.offset) : "0"})`
 }
 
 function shape2d(s: SketchShape): string {
@@ -135,17 +141,27 @@ function feature(f: Feature, tree: Tree): string[] {
       const n = { XY: "Vector(0, 0, 1)", XZ: "Vector(0, -1, 0)", YZ: "Vector(1, 0, 0)" }[f.on.plane]
       const out = f.reverse ? `-${n}` : n
       const depth = f.depth !== undefined ? py(f.depth) : "1000"
-      const r = `${py(f.d)} / 2`
+      // A standard hole is written out as the numbers the table gives.
+      let std: ReturnType<typeof standardHole> | null = null
+      try {
+        std = f.standard ? standardHole(f.standard) : null
+      } catch {
+        /* the kernel reports it */
+      }
+      const r = `${std ? std.d : py(f.d ?? 0)} / 2`
+      const cbore = f.cbore ? { d: py(f.cbore.d), depth: py(f.cbore.depth) } : std?.cbore && { d: String(std.cbore.d), depth: String(std.cbore.depth) }
+      const csink = f.csink ? { d: py(f.csink.d), angle: f.csink.angle !== undefined ? py(f.csink.angle) : "90" } : std?.csink && { d: String(std.csink.d), angle: "90" }
       let tool = `Cylinder(${r}, ${depth}, align=(Align.CENTER, Align.CENTER, Align.MAX))`
-      if (f.cbore) tool += ` + Cylinder(${py(f.cbore.d)} / 2, ${py(f.cbore.depth)}, align=(Align.CENTER, Align.CENTER, Align.MAX))`
-      if (f.csink) {
-        const R = `${py(f.csink.d)} / 2`
-        const a = f.csink.angle !== undefined ? py(f.csink.angle) : "90"
+      if (cbore) tool += ` + Cylinder(${cbore.d} / 2, ${cbore.depth}, align=(Align.CENTER, Align.CENTER, Align.MAX))`
+      if (csink) {
+        const R = `${csink.d} / 2`
+        const a = csink.angle
         tool += ` + Cone(${r}, ${R}, (${R} - ${r}) / tan(${a} / 2), align=(Align.CENTER, Align.CENTER, Align.MAX))`
       }
       const at = f.at.map(([x, y]) => `(${py(x)}, ${py(y)})`).join(", ")
       return [
         ...head,
+        ...(std ? [`# ${std.label}${std.thread ? "：只钻底孔，装饰螺纹不导出" : ""}`] : []),
         `hole_plane = ${sketchPlane(f.on)}`,
         `tool_${f.id} = Compound([Plane(origin=hole_plane.from_local_coords(xy), z_dir=${out}) * (${tool}) for xy in [${at}]])`,
         combine(f.id, "cut"),
@@ -213,7 +229,8 @@ function params(tree: Tree) {
     done.add(k)
     const v = tree.params[k]
     if (typeof v === "string") namesIn(v).forEach(visit)
-    out.push(`${k} = ${py(v)}`)
+    const note = tree.paramNotes?.[k]?.replace(/\s+/g, " ")
+    out.push(`${k} = ${py(v)}${note ? `  # ${note}` : ""}`)
   }
   Object.keys(tree.params).forEach(visit)
   return out
@@ -242,6 +259,15 @@ Z 轴朝上，单位毫米。选择器按语义转成 build123d 的过滤；「�
     "def tan(d): return math.tan(math.radians(d))",
     "def atan(x): return math.degrees(math.atan(x))",
     "sqrt, pi, floor, ceil = math.sqrt, math.pi, math.floor, math.ceil",
+    "",
+    "",
+    "def on_face(face, flat, offset=0):",
+    '    """Sketch plane on a face: `flat` when the face is parallel to the datum; an inclined face gets its own (origin at its centre, x level, y up the slope)."""',
+    "    n = face.normal_at()",
+    "    if abs(n.dot(flat.z_dir)) > 0.9999:",
+    "        return flat",
+    "    x = Vector(0, 0, 1).cross(n) if abs(n.Z) < 0.999 else Vector(1, 0, 0)",
+    "    return Plane(origin=face.center() + n * offset, x_dir=x.normalized(), z_dir=n)",
     "",
     "",
     "def on_feature(items, tool):",

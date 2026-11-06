@@ -6,9 +6,12 @@ import type { DisplayData } from "./kernel/build"
 
 /**
  * How faces are coloured: by this step's status, by provenance (`highlight` =
- * a feature id), or, when `faces` is given, only those faces (by mesh hash).
+ * feature ids), or, when `faces` is given, only those faces (by mesh hash).
  */
-export type Paint = { status: boolean; highlight?: string; faces?: number[] }
+export type Paint = { status: boolean; highlight?: string | string[]; faces?: number[] }
+
+/** Features lit up from outside the viewport (a tree row, a parameter), and what the legend calls them. */
+export type Hover = { ids: string[]; label: string }
 
 /**
  * The live model as three.js objects: one mesh with a group per B-rep face
@@ -33,6 +36,27 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint): THR
     eg.setAttribute("position", new THREE.BufferAttribute(d.edges, 3))
     root.add(new THREE.LineSegments(eg, kit.edge))
   }
+  if (d.threads?.length) {
+    // Cosmetic threads: dashed rings at the nominal diameter, as on a drawing.
+    const pts: number[] = []
+    for (const t of d.threads) {
+      const axis = new THREE.Vector3(...t.axis).normalize()
+      const u = new THREE.Vector3().crossVectors(axis, Math.abs(axis.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0)).normalize()
+      const v = new THREE.Vector3().crossVectors(axis, u)
+      const c = new THREE.Vector3(...t.center)
+      const at = (k: number) => {
+        const a = (k / 48) * Math.PI * 2
+        return c.clone().addScaledVector(u, Math.cos(a) * t.r).addScaledVector(v, Math.sin(a) * t.r)
+      }
+      for (let k = 0; k < 48; k++) pts.push(...at(k).toArray(), ...at(k + 1).toArray())
+    }
+    const tg = new LineSegmentsGeometry()
+    tg.setPositions(pts)
+    const rings = new LineSegments2(tg, kit.construction)
+    rings.computeLineDistances()
+    rings.name = "threads"
+    root.add(rings)
+  }
   if (d.sketch?.length) {
     const sg = new LineSegmentsGeometry()
     sg.setPositions(d.sketch)
@@ -45,7 +69,7 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint): THR
 
 function materialIndex(g: DisplayData["groups"][number], paint: Paint) {
   if (paint.faces) return paint.faces.includes(g.hash) ? 1 : 0
-  if (paint.highlight) return g.origin === paint.highlight ? 1 : 0
+  if (paint.highlight) return (typeof paint.highlight === "string" ? g.origin === paint.highlight : paint.highlight.includes(g.origin)) ? 1 : 0
   if (!paint.status) return 0
   return g.status === "new" ? 1 : g.status === "modified" ? 2 : 0
 }

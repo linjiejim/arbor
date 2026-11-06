@@ -32,16 +32,46 @@ export function referencesOf(f: Feature): string[] {
   return [...out]
 }
 
+/** Put `f` in place of the feature with its id, as a whole (fields left out are removed). */
+export function replaceFeature(tree: Tree, f: unknown): Tree {
+  const parsed = Feature.safeParse(f)
+  if (!parsed.success) throw new InputError(`有字段不对：${parsed.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("；")}`)
+  const i = tree.features.findIndex((x) => x.id === parsed.data.id)
+  if (i < 0) throw new InputError(`找不到特征「${parsed.data.id}」`)
+  const features = [...tree.features]
+  features[i] = parsed.data
+  return { ...tree, features }
+}
+
+/** Move a feature one step up or down, never above something it uses or below something that uses it. */
+export function moveFeature(tree: Tree, id: string, by: -1 | 1): Tree {
+  const i = tree.features.findIndex((x) => x.id === id)
+  const j = i + by
+  if (i < 0 || j < 0 || j >= tree.features.length) throw new InputError("已经到头了")
+  const [a, b] = by < 0 ? [tree.features[j], tree.features[i]] : [tree.features[i], tree.features[j]]
+  // After the swap `b` comes first: it must not use `a`.
+  if (referencesOf(b).includes(a.id)) throw new InputError(`「${displayName(tree, b)}」用到了「${displayName(tree, a)}」，不能排到它前面`)
+  const features = [...tree.features]
+  features[i] = tree.features[j]
+  features[j] = tree.features[i]
+  return { ...tree, features }
+}
+
 export function applyEdit(tree: Tree, name: string, input: Record<string, unknown>): { tree: Tree; target?: string } {
   if (name === "set_params") {
     const params = { ...tree.params }
-    for (const k of (input.remove as string[] | undefined) ?? []) delete params[k]
+    const notes = { ...tree.paramNotes }
+    for (const k of (input.remove as string[] | undefined) ?? []) {
+      delete params[k]
+      delete notes[k]
+    }
     for (const [k, v] of Object.entries((input.set as Record<string, number | string>) ?? {})) {
       if (!/^[A-Za-z_一-龥][A-Za-z0-9_一-龥]*$/.test(k)) throw new InputError(`参数名「${k}」不合法：用字母、数字、下划线或中文，不以数字开头`)
       params[k] = v
     }
+    for (const [k, v] of Object.entries((input.notes as Record<string, string>) ?? {})) if (k in params && typeof v === "string") notes[k] = v.trim().slice(0, 60)
     resolveParams(params) // unknown names / cycles fail here, before the tree changes
-    return { tree: { ...tree, params } }
+    return { tree: { ...tree, params, ...(Object.keys(notes).length ? { paramNotes: notes } : { paramNotes: undefined }) } }
   }
   if (FEATURE_OPS.has(name)) {
     const { after, ...rest } = input as { after?: string } & Record<string, unknown>
@@ -118,7 +148,7 @@ export async function executeTool(port: KernelPort, tree: Tree, name: string, in
 
 function resultOk(report: BuildReport, target?: string) {
   if (report.paramError) return false
-  if (!target) return report.features.every((f) => f.state === "ok")
+  if (!target) return report.features.every((f) => f.state === "ok" || f.state === "suppressed")
   return report.features.find((f) => f.id === target)?.state === "ok"
 }
 
@@ -160,7 +190,7 @@ export function treeText(tree: Tree, report: BuildReport) {
     .join("，")
   const rows = tree.features.map((f, i) => {
     const r = report.features[i]
-    const mark = r?.state === "ok" ? "✓" : r?.state === "error" ? "✗" : "…"
+    const mark = r?.state === "ok" ? "✓" : r?.state === "error" ? "✗" : r?.state === "suppressed" ? "⊘" : "…"
     const why = f.intent ? ` — ${f.intent}` : ""
     const msg = r?.state === "error" ? ` 失败：${r.message}` : ""
     return `${i + 1}. ${mark} ${f.id}（${displayName(tree, f)}，${OP_NAMES[f.op as FeatureOp]}）${r?.summary ? `：${r.summary}` : ""}${msg}${why}`

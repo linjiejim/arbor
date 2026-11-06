@@ -47,6 +47,10 @@ export const STUDIO_TOOLS = {
     inputSchema: z.object({
       set: z.record(z.string(), Num).optional().describe("要新建或修改的参数"),
       remove: z.array(z.string()).optional().describe("要删除的参数名"),
+      notes: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe('参数说明，给学习者看：每个新参数一句短中文，说清是什么尺寸、沿哪个方向，如 { "L": "总长，沿 X", "t": "壁厚" }'),
     }),
     toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
   }),

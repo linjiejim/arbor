@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { getOC } from "replicad"
 import type { UIMessage } from "ai"
-import { applyEdit, executeTool, type KernelPort } from "@/studio/apply"
+import { applyEdit, executeTool, moveFeature, replaceFeature, type KernelPort } from "@/studio/apply"
 import { toBuild123d } from "@/studio/codegen"
 import { EMPTY_TREE, type Tree } from "@/studio/dsl"
 import { evaluate, resolveParams } from "@/studio/expr"
@@ -11,6 +11,9 @@ import { trimMessages } from "@/studio/trim"
 import { annotationText } from "@/studio/annotations"
 import { STARTERS } from "@/studio/starters"
 import { closeOpen, splitBlocks } from "@/studio/md-blocks"
+import { describeUse, drivenFeatures, paramDependents, paramUses } from "@/studio/param-uses"
+import { standardHole } from "@/studio/holes"
+import { glyphArea } from "./glyph-area"
 
 describe("parameter expressions", () => {
   it("evaluates arithmetic, functions in degrees and parameters", () => {
@@ -280,6 +283,22 @@ describe("kernel", () => {
     expect(embossed.body!.volume - volume).toBeCloseTo(((volume - engraved.body!.volume) / 0.6) * 1, 0)
   }, 60_000)
 
+  it("fills CJK glyphs by the font's own rule: overlapping strokes fused, counters open", () => {
+    // These lost strokes or failed outright with replicad's 2D booleans; 4 & 量 cross themselves.
+    for (const text of ["坡鞍俺霸健", "海客编", "回器赢疆", "2024 & 量", "偶么蟹"]) {
+      const rep = k.rebuild(
+        plate(
+          { id: "tx", op: "sketch", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, shapes: [{ type: "text", text, size: 6 }] },
+          { id: "eng", op: "extrude", sketch: "tx", distance: 0.5, mode: "cut", direction: "reverse" },
+        ),
+      )
+      expect(rep.features.map((f) => f.state), text).toEqual(["ok", "ok", "ok", "ok"])
+      expect(rep.body!.solids).toBe(1)
+      const removed = volume - rep.body!.volume
+      expect(Math.abs(removed / (glyphArea(text, 6) * 0.5) - 1), text).toBeLessThan(0.005)
+    }
+  }, 120_000)
+
   it("mirrors text on a face seen from behind its datum plane, and says which characters it can't draw", () => {
     const engrave = (normal: "+Y" | "-Y", text: string, flush = false) =>
       plate(
@@ -398,4 +417,135 @@ describe("build123d export", () => {
     expect(code).toContain("extrude(sk_sk, amount=3 / 2, both=True)")
     expect(code).toContain("fillet(on_feature(part.edges(), tool_b).filter_by(Axis.Z).group_by(Axis.X)[-1], radius=1)")
   })
+})
+
+describe("tier-1 tools", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+  const flange = STARTERS.find((s) => s.id === "flange")!.tree
+  const at = (x: number, y: number, z: number): [number, number, number] => [x, y, z]
+
+  it("says where each parameter is used and what it drives, through patterns too", () => {
+    const uses = paramUses(flange, "pcd").map((u) => describeUse(flange, u))
+    expect(uses).toEqual(["螺栓孔 · 位置"])
+    expect(paramUses(flange, "d0").map((u) => describeUse(flange, u))).toEqual(["盘面草图 · 圆直径"])
+    expect(drivenFeatures(flange, paramUses(flange, "pcd")).sort()).toEqual(["h1", "ring"])
+    expect(drivenFeatures(flange, paramUses(flange, "D"))).toContain("disc")
+    expect(paramDependents({ params: { L: 80, inner: "L - 2*t", t: 2 }, features: [] }, "t")).toEqual(["inner"])
+  })
+
+  it("keeps parameter notes with set_params, and drops them with the parameter", () => {
+    let t = applyEdit(EMPTY_TREE, "set_params", { set: { L: 80, W: 50 }, notes: { L: "总长，沿 X", nope: "x" } }).tree
+    expect(t.paramNotes).toEqual({ L: "总长，沿 X" })
+    t = applyEdit(t, "set_params", { remove: ["L"] }).tree
+    expect(t.paramNotes).toBeUndefined()
+    expect(toBuild123d({ ...flange }, { body: true })).toContain("pcd = 90  # 螺栓孔所在圆的直径（节圆）")
+  })
+
+  it("edits a feature as a whole, moves it only where its references allow, and suppresses it", () => {
+    const hole = flange.features.find((f) => f.id === "h1")!
+    const { depth: _depth, ...rest } = { ...hole, depth: 4 } as typeof hole & { depth?: number }
+    void _depth
+    const t = replaceFeature({ ...flange, features: flange.features.map((f) => (f.id === "h1" ? { ...hole, depth: 4 } : f)) }, rest)
+    expect(t.features.find((f) => f.id === "h1")).not.toHaveProperty("depth")
+    expect(() => replaceFeature(flange, { ...hole, d: undefined, at: [] })).toThrow(/有字段不对/)
+    expect(() => moveFeature(flange, "disc", -1)).toThrow(/用到了/)
+    expect(moveFeature(flange, "ch", -1).features.map((f) => f.id)).toEqual(["sk", "disc", "h1", "ch", "ring"])
+
+    const rep = k.rebuild({ ...flange, features: flange.features.map((f) => (f.id === "h1" ? { ...f, suppressed: true } : f)) })
+    // The pattern of the suppressed hole goes with it; the chamfer still builds.
+    expect(rep.features.map((f) => f.state)).toEqual(["ok", "ok", "suppressed", "suppressed", "ok"])
+    expect(rep.features[3].summary).toMatch(/螺栓孔/)
+    // No bolt holes: only the 1 mm chamfers (≈ 377 mm³) came off the disc.
+    expect(rep.body!.volume).toBeGreaterThan(Math.PI * (3600 - 400) * 10 - 500)
+  }, 60_000)
+
+  it("measures faces and edges: sizes, parallel gaps, axis and centre distances", () => {
+    k.rebuild(flange)
+    const d = k.display()
+    const facePicks = d.groups.map((g) => ({ g, p: k.pick({ kind: "face", hash: g.hash, point: at(0, 0, 0) })! }))
+    const face = (pred: (what: string) => boolean) => facePicks.filter((x) => pred(x.p.what)).map((x) => ({ kind: "face" as const, hash: x.g.hash, point: at(0, 0, 0) }))
+    const [top] = face((w) => w.includes("朝上"))
+    const [bottom] = face((w) => w.includes("朝下"))
+    const holes = face((w) => w.includes("R4"))
+    const gap = k.measure([top, bottom])!
+    expect(gap.between).toContainEqual({ name: "平行面间距", value: "10 mm" })
+    expect(gap.segment).not.toBeNull()
+    const pair = k.measure([holes[0], holes[1]])!
+    expect(pair.items[0].facts[0]).toBe("直径 ⌀8（R4）")
+    // Neighbouring holes on the ⌀90 circle, 60° apart: 45 mm between axes.
+    expect(pair.between.find((b) => b.name === "轴线间距")?.value).toBe("45 mm")
+    const rim = d.edgeGroups.map((g) => ({ g, p: k.pick({ kind: "edge", hash: g.hash, point: at(0, 0, 0) })! })).find((x) => x.p?.what.includes("R60"))!
+    const one = k.measure([{ kind: "edge", hash: rim.g.hash, point: at(0, 0, 0) }])!
+    expect(one.items[0]).toMatchObject({ what: "整圆边", facts: ["直径 ⌀120（R60）", "长 376.99 mm"] })
+  }, 60_000)
+
+  it("drills standard holes from the metric table and marks tapped ones with thread rings", () => {
+    const top = { plane: "XY", face: { normal: "+Z", extreme: "+Z" } } as const
+    const rep = k.rebuild({
+      params: {},
+      features: [
+        { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 60, h: 40 }] },
+        { id: "b", op: "extrude", sketch: "sk", distance: 10 },
+        { id: "t", op: "hole", on: top, at: [[-20, 0]], standard: { size: "M4", fit: "tap" }, depth: 8 },
+        { id: "p", op: "linear_pattern", features: ["t"], dir: "+Y", count: 2, spacing: 12 },
+        { id: "c", op: "hole", on: top, at: [[20, 0]], standard: { size: "M3", head: "cbore" } },
+      ],
+    })
+    expect(rep.features.map((f) => f.state)).toEqual(["ok", "ok", "ok", "ok", "ok"])
+    expect(rep.features[2].summary).toBe("M4 螺纹孔（底孔 ⌀3.3） × 1 · 深 8")
+    expect(rep.features[4].summary).toContain("沉孔 ⌀6.5 深 3.3")
+    const rings = k.display().threads
+    expect(rings).toHaveLength(4)
+    expect(rings.every((r) => r.r === 2)).toBe(true)
+    expect(rings.map((r) => r.center[2]).sort((a, b) => a - b)).toEqual([2, 2, 10, 10])
+    const bad = k.rebuild({ params: {}, features: [...rep.features.slice(0, 2).map((_, i) => [
+      { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 60, h: 40 }] },
+      { id: "b", op: "extrude", sketch: "sk", distance: 10 },
+    ][i]), { id: "x", op: "hole", on: top, at: [[0, 0]], standard: { size: "M5", fit: "tap", head: "cbore" } }] } as Tree)
+    expect(bad.features[2].message).toMatch(/螺纹孔不带沉头/)
+    expect(standardHole({ size: "M6" }).d).toBe(6.6)
+    expect(standardHole({ size: "M6", fit: "close" }).d).toBe(6.4)
+  }, 60_000)
+
+  it("sketches on an inclined face (centred, x level, y up the slope) and on a tilted datum plane", () => {
+    const slope = { kind: "plane", near: [0, 0, 20], expect: 1 } as const
+    const wedge: Tree["features"] = [
+      { id: "s", op: "sketch", on: { plane: "YZ" }, shapes: [{ type: "polyline", points: [[-20, 0], [20, 0], [20, 30], [-20, 10]] }] },
+      { id: "w", op: "extrude", sketch: "s", distance: 40, direction: "both" },
+    ]
+    const rep = k.rebuild({
+      params: {},
+      features: [
+        ...wedge,
+        { id: "s2", op: "sketch", on: { plane: "XY", face: slope }, shapes: [{ type: "circle", d: 6, center: [10, 0] }] },
+        { id: "boss", op: "extrude", sketch: "s2", distance: 2 },
+      ],
+    })
+    expect(rep.features.map((f) => f.state)).toEqual(["ok", "ok", "ok", "ok"])
+    expect(rep.features[2].summary).toMatch(/^斜面/)
+    expect(rep.body!.solids).toBe(1)
+    // The boss sits on the slope's centre line, 10 mm to the +X side, standing out along the face normal.
+    const top = k.inspect("faces", undefined, { of: "boss", kind: "plane" })
+    const c = [...top.matchAll(/中心\(([^)]+)\)/g)].map((m) => m[1].split(",").map(Number))[0]
+    expect(c[0]).toBeCloseTo(10, 1)
+    expect(c[2]).toBeGreaterThan(20)
+
+    const tilted = k.rebuild({
+      params: {},
+      features: [
+        { id: "t", op: "sketch", on: { plane: "XY", tilt: { axis: "Y", angle: 30 } }, shapes: [{ type: "rect", w: 20, h: 10 }] },
+        { id: "e", op: "extrude", sketch: "t", distance: 5 },
+      ],
+    })
+    expect(tilted.features[0].summary).toContain("绕 Y 转 30°")
+    // A 20×10×5 block turned 30° about Y: its X extent is 20·cos30 + 5·sin30.
+    expect(tilted.body!.size[0]).toBeCloseTo(20 * Math.cos(Math.PI / 6) + 5 * Math.sin(Math.PI / 6), 1)
+    const code = toBuild123d({ params: {}, features: [...wedge, { id: "s2", op: "sketch", on: { plane: "XY", face: slope, tilt: undefined }, shapes: [{ type: "circle", d: 6 }] }] }, { body: true })
+    expect(code).toContain("on_face(")
+    expect(toBuild123d(tilted.features.length ? { params: {}, features: [{ id: "t", op: "sketch", on: { plane: "XY", tilt: { axis: "Y", angle: 30 } }, shapes: [{ type: "rect", w: 20, h: 10 }] }] } : EMPTY_TREE, { body: true })).toContain(".move(Rot(Y=30))")
+  }, 60_000)
 })

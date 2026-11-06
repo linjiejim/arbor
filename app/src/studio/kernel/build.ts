@@ -5,24 +5,33 @@
 //
 // Runs unchanged in a Web Worker (the studio) and in Node (evals, tests).
 import {
+  Blueprints,
+  cast,
   draw,
+  Drawing,
   drawCircle,
   drawPolysides,
   drawRoundedRectangle,
+  getOC,
   makeCompound,
   makePlane,
   measureArea,
   measureShapeVolumeProperties,
+  Plane,
   sketchCircle,
   sketchRectangle,
-  type Drawing,
+  type Blueprint,
+  type CompoundBlueprint,
   type Shape3D,
 } from "replicad"
 import type { PickInfo } from "../annotations"
 import { displayName, EMPTY_TREE, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
+import { referencesOf } from "../apply"
 import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
+import { measure, type MeasureResult, type MeasureTarget } from "./measure"
+import { standardHole } from "../holes"
 import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
   axisDir,
@@ -55,14 +64,39 @@ const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[
 const r2 = (x: number) => Math.round(x * 100) / 100
 const fmt = (x: number) => String(r2(x))
 
-/** `flipped`: sketched on a face that looks the other way from its datum plane (the back, the bottom…). */
-type ResolvedPlane = { name: PlaneName; origin: V3; label: string; flipped?: boolean }
+/**
+ * Where a sketch lies: the datum plane it was named after, and its actual frame
+ * (sketch x → `x`, y → `y`, extrusion along `normal`). `flipped`: sketched on a
+ * face that looks the other way from its datum plane (the back, the bottom…).
+ * `custom`: an inclined face or a tilted datum, not an axis-aligned plane.
+ */
+type ResolvedPlane = { name: PlaneName; origin: V3; x: V3; y: V3; normal: V3; label: string; flipped?: boolean; custom?: boolean }
+
+const unit = (a: V3): V3 => mul(a, 1 / (Math.hypot(...a) || 1))
+
+/** `v` turned `deg` degrees about the unit vector `k` (right-hand rule). */
+function rotate(v: V3, k: V3, deg: number): V3 {
+  const t = (deg * Math.PI) / 180
+  const c = Math.cos(t)
+  const s = Math.sin(t)
+  return add(add(mul(v, c), mul(cross(k, v), s)), mul(k, dot(k, v) * (1 - c)))
+}
+
+/** Put a drawing (or blueprint) on a resolved plane, optionally moved to `origin`. */
+function sketchOn<T>(d: { sketchOnPlane(p: Plane): T }, p: ResolvedPlane, origin: V3 = p.origin): T {
+  const pl = new Plane(origin, p.x, p.normal)
+  try {
+    return d.sketchOnPlane(pl)
+  } finally {
+    pl.delete()
+  }
+}
 
 export type FeatureResult = {
   id: string
   op: FeatureOp
   name: string
-  state: "ok" | "error" | "skipped"
+  state: "ok" | "error" | "skipped" | "suppressed"
   summary?: string
   message?: string
   hint?: string
@@ -104,6 +138,8 @@ export type DisplayData = {
   edgeGroups: { start: number; count: number; hash: number }[]
   /** Outline of the sketch, when the shown step is a sketch. */
   sketch: Float32Array | null
+  /** Cosmetic threads: a ring at the nominal diameter at each end of a tapped hole. */
+  threads: { center: V3; axis: V3; r: number }[]
   bbox: [V3, V3] | null
 }
 
@@ -120,7 +156,11 @@ type Step = {
   edges: EdgeMesh | null
   sketch?: { drawing: Drawing; plane: ResolvedPlane; lines: Float32Array }
   tools?: Tool[]
+  /** Tapped holes this step drilled: drill radius and the thread's nominal diameter. */
+  threads?: Thread[]
 }
+
+type Thread = { r: number; major: number }
 
 export class Kernel {
   private steps: Step[] = []
@@ -144,20 +184,35 @@ export class Kernel {
       this.paramsKey = paramsKey
     }
 
+    // Suppressing a feature suppresses what is built on it, as in SolidWorks.
+    const off = new Map<string, string | null>()
+    for (const f of tree.features) {
+      if (f.suppressed) off.set(f.id, null)
+      else {
+        const parent = referencesOf(f).find((r) => off.has(r))
+        if (parent) off.set(f.id, parent)
+      }
+    }
+
     let key = paramsKey
     let failed = paramError !== undefined
     for (let i = 0; i < tree.features.length; i++) {
       const f = tree.features[i]
-      key += "\n" + JSON.stringify(f)
+      key += "\n" + JSON.stringify(f) + (off.has(f.id) ? "\noff" : "")
       const cached = this.steps[i]
       if (cached && cached.key === key) {
-        if (cached.result.state !== "ok") failed = true
+        if (cached.result.state === "error" || cached.result.state === "skipped") failed = true
         continue
       }
       this.disposeFrom(i)
       const prev = this.lastBuilt(i)
-      const step = failed ? this.skip(f, key, prev, tree) : this.run(f, key, prev, tree)
-      if (step.result.state !== "ok") failed = true
+      // A suppressed feature passes the body through untouched; what depends on it fails on its own.
+      const step = off.has(f.id)
+        ? this.base(f, key, prev, tree, { state: "suppressed", summary: off.get(f.id) ? `已压缩（它用到的「${displayName(tree, tree.features.find((x) => x.id === off.get(f.id))!)}」被压缩了）` : "已压缩" })
+        : failed
+          ? this.skip(f, key, prev, tree)
+          : this.run(f, key, prev, tree)
+      if (step.result.state === "error" || step.result.state === "skipped") failed = true
       this.steps.push(step)
     }
     this.disposeFrom(tree.features.length)
@@ -182,7 +237,7 @@ export class Kernel {
   display(index?: number): DisplayData {
     const i = index ?? this.steps.findLastIndex((s) => s.result.state === "ok")
     const step = this.steps[i]
-    const empty: DisplayData = { index: i, mesh: null, groups: [], edges: null, edgeGroups: [], sketch: null, bbox: null }
+    const empty: DisplayData = { index: i, mesh: null, groups: [], edges: null, edgeGroups: [], sketch: null, bbox: null, threads: [] }
     if (!step) return empty
     const body = step.result.state === "ok" ? step : this.lastBuilt(i)
     const out: DisplayData = { ...empty, sketch: step.sketch ? step.sketch.lines.slice() : null }
@@ -206,6 +261,58 @@ export class Kernel {
       out.edgeGroups = body.edges ? body.edges.edgeGroups.map((g) => ({ start: g.start, count: g.count, hash: g.edgeId })) : []
       const bb = body.body.boundingBox.bounds as [V3, V3]
       out.bbox = [[...bb[0]], [...bb[1]]] as [V3, V3]
+      out.threads = this.threadRings(this.steps.indexOf(body), body)
+    }
+    return out
+  }
+
+  /** Rings for the tapped holes in `step`'s body, the ones patterns and mirrors copied included. */
+  private threadRings(upto: number, step: Step): DisplayData["threads"] {
+    const tapped = new Map<string, Thread[]>()
+    for (const s of this.steps.slice(0, upto + 1)) {
+      if (s.result.state !== "ok") continue
+      if (s.threads) tapped.set(s.feature.id, s.threads)
+      const f = s.feature
+      if (f.op === "linear_pattern" || f.op === "circular_pattern" || f.op === "mirror") {
+        const copied = (f.features ?? [...tapped.keys()]).flatMap((id) => tapped.get(id) ?? [])
+        if (copied.length) tapped.set(f.id, copied)
+      }
+    }
+    if (!tapped.size || !step.body || !step.mesh) return []
+    const out: DisplayData["threads"] = []
+    const faces = faceInfos(step.body, step.origins)
+    try {
+      const groups = new Map(step.mesh.faceGroups.map((g) => [g.faceId, g]))
+      for (const f of faces) {
+        const t = f.kind === "cylinder" && f.radius !== undefined ? tapped.get(f.origin)?.find((x) => Math.abs(x.r - f.radius!) < 1e-4) : undefined
+        const g = t && groups.get(f.face.hashCode)
+        if (!t || !g) continue
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ad: any = (f.face as any)._geomAdaptor()
+        try {
+          const ax = ad.Cylinder().Axis()
+          const lp = ax.Location()
+          const dp = ax.Direction()
+          const p: V3 = [lp.X(), lp.Y(), lp.Z()]
+          const a: V3 = [dp.X(), dp.Y(), dp.Z()]
+          // The hole's extent along its axis, from the face's own triangles.
+          const v = step.mesh.vertices
+          const tri = step.mesh.triangles
+          let lo = Infinity
+          let hi = -Infinity
+          for (let k = g.start; k < g.start + g.count; k++) {
+            const q: V3 = [v[tri[k] * 3], v[tri[k] * 3 + 1], v[tri[k] * 3 + 2]]
+            const s = dot([q[0] - p[0], q[1] - p[1], q[2] - p[2]], a)
+            lo = Math.min(lo, s)
+            hi = Math.max(hi, s)
+          }
+          for (const s of [lo, hi]) out.push({ center: add(p, mul(a, s)), axis: a, r: t.major / 2 })
+        } finally {
+          ad.delete?.()
+        }
+      }
+    } finally {
+      disposeInfos(faces)
     }
     return out
   }
@@ -337,6 +444,13 @@ export class Kernel {
     }
   }
 
+  /** Sizes of one or two clicked faces / edges of the latest body, and how they relate. */
+  measure(targets: MeasureTarget[]): MeasureResult | null {
+    const step = this.lastBuilt(this.steps.length)
+    if (!step?.body || !targets.length) return null
+    return measure(step.body, step.origins, targets.slice(0, 2))
+  }
+
   exportBody(format: "step" | "stl", index?: number): Blob | null {
     const step = this.lastBuilt(index === undefined ? this.steps.length : index + 1)
     if (!step?.body) return null
@@ -393,6 +507,7 @@ export class Kernel {
       Object.assign(step.result, { summary: out.summary, selected: out.selected })
       if (out.sketch) step.sketch = out.sketch
       if (out.tools) step.tools = out.tools
+      if (out.threads) step.threads = out.threads
       if (out.body) this.commitBody(step, prev, out.body, f.id)
     } catch (e) {
       const ex = explain(f.op, describeError(e))
@@ -435,9 +550,17 @@ export class Kernel {
       const faces = faceInfos(prev.body, prev.origins)
       try {
         const sel = selectFaces(ref.face, faces, this.scope)
+        if (sel.some((x) => x.kind !== "plane" || !x.normal)) throw new InputError("选中的面不是平面，草图贴不上去")
+        // An inclined face: the sketch lies on it, centred on it, x level, y up the slope.
+        if (sel.some((x) => Math.abs(dot(x.normal!, P.normal)) < 0.9999)) {
+          if (sel.length > 1) throw new InputError("斜面只能选一个：加 near 或 expect: 1")
+          if (ref.tilt) throw new InputError("贴在斜面上时不用 tilt")
+          const f = sel[0]
+          const normal = unit(f.normal!)
+          const x = Math.abs(normal[2]) < 0.999 ? unit(cross([0, 0, 1], normal)) : ([1, 0, 0] as V3)
+          return { name: ref.plane, origin: add(f.center, mul(normal, coord)), x, y: cross(normal, x), normal, label: `斜面（${describeFace(f).split(" 来自")[0]}）`, custom: true }
+        }
         const coords = new Set(sel.map((x) => r2(x.center[P.axis])))
-        if (sel.some((x) => x.kind !== "plane" || !x.normal || Math.abs(dot(x.normal, P.normal)) < 0.9999))
-          throw new InputError(`选中的面不是与 ${ref.plane} 平行的平面，草图贴不上去`)
         if (coords.size > 1) throw new InputError("选中的面不在同一高度，加 near 或 expect 只选一个")
         coord += sel[0].center[P.axis]
         flipped = dot(sel[0].normal!, P.normal) < 0
@@ -447,19 +570,26 @@ export class Kernel {
       }
     }
     // A datum plane flush with the body's far side (the back, the bottom…) is seen from outside that side too.
-    if (!ref.face && prev?.body) {
+    if (!ref.face && !ref.tilt && prev?.body) {
       const [lo, hi] = (prev.body.boundingBox.bounds as [V3, V3]).map((b) => b[P.axis])
       const outward = Math.abs(coord - hi) < 1e-3 ? 1 : Math.abs(coord - lo) < 1e-3 ? -1 : 0
       flipped = outward !== 0 && outward !== Math.sign(P.normal[P.axis])
     }
     const origin: V3 = [0, 0, 0]
     origin[P.axis] = coord
-    return { name: ref.plane, origin, label, flipped }
+    if (ref.tilt) {
+      const k = AXIS[ref.tilt.axis]
+      const a = num(ref.tilt.angle, this.scope)
+      const turn = (v: V3) => rotate(v, k, a)
+      return { name: ref.plane, origin: turn(origin), x: turn(P.x), y: turn(P.y), normal: turn(P.normal), label: `${label} · 绕 ${ref.tilt.axis} 转 ${fmt(a)}°`, custom: true }
+    }
+    return { name: ref.plane, origin, x: P.x, y: P.y, normal: P.normal, label, flipped }
   }
 
   private sketchOf(id: string): NonNullable<Step["sketch"]> {
     const s = this.steps.find((x) => x.feature.id === id)
     if (!s) throw new InputError(`找不到草图「${id}」（必须在这个特征之前）`)
+    if (s.result.state === "suppressed") throw new InputError(`草图「${id}」被压缩了`)
     if (s.feature.op !== "sketch" || !s.sketch) throw new InputError(`「${id}」不是草图`)
     return s.sketch
   }
@@ -467,6 +597,7 @@ export class Kernel {
   private toolsOf(id: string): Tool[] {
     const s = this.steps.find((x) => x.feature.id === id)
     if (!s) throw new InputError(`找不到特征「${id}」（必须在这个特征之前）`)
+    if (s.result.state === "suppressed") throw new InputError(`「${id}」被压缩了，不能阵列或镜像`)
     if (!s.tools?.length) throw new InputError(`「${id}」不是加料、切除或孔特征，不能阵列或镜像`)
     return s.tools
   }
@@ -481,7 +612,7 @@ export class Kernel {
     f: Feature,
     prev: Step | null,
     warnings: string[],
-  ): { body?: Shape3D; summary: string; selected?: number; sketch?: Step["sketch"]; tools?: Tool[] } {
+  ): { body?: Shape3D; summary: string; selected?: number; sketch?: Step["sketch"]; tools?: Tool[]; threads?: Thread[] } {
     const n = (v: number | string) => num(v, this.scope)
     const int = (v: number | string, min: number, what: string) => count(n(v), min, what)
     const body = prev?.body ?? null
@@ -489,7 +620,7 @@ export class Kernel {
       case "sketch": {
         const plane = this.plane(f.on, prev)
         const drawing = sketchDrawing(f.shapes, this.scope, plane.flipped)
-        const sk = drawing.clone().sketchOnPlane(plane.name, plane.origin)
+        const sk = sketchOn(drawing.clone(), plane)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const faceShape: any = (sk as any).faces()
         const lines = meshEdges(faceShape).lines
@@ -500,21 +631,20 @@ export class Kernel {
       }
       case "extrude": {
         const { drawing, plane } = this.sketchOf(f.sketch)
-        const P = PLANES[plane.name]
         const mode = f.mode ?? "add"
         let d = n(f.distance)
         let origin = plane.origin
-        let dir = P.normal
+        let dir = plane.normal
         if (f.through) {
           if (mode !== "cut") throw new InputError("「贯穿」只用于切除")
           d = 2 * this.bigLength(body)
-          origin = add(origin, mul(P.normal, -d / 2))
+          origin = add(origin, mul(plane.normal, -d / 2))
         } else {
           if (!(d > 0)) throw new InputError("拉伸距离必须大于 0")
-          if (f.direction === "both") origin = add(origin, mul(P.normal, -d / 2))
-          if (f.direction === "reverse") dir = mul(P.normal, -1)
+          if (f.direction === "both") origin = add(origin, mul(plane.normal, -d / 2))
+          if (f.direction === "reverse") dir = mul(plane.normal, -1)
         }
-        const tool = drawing.clone().sketchOnPlane(plane.name, origin).extrude(d, { extrusionDirection: dir }) as Shape3D
+        const tool = mergeOverlaps(sketchOn(drawing.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D)
         const next = applyTool(body, tool, mode, warnings)
         const how = f.through ? "贯穿" : `${f.direction === "both" ? "两侧对称 " : f.direction === "reverse" ? "反向 " : ""}${fmt(d)} mm`
         return { body: next, tools: [{ tool, mode }], summary: `${mode === "cut" ? "切除" : "加料"} ${how}` }
@@ -526,14 +656,14 @@ export class Kernel {
         const angle = f.angle !== undefined ? n(f.angle) : 360
         if (!(angle > 0 && angle <= 360)) throw new InputError("旋转角度要在 0–360° 之间")
         // The profile may touch the axis but not cross it.
-        if (plane.origin[P.axis] === 0) {
+        if (!plane.custom && plane.origin[P.axis] === 0) {
           const bb = drawing.boundingBox.bounds
           const across = (lo: number, hi: number) => lo < -1e-6 && hi > 1e-6
           if ((dot(axis, P.y) > 0.999 && across(bb[0][0], bb[1][0])) || (dot(axis, P.x) > 0.999 && across(bb[0][1], bb[1][1])))
             throw new InputError("轮廓跨过了旋转轴：旋转体只画轴一侧的半截面")
         }
         const mode = f.mode ?? "add"
-        const tool = drawing.clone().sketchOnPlane(plane.name, plane.origin).revolve(axis, { origin: [0, 0, 0], angle }) as Shape3D
+        const tool = mergeOverlaps(sketchOn(drawing.clone(), plane).revolve(axis, { origin: [0, 0, 0], angle }) as Shape3D)
         const next = applyTool(body, tool, mode, warnings)
         return { body: next, tools: [{ tool, mode }], summary: `${mode === "cut" ? "旋转切除" : "旋转"} ${fmt(angle)}° · 绕 ${f.axis} 轴` }
       }
@@ -573,20 +703,29 @@ export class Kernel {
       case "hole": {
         if (!body) throw new InputError("还没有实体，不能打孔")
         const plane = this.plane(f.on, prev)
-        const P = PLANES[plane.name]
-        const d = n(f.d)
+        let std: ReturnType<typeof standardHole> | null = null
+        try {
+          std = f.standard ? standardHole(f.standard) : null
+        } catch (e) {
+          throw new InputError((e as Error).message)
+        }
+        if (!std && f.d === undefined) throw new InputError("孔要么给 d（孔径），要么给 standard（标准孔）")
+        const d = std ? std.d : n(f.d!)
         if (!(d > 0)) throw new InputError("孔径必须大于 0")
         const depth = f.depth !== undefined ? n(f.depth) : this.bigLength(body)
-        const drill = f.reverse ? P.normal : mul(P.normal, -1)
-        const template = () => holeTool(d / 2, depth, f.cbore && { r: n(f.cbore.d) / 2, depth: n(f.cbore.depth) }, f.csink && { r: n(f.csink.d) / 2, angle: f.csink.angle !== undefined ? n(f.csink.angle) : 90 })
-        const parts = f.at.map(([u, v]) => orient(template(), drill, add(plane.origin, add(mul(P.x, n(u)), mul(P.y, n(v))))))
+        const drill = f.reverse ? plane.normal : mul(plane.normal, -1)
+        const cbore = f.cbore ? { r: n(f.cbore.d) / 2, depth: n(f.cbore.depth) } : std?.cbore && { r: std.cbore.d / 2, depth: std.cbore.depth }
+        const csink = f.csink ? { r: n(f.csink.d) / 2, angle: f.csink.angle !== undefined ? n(f.csink.angle) : 90 } : std?.csink && { r: std.csink.d / 2, angle: 90 }
+        const template = () => holeTool(d / 2, depth, cbore, csink)
+        const parts = f.at.map(([u, v]) => orient(template(), drill, add(plane.origin, add(mul(plane.x, n(u)), mul(plane.y, n(v))))))
         const tool = parts.length === 1 ? parts[0] : (makeCompound(parts) as unknown as Shape3D)
         const next = applyTool(body, tool, "cut", warnings)
-        const kind = f.cbore ? "沉头孔" : f.csink ? "埋头孔" : "孔"
+        const kind = std ? std.label : `${cbore ? "沉头孔" : csink ? "埋头孔" : "孔"} ⌀${fmt(d)}`
         return {
           body: next,
           tools: [{ tool, mode: "cut" }],
-          summary: `${kind} ⌀${fmt(d)} × ${f.at.length} · ${f.depth !== undefined ? `深 ${fmt(depth)}` : "贯穿"}`,
+          summary: `${kind} × ${f.at.length} · ${f.depth !== undefined ? `深 ${fmt(depth)}` : "贯穿"}`,
+          threads: std?.thread ? [{ r: d / 2, major: std.thread.major }] : undefined,
         }
       }
       case "linear_pattern":
@@ -625,7 +764,7 @@ export class Kernel {
           pen = p.via ? pen.threePointsArcTo(p.to, p.via) : pen.lineTo(p.to)
           if (corner > 0 && i < pts.length - 2 && !pts[i + 2].via && !p.via) pen = pen.customCorner(corner)
         })
-        const path = pen.done().sketchOnPlane(plane.name, plane.origin)
+        const path = sketchOn(pen.done(), plane)
         const prof = f.profile
         const tool = (path as unknown as { sweepSketch: (fn: unknown) => Shape3D }).sweepSketch((pl: unknown, origin: unknown) =>
           prof.type === "circle" ? sketchCircle(n(prof.d) / 2, { plane: pl as never, origin: origin as never }) : sketchRectangle(n(prof.w), n(prof.h), { plane: pl as never, origin: origin as never }),
@@ -638,7 +777,7 @@ export class Kernel {
       case "loft": {
         const sketches = f.sketches.map((id) => {
           const { drawing, plane } = this.sketchOf(id)
-          const sk = drawing.clone().sketchOnPlane(plane.name, plane.origin)
+          const sk = sketchOn(drawing.clone(), plane)
           if (!("wire" in sk)) throw new InputError(`放样的草图「${id}」有多个轮廓：每个截面只能是一个闭合轮廓`)
           return sk
         })
@@ -775,7 +914,7 @@ function shapeName(s: SketchShape) {
 /** `mirrorText`: the sketch is seen from behind its datum plane, so text is mirrored to read right from outside. */
 function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false): Drawing {
   const n = (v: number | string) => num(v, scope)
-  let out: Drawing | null = null
+  let parts: Drawing[] = []
   for (const s of shapes) {
     const c = s.type !== "polyline" && s.center ? [n(s.center[0]), n(s.center[1])] : [0, 0]
     let d: Drawing
@@ -839,13 +978,65 @@ function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false):
         break
       }
     }
+    // 2D booleans only between shapes that overlap: separate shapes (a circle beside a
+    // text) stay separate regions. replicad's 2D boolean can fail on glyph outlines.
+    const hit = parts.filter((p) => overlaps(p.boundingBox.bounds, d.boundingBox.bounds))
     if (s.cut) {
-      if (!out) throw new InputError("「挖掉」的图形前面要先有图形")
-      out = out.cut(d)
-    } else out = out ? out.fuse(d) : d
+      if (!parts.length) throw new InputError("「挖掉」的图形前面要先有图形")
+      for (const p of hit) parts[parts.indexOf(p)] = p.cut(d)
+    } else {
+      const merged = hit.reduce((acc, p) => acc.fuse(p), d)
+      parts = [...parts.filter((p) => !hit.includes(p)), merged]
+    }
   }
-  return out!
+  if (parts.length === 1) return parts[0]
+  // Drawing keeps its shape private; disjoint regions are just listed together.
+  const inner = (x: Drawing) => (x as unknown as { innerShape: Blueprint | Blueprints | CompoundBlueprint | null }).innerShape
+  return new Drawing(new Blueprints(parts.flatMap((p) => { const i = inner(p); return !i ? [] : i instanceof Blueprints ? i.blueprints : [i] })))
 }
+
+const overlaps = (a: [number[], number[]], b: [number[], number[]]) => a[0][0] <= b[1][0] && b[0][0] <= a[1][0] && a[0][1] <= b[1][1] && b[0][1] <= a[1][1]
+
+/**
+ * A sketch may hold regions that overlap (a text's strokes): its extrusion is
+ * then several solids crossing each other, which a boolean can't take as a
+ * tool. Fuse the ones whose boxes meet; separate ones stay a compound.
+ */
+export function mergeOverlaps(shape: Shape3D): Shape3D {
+  const solids = ((shape as unknown as { solids?: Shape3D[] }).solids ?? []) as Shape3D[]
+  if (solids.length < 2) return shape
+  const boxes = solids.map((s) => s.boundingBox.bounds as [V3, V3])
+  const meet = (a: [V3, V3], b: [V3, V3]) => [0, 1, 2].every((k) => a[0][k] <= b[1][k] + 1e-9 && b[0][k] <= a[1][k] + 1e-9)
+  const group = solids.map((_, i) => i)
+  const root = (i: number): number => (group[i] === i ? i : (group[i] = root(group[i])))
+  for (let i = 0; i < solids.length; i++) for (let j = i + 1; j < solids.length; j++) if (meet(boxes[i], boxes[j])) group[root(i)] = root(j)
+  const groups = new Map<number, Shape3D[]>()
+  solids.forEach((s, i) => groups.set(root(i), [...(groups.get(root(i)) ?? []), s]))
+  if (groups.size === solids.length) return shape
+  // Straight through OCCT: each builder and intermediate result freed at once, and
+  // no same-domain clean-up (see below).
+  const oc = getOC() as unknown as OCFuse
+  const merged = [...groups.values()].map((g) => {
+    if (g.length === 1) return g[0]
+    const first = g[0].wrapped as unknown as { delete(): void }
+    let acc = first
+    for (const s of g.slice(1)) {
+      const builder = new oc.BRepAlgoAPI_Fuse(acc, s.wrapped)
+      builder.Build()
+      // No same-domain clean-up here: on these polyline walls it loses whole strokes
+      // (偶 kept a quarter of its area). The body's own boolean cleans up afterwards.
+      const next = builder.Shape()
+      builder.delete()
+      if (acc !== first) acc.delete()
+      acc = next
+    }
+    return cast(acc as never) as Shape3D
+  })
+  shape.delete()
+  return merged.length === 1 ? merged[0] : (makeCompound(merged) as unknown as Shape3D)
+}
+
+type OCFuse = { BRepAlgoAPI_Fuse: new (a: unknown, b: unknown) => { Build(): void; Shape(): { delete(): void }; delete(): void } }
 
 /** A hole as a revolved half-section pointing down -Z from the origin. */
 function holeTool(r: number, depth: number, cbore?: { r: number; depth: number }, csink?: { r: number; angle: number }): Shape3D {

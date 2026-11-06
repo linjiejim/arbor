@@ -307,9 +307,10 @@ export class Viewer {
     return new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1)
   }
 
-  pick(ev: { clientX: number; clientY: number }, objects: THREE.Object3D[], recursive = true) {
+  /** The nearest visible hit; `accept` can skip hits (a section plane's cut-away side, back faces). */
+  pick(ev: { clientX: number; clientY: number }, objects: THREE.Object3D[], recursive = true, accept?: (h: THREE.Intersection, ray: THREE.Ray) => boolean) {
     this.raycaster.setFromCamera(this.ndc(ev), this.camera)
-    return this.raycaster.intersectObjects(objects, recursive).find((h) => h.object.visible) ?? null
+    return this.raycaster.intersectObjects(objects, recursive).find((h) => h.object.visible && (!accept || accept(h, this.raycaster.ray))) ?? null
   }
 
   /** Where the pointer ray meets a plane (sketch dragging, extrude handles). */

@@ -12,6 +12,7 @@ import { notify } from "@/components/ui/toast"
 import { ChatPanel } from "@/studio/ui/chat-panel"
 import { toBuild123d } from "@/studio/codegen"
 import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
+import type { Hover } from "@/studio/scene"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
 import { useAnnotations } from "@/studio/use-annotations"
@@ -30,7 +31,7 @@ export function StudioPage() {
   React.useEffect(() => {
     if (!chat.busy) clearSent()
   }, [chat.busy, clearSent])
-  const [hover, setHover] = React.useState<string | null>(null)
+  const [hover, setHover] = React.useState<Hover | null>(null)
   const [confirmNew, setConfirmNew] = React.useState(false)
   const [status, setStatus] = React.useState<Status | null>(null)
   const ready = studio.kernel.phase === "ready"
@@ -123,7 +124,7 @@ export function StudioPage() {
             />
           </TabsContent>
           <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
-            <ParamsPanel studio={studio} />
+            <ParamsPanel studio={studio} onHover={setHover} />
           </TabsContent>
           <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
             <CodePanel studio={studio} />
