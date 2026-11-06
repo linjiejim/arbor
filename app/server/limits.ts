@@ -1,6 +1,11 @@
 import fs from "node:fs"
 import path from "node:path"
 
+/** The caller's address behind Caddy, which sets X-Forwarded-For to the client it saw. */
+export function clientIp(header: (name: string) => string | undefined) {
+  return header("x-forwarded-for")?.split(",")[0]?.trim() || header("x-real-ip") || "local"
+}
+
 /** Sliding-window counter per key (IP). In memory: a restart forgives everyone. */
 export class RateLimiter {
   private hits = new Map<string, number[]>()

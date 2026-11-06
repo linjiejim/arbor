@@ -39,20 +39,23 @@ type Peek = { id: string; top: number; bound: number }
 /**
  * The feature tree over the left edge of the 3D view: icon and name in grey,
  * a row lifts on hover and lights up the faces it made, details open beside
- * it. Click a row to edit that feature by hand.
+ * it. Click a row to edit that feature by hand; `readOnly` (a shared link): to view the model at that step.
  */
 export function TreeOverlay({
   studio,
   onHover,
   reselect,
   annotations,
-  busy,
+  busy = false,
+  readOnly = false,
 }: {
   studio: Studio
   onHover: (h: Hover | null) => void
-  reselect: Reselect
-  annotations: Annotations
-  busy: boolean
+  reselect?: Reselect
+  annotations?: Annotations
+  busy?: boolean
+  /** A shared link: a click rolls back to that step; no feature card. */
+  readOnly?: boolean
 }) {
   const { tree, report, rollback } = studio
   const root = React.useRef<HTMLElement>(null)
@@ -100,8 +103,8 @@ export function TreeOverlay({
             <li key={f.id}>
               <button
                 type="button"
-                onClick={(e) => edit(f, e.currentTarget)}
-                aria-expanded={editing?.id === f.id}
+                onClick={(e) => (readOnly ? studio.showFeature(active ? null : f.id) : edit(f, e.currentTarget))}
+                aria-expanded={readOnly ? undefined : editing?.id === f.id}
                 onMouseEnter={(e) => show(f, e.currentTarget)}
                 onFocus={(e) => show(f, e.currentTarget)}
                 onBlur={hide}
@@ -128,7 +131,7 @@ export function TreeOverlay({
           )
         })}
       </ol>
-      {editing && edited && (
+      {editing && edited && reselect && annotations && (
         <div className="pointer-events-none absolute inset-y-0 left-full ml-1 flex w-80 max-w-[calc(100vw-5rem)] flex-col">
           <div className="pointer-events-auto flex min-h-0 flex-col" style={{ marginTop: Math.max(0, Math.min(editing.top, editing.bound - 380)) }}>
             <FeatureCard
@@ -154,6 +157,7 @@ export function TreeOverlay({
           f={tree.features[peeked]}
           r={report?.features[peeked]}
           active={rollback === peek.id}
+          readOnly={readOnly}
           top={peek.top}
           bound={peek.bound}
         />
@@ -163,7 +167,7 @@ export function TreeOverlay({
 }
 
 /** The details layer beside a hovered row. Read-only, so it never takes the pointer. */
-function FeaturePeek({ tree, f, r, active, top, bound }: { tree: Tree; f: Feature; r?: FeatureResult; active: boolean; top: number; bound: number }) {
+function FeaturePeek({ tree, f, r, active, readOnly, top, bound }: { tree: Tree; f: Feature; r?: FeatureResult; active: boolean; readOnly: boolean; top: number; bound: number }) {
   const card = React.useRef<HTMLDivElement>(null)
   // Level with the row; slid up when the row is near the bottom so the card stays in view.
   React.useLayoutEffect(() => {
@@ -206,7 +210,9 @@ function FeaturePeek({ tree, f, r, active, top, bound }: { tree: Tree; f: Featur
           {[r.faces && `新面 ${r.faces.new}`, r.faces?.modified && `改动 ${r.faces.modified} 个面`, `用时 ${Math.round(r.ms)} ms`].filter(Boolean).join(" · ")}
         </div>
       )}
-      <div className="mt-2 border-t pt-2 text-caption text-faint-foreground">{active ? "正在这一步查看 · 单击看尺寸和选择" : "单击看尺寸和选择"}</div>
+      <div className="mt-2 border-t pt-2 text-caption text-faint-foreground">
+        {readOnly ? (active ? "正在这一步查看 · 单击回到最新" : "单击在这一步查看") : active ? "正在这一步查看 · 单击看尺寸和选择" : "单击看尺寸和选择"}
+      </div>
     </div>
   )
 }

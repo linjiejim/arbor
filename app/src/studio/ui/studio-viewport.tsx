@@ -39,18 +39,22 @@ export function StudioViewport({
   annotations,
   busy,
   reselect,
+  readOnly = false,
 }: {
   studio: Studio
   hover: Hover | null
   annotations: Annotations
   busy: boolean
-  reselect: Reselect
+  /** 「在模型上重选」 (none on a shared link). */
+  reselect?: Reselect
+  /** A shared link: measure and section, but no annotating (there is no chat to send it to). */
+  readOnly?: boolean
 }) {
   const [viewer, setViewer] = React.useState<Viewer | null>(null)
   const current = React.useRef<THREE.Group | null>(null)
   const fittedSize = React.useRef(0)
   // While re-picking a feature's faces or edges, the view shows the body that feature starts from.
-  const rs = reselect.state
+  const rs = reselect?.state ?? null
   const display = rs?.display ?? studio.display
   const { kernel } = studio
   const { focus, draft } = annotations
@@ -253,11 +257,11 @@ export function StudioViewport({
   }, [viewer, plane, display])
 
   // Esc leaves re-picking (the card's 取消 does the same).
-  const cancelReselect = reselect.cancel
+  const cancelReselect = reselect?.cancel
   React.useEffect(() => {
     if (!rs) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !(e.target as HTMLElement)?.closest?.("input, textarea")) cancelReselect()
+      if (e.key === "Escape" && !(e.target as HTMLElement)?.closest?.("input, textarea")) cancelReselect?.()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -315,10 +319,10 @@ export function StudioViewport({
 
   // ---------------------------------------------------------------- clicking
 
-  const latest = React.useRef({ studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect })
+  const latest = React.useRef({ studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly })
   React.useEffect(() => {
-    latest.current = { studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect }
-  }, [studio, busy, display, annotations.open, annotations.cancel, measuring, plane, reselect])
+    latest.current = { studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly }
+  }, [studio, busy, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly])
 
   React.useEffect(() => {
     if (!viewer) return
@@ -337,7 +341,7 @@ export function StudioViewport({
       const mesh = current.current?.children.find((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh)
       if (!d?.mesh || !mesh || s.kernel.phase !== "ready") return
       const { edge, face } = pickTargets(viewer, d, mesh, e, cut)
-      if (rsel.state) return void rsel.toggle({ edge: edge?.hash ?? null, face: face?.hash ?? null })
+      if (rsel?.state) return void rsel.toggle({ edge: edge?.hash ?? null, face: face?.hash ?? null })
       if (isMeasuring) {
         if (s.rollback) return notify("先回到最新一步，再测量")
         if (!edge && !face) return setPicked([])
@@ -348,6 +352,7 @@ export function StudioViewport({
         return
       }
       if (!edge && !face) return cancel()
+      if (latest.current.readOnly) return
       if (isBusy) return notify("助教正在改模型，这一轮结束后再标注")
       if (s.rollback) return notify("先回到最新一步，再在模型上标注")
       let info = edge ? await s.pick("edge", edge.hash, edge.point) : null
@@ -407,7 +412,7 @@ export function StudioViewport({
           {rs.kind === "edge" ? "点要选的边，再点一次取消；点一个面等于选它的一圈边" : "点要选的面，再点一次取消"}。Esc 退出
         </div>
       )}
-      {display?.mesh && !busy && !draft && !measuring && !rs && annotations.pending.length === 0 && (
+      {display?.mesh && !readOnly && !busy && !draft && !measuring && !rs && annotations.pending.length === 0 && (
         <div className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border bg-background/90 px-2.5 py-1 text-center text-caption text-muted-foreground">
           单击模型上的面或边，标注要改的地方
         </div>

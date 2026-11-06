@@ -1,6 +1,7 @@
 import * as React from "react"
 import { useChat } from "@ai-sdk/react"
 import { DefaultChatTransport, lastAssistantMessageIsCompleteWithToolCalls, type FileUIPart, type UIMessage } from "ai"
+import { isDivider } from "./share"
 import { trimMessages } from "./trim"
 import type { Studio } from "./use-studio"
 import type { Note } from "./use-annotations"
@@ -86,7 +87,8 @@ export function useStudioChat(studio: Studio) {
           const key = localStorage.getItem(KEY_STORE)
           const s = bridge.studio
           return {
-            body: { messages: trimMessages(messages), tree: s?.treeRef.current, summary: s?.summary ?? "", mode: bridge.mode },
+            // Dividers are for the learner; each message already carries the tree it was sent with.
+            body: { messages: trimMessages(messages.filter((m) => !isDivider(m))), tree: s?.treeRef.current, summary: s?.summary ?? "", mode: bridge.mode },
             headers: key ? { "x-deepseek-key": key } : undefined,
           }
         },
@@ -144,6 +146,16 @@ export function useStudioChat(studio: Studio) {
     [chat],
   )
 
+  /** 「—— 换成了分享的模型「法兰盘」——」: the model changed under the conversation. Nothing to mark in an empty chat. */
+  const { setMessages } = chat
+  const addDivider = React.useCallback(
+    (text: string) =>
+      setMessages((list) =>
+        list.length ? [...list, { id: `divider-${Date.now()}`, role: "assistant", parts: [{ type: "text", text }], metadata: { divider: true } }] : list,
+      ),
+    [setMessages],
+  )
+
   const clear = React.useCallback(() => {
     void chat.stop()
     chat.setMessages([])
@@ -167,7 +179,7 @@ export function useStudioChat(studio: Studio) {
   }, [linger])
   const busy = requesting || (linger > 0 && chat.status === "ready" && !paused)
 
-  return { ...chat, send, clear, paused, mode, setMode: setModeState, busy }
+  return { ...chat, send, clear, addDivider, paused, mode, setMode: setModeState, busy }
 }
 
 export type StudioChat = ReturnType<typeof useStudioChat>

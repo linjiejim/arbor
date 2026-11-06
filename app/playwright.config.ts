@@ -10,6 +10,8 @@ import { defineConfig, devices } from "@playwright/test"
  * Chromium (when `npx playwright install chromium` can't download).
  */
 const port = Number(process.env.E2E_PORT ?? 4391)
+/** The studio API; E2E_API_PORT keeps a run from reusing another checkout's server on 18914. */
+const apiPort = Number(process.env.E2E_API_PORT ?? 18914)
 const ci = !!process.env.CI
 
 export default defineConfig({
@@ -47,6 +49,7 @@ export default defineConfig({
     {
       command: `${ci ? "" : "npx vite build && "}npx vite preview --host 127.0.0.1 --port ${port} --strictPort`,
       url: `http://127.0.0.1:${port}`,
+      env: { STUDIO_API_PORT: String(apiPort) },
       reuseExistingServer: false,
       timeout: 180_000,
       stdout: "ignore",
@@ -55,8 +58,8 @@ export default defineConfig({
     {
       // The studio API with the scripted model (no key needed); `vite preview` proxies /api to it.
       command: "npx tsx server/index.ts",
-      url: "http://127.0.0.1:18914/api/health",
-      env: { STUDIO_MOCK: "1", STUDIO_DATA_DIR: ".tmp/e2e-studio", PORT: "18914" },
+      url: `http://127.0.0.1:${apiPort}/api/health`,
+      env: { STUDIO_MOCK: "1", STUDIO_DATA_DIR: ".tmp/e2e-studio", PORT: String(apiPort) },
       reuseExistingServer: !ci,
       timeout: 60_000,
       stdout: "ignore",
