@@ -1,6 +1,7 @@
 import * as React from "react"
 import { applyEdit, executeTool, treeText, type ToolRun } from "./apply"
-import { KernelClient } from "./client"
+import { takeKernel } from "./boot"
+import type { KernelClient } from "./client"
 import { EMPTY_TREE, Tree } from "./dsl"
 import type { BuildReport, DisplayData } from "./kernel/build"
 import type { MeasureTarget } from "./kernel/measure"
@@ -77,7 +78,7 @@ export function useStudio() {
   )
 
   React.useEffect(() => {
-    const c = new KernelClient()
+    const c = takeKernel()
     client.current = c
     c.onProgress = (loadedMB) => setKernel({ phase: "loading", loadedMB })
     const life = { alive: true }
