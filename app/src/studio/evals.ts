@@ -242,7 +242,9 @@ export function checkCase(c: EvalCase, tree: Tree, report: BuildReport, q?: Eval
   out.push({ name: "尺寸", pass: sz.every((x, i) => close(x, want[i])), detail: `${b.size.join("×")} vs ${c.size.join("×")}` })
   if (c.upright) out.push({ name: "方向", pass: b.size.every((x, i) => close(x, c.size[i])), detail: `X/Y/Z = ${b.size.join(" / ")}` })
   if (c.volume) out.push({ name: "体积", pass: close(b.volume, c.volume, 0.02), detail: `${Math.round(b.volume)} vs ${Math.round(c.volume)}` })
-  out.push({ name: "单一实体", pass: b.solids === 1, detail: `${b.solids}` })
+  // After a split each part is one solid.
+  const wantSolids = report.parts?.length ?? 1
+  out.push({ name: report.parts ? `每个零件一个实体（${wantSolids} 个零件）` : "单一实体", pass: b.solids === wantSolids, detail: `${b.solids}` })
   out.push({ name: "参数化", pass: Object.keys(tree.params).length >= 2, detail: `${Object.keys(tree.params).length} 个参数` })
   if (c.maxVolume) out.push({ name: "空心", pass: b.volume <= c.maxVolume, detail: `${Math.round(b.volume)} ≤ ${Math.round(c.maxVolume)}` })
   if (c.ops) {

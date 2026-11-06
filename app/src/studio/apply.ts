@@ -80,7 +80,7 @@ export function moveFeature(tree: Tree, id: string, by: -1 | 1): Tree {
   return { ...tree, features }
 }
 
-export function applyEdit(tree: Tree, name: string, input: Record<string, unknown>): { tree: Tree; target?: string } {
+export function applyEdit(tree: Tree, name: string, input: Record<string, unknown>): { tree: Tree; target?: string; note?: string } {
   if (name === "set_params") {
     const params = { ...tree.params }
     const notes = { ...tree.paramNotes }
@@ -103,10 +103,18 @@ export function applyEdit(tree: Tree, name: string, input: Record<string, unknow
     const f = parsed.data
     if (tree.features.some((x) => x.id === f.id)) throw new InputError(`已经有 id 为「${f.id}」的特征了，换一个 id，或用 edit_feature 修改它`)
     const features = [...tree.features]
-    const at = after ? features.findIndex((x) => x.id === after) : features.length - 1
+    let at = after ? features.findIndex((x) => x.id === after) : features.length - 1
     if (after && at < 0) throw new InputError(`找不到特征「${after}」`)
+    // `after` that would put it before what it uses (a sketch made just now): after the last of those instead.
+    const uses = referencesOf(f).map((id) => features.findIndex((x) => x.id === id)).filter((i) => i >= 0)
+    const latest = uses.length ? Math.max(...uses) : -1
+    let note: string | undefined
+    if (latest > at) {
+      note = `after「${after}」会排在它用到的「${displayName(tree, features[latest])}」前面，已改为放在「${displayName(tree, features[latest])}」后面。after 只在要插到中间时才写。`
+      at = latest
+    }
     features.splice(at + 1, 0, f)
-    return { tree: { ...tree, features }, target: f.id }
+    return { tree: { ...tree, features }, target: f.id, note }
   }
   if (name === "edit_feature") {
     const { id, changes } = input as { id: string; changes: Record<string, unknown> }
@@ -168,9 +176,9 @@ export async function executeTool(port: KernelPort, tree: Tree, name: string, in
       const images = await look(views, input.highlight as string | undefined)
       return { tree, output: { ok: true, text: `视图：${views.join("、")}（蓝色 = 高亮的特征，灰色 = 其余）`, images } }
     }
-    const { tree: next, target } = applyEdit(tree, name, input)
+    const { tree: next, target, note } = applyEdit(tree, name, input)
     const report = await port.rebuild(next)
-    return { tree: next, output: { ok: resultOk(report, target), text: resultText(name, report, target) }, report, focus: target }
+    return { tree: next, output: { ok: resultOk(report, target), text: [note && `⚠ ${note}`, resultText(name, report, target)].filter(Boolean).join("\n") }, report, focus: target }
   } catch (e) {
     if (e instanceof InputError || (e as Error)?.name === "ExprError") return { tree, output: { ok: false, text: `✗ ${(e as Error).message}` } }
     return { tree, output: { ok: false, text: `✗ 出错了：${(e as Error)?.message ?? e}` } }

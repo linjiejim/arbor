@@ -933,3 +933,16 @@ describe("split into parts", () => {
     expect(code).toContain('parts["上盖"] = fillet(parts["上盖"].edges()')
   })
 })
+
+describe("after that would come too early", () => {
+  it("puts a feature after the sketch it uses, and says so", () => {
+    const t: Tree = { params: { H: 10 }, features: [
+      { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 10, h: 10 }] },
+      { id: "body", op: "extrude", sketch: "sk", distance: "H" },
+      { id: "cav", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 4, h: 4 }] },
+    ] } as unknown as Tree
+    const r = applyEdit(t, "extrude", { id: "hole", sketch: "cav", distance: 5, mode: "cut", after: "body" })
+    expect(r.tree.features.map((f) => f.id)).toEqual(["sk", "body", "cav", "hole"])
+    expect(r.note).toMatch(/已改为放在/)
+  })
+})
