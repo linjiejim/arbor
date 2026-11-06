@@ -56,7 +56,8 @@
 - [x] 真实 agent（Codex，经 MCP）从一句话建出零件：80×50×30 外壳、壁厚 2、R4、四角 M3 螺纹孔；14 次调用，`check` 16/16，看图，导出 STEP
 - [x] 人和 agent 配合（Codex）：在窗口里点前壁写「开一个 9×3.5 的 USB-C 口，下沿离底 6」→ agent `get_notes`，用备注里的选择器在前壁上画草图、切穿壁厚，`check` 8/8，`resolve_note` 回复；窗口里备注变成已处理并显示回复
 - [ ] Claude Code（`claude -p`）完整跑一遍：MCP 已连上（33 个工具），等命令行重新登录后再跑建模
-- [ ] 网站的 `npm run check` 和 e2e 在 CI 上通过（本地 `npm run check` 已通过）
+- [x] 网站不受影响：本地 `npm run check`（165 个单元测试、oxlint 零警告）和工作台 e2e 4 项通过（含用到改过的标注卡片的「在模型上标注」）
+- [ ] 完整 e2e 在 CI 上通过
 
 ## 下一步
 
