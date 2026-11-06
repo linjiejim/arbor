@@ -123,7 +123,10 @@ export function applyEdit(tree: Tree, name: string, input: Record<string, unknow
     const { op: _op, id: _id, ...rest } = changes ?? {}
     void _op
     void _id
-    const parsed = Feature.safeParse({ ...tree.features[i], ...rest })
+    // null removes a field: { "thin": null } turns a thin wall back into a plain extrusion.
+    const merged: Record<string, unknown> = { ...tree.features[i], ...rest }
+    for (const [k, v] of Object.entries(rest)) if (v === null) delete merged[k]
+    const parsed = Feature.safeParse(merged)
     if (!parsed.success) throw new InputError(`修改后的特征不合法：${parsed.error.issues.map((x) => `${x.path.join(".")} ${x.message}`).join("；")}`)
     const features = [...tree.features]
     features[i] = parsed.data

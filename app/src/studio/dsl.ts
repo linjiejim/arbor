@@ -159,15 +159,15 @@ export const Feature = z.discriminatedUnion("op", [
         z.object({ face: FaceSelector.describe("成形到这个面（要正好选中一个）"), offset: Num.optional().describe("停在离这个面多远的地方，正值 = 还没到") }),
       ])
       .optional()
-      .describe("成形到：设计意图是「到那个面为止」，不用自己算距离（不写 distance）"),
+      .describe("成形到：设计意图是「到那个面为止」，不用自己算距离（不写 distance）。不需要就不要写这个字段"),
     thin: z
       .object({
         t: Num.describe("壁厚"),
         side: z.enum(["center", "inside", "outside"]).optional().describe("厚度加在线的哪一侧：center = 两侧各一半（缺省）；inside = 向里（封闭轮廓向内，开放的线向拐弯的那一侧）"),
       })
       .optional()
-      .describe("薄壁拉伸：只沿着轮廓线长出一圈等厚的壁；草图可以是开放的线（path）"),
-    draft: Num.optional().describe("拔模角（度）：正值让侧壁沿拉伸方向向内收，一步拉出锥形凸台或带斜度的槽"),
+      .describe("薄壁拉伸：只沿着轮廓线长出一圈等厚的壁；草图可以是开放的线（path）。普通的实心拉伸不要写这个字段"),
+    draft: Num.optional().describe("拔模角（度）：正值让侧壁沿拉伸方向向内收，一步拉出锥形凸台或带斜度的槽。不需要斜度就不要写"),
   }),
   z.object({
     ...Base,

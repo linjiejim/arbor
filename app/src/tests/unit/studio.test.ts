@@ -987,3 +987,14 @@ describe("engineering drawings", () => {
     expect(new Set(all).size).toBe(all.length)
   })
 })
+
+describe("edit_feature null", () => {
+  it("removes a field", () => {
+    const t: Tree = { params: {}, features: [
+      { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 10, h: 10 }] },
+      { id: "e", op: "extrude", sketch: "sk", distance: 5, thin: { t: 1 } },
+    ] } as unknown as Tree
+    const r = applyEdit(t, "edit_feature", { id: "e", changes: { thin: null } })
+    expect("thin" in r.tree.features[1]).toBe(false)
+  })
+})

@@ -61,7 +61,7 @@ export const STUDIO_TOOLS = {
     description: "修改已有特征的字段（只写要改的字段，嵌套对象整体替换）。修复失败的特征时优先用它，不要再加一个新特征。",
     inputSchema: z.object({
       id: z.string(),
-      changes: z.record(z.string(), z.unknown()).describe("要改的字段，例如 { \"r\": 3 } 或 { \"edges\": { \"parallel\": \"Z\" } }"),
+      changes: z.record(z.string(), z.unknown()).describe("要改的字段，例如 { \"r\": 3 } 或 { \"edges\": { \"parallel\": \"Z\" } }；写 null 删掉一个字段，例如 { \"thin\": null }"),
     }),
     toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
   }),
