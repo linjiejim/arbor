@@ -6,6 +6,7 @@ import { makeVertex, measureDistanceBetween, type Edge, type Face, type Shape3D 
 import type { EdgeSelector, FaceSelector } from "../dsl"
 import { num, type Scope } from "../expr"
 import { InputError } from "./errors"
+import { edgesOf, faceProps, facesOf } from "./topo"
 
 type V3 = [number, number, number]
 
@@ -54,10 +55,10 @@ const r2 = (x: number) => Math.round(x * 100) / 100
 
 /** Per-face facts used by selectors, inspect and the UI. `origins[i]` = feature that first made face i. */
 export function faceInfos(shape: Shape3D, origins: string[]): FaceInfo[] {
-  return shape.faces.map((face, index) => {
+  return facesOf(shape).map((face, index) => {
     const kind = SURF[face.geomType] ?? "freeform"
-    const center = v3(face.center)
-    const info: FaceInfo = { index, face, kind, center, area: 0, origin: origins[index] ?? "?" }
+    const { area, center } = faceProps(face)
+    const info: FaceInfo = { index, face, kind, center, area, origin: origins[index] ?? "?" }
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const adaptor: any = (face as any)._geomAdaptor()
@@ -75,12 +76,12 @@ export function faceInfos(shape: Shape3D, origins: string[]): FaceInfo[] {
 }
 
 export function edgeInfos(shape: Shape3D, faces: FaceInfo[]): EdgeInfo[] {
-  const edges = shape.edges
+  const edges = edgesOf(shape)
   const byHash = new Map<number, number[]>()
   edges.forEach((e, i) => byHash.set(e.hashCode, [...(byHash.get(e.hashCode) ?? []), i]))
   const adjacent: number[][] = edges.map(() => [])
   for (const f of faces) {
-    for (const fe of f.face.edges) {
+    for (const fe of edgesOf(f.face)) {
       for (const i of byHash.get(fe.hashCode) ?? []) {
         if (edges[i].isSame(fe) && !adjacent[i].includes(f.index)) adjacent[i].push(f.index)
       }

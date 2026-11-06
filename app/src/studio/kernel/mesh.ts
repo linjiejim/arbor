@@ -1,7 +1,8 @@
 // Meshing and per-face bookkeeping. Ported from the kernel spike
 // (spikes/replicad-kernel/src/kernel/mesh.js), where the geometric face
 // classification agreed with OCCT's own history on all but 1 of 1,694 faces.
-import { getOC, measureArea, type AnyShape } from "replicad"
+import { getOC, type AnyShape } from "replicad"
+import { faceProps } from "./topo"
 
 // The opencascade.js bindings are untyped from our side.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -72,9 +73,8 @@ export function faceSignatures(faces: any[], mesh: Mesh): FaceSig[] {
   const oc: OC = getOC()
   const groupByHash = new Map(mesh.faceGroups.map((g) => [g.faceId, g]))
   return faces.map((f) => {
-    const c = f.center
-    const sig: FaceSig = { type: f.geomType, area: measureArea(f), center: [c.x, c.y, c.z], sample: null, box: null }
-    c.delete()
+    const { area, center } = faceProps(f)
+    const sig: FaceSig = { type: f.geomType, area, center, sample: null, box: null }
     const g = groupByHash.get(f.hashCode)
     if (g) {
       const v = mesh.vertices

@@ -31,6 +31,7 @@ import { referencesOf } from "../apply"
 import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
 import { measure, type MeasureResult, type MeasureTarget } from "./measure"
+import { countOf, facesOf, solidsOf } from "./topo"
 import { standardHole } from "../holes"
 import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
@@ -242,7 +243,7 @@ export class Kernel {
     const body = step.result.state === "ok" ? step : this.lastBuilt(i)
     const out: DisplayData = { ...empty, sketch: step.sketch ? step.sketch.lines.slice() : null }
     if (body?.body && body.mesh) {
-      const faces = body.body.faces
+      const faces = facesOf(body.body)
       const indexByHash = new Map(faces.map((f, k) => [f.hashCode, k]))
       faces.forEach((f) => f.delete())
       const isThisStep = body === step && step.ownsBody
@@ -521,9 +522,9 @@ export class Kernel {
   /** Mesh the new body, classify its faces against the previous one, carry provenance forward. */
   private commitBody(step: Step, prev: Step | null, body: Shape3D, id: string) {
     const mesh = meshShape(body)
-    const faces = body.faces
+    const faces = facesOf(body)
     const sigs = faceSignatures(faces, mesh)
-    const prevFaces = prev?.body ? prev.body.faces : null
+    const prevFaces = prev?.body ? facesOf(prev.body) : null
     const cls = classifyFaces(prevFaces, prev?.sigs ?? null, sigs)
     prevFaces?.forEach((pf) => pf.delete())
     faces.forEach((x) => x.delete())
@@ -853,7 +854,7 @@ function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut", war
     const after = measureShapeVolumeProperties(next).volume
     if (Math.abs(after - before) < 1e-6 * Math.max(1, before)) warnings.push("加的料完全在原实体里面，模型没有变化")
   }
-  const solids = next.solids?.length ?? 1
+  const solids = countOf(next, "solid")
   if (solids > 1) warnings.push(`现在是 ${solids} 个不相连的实体：新加的料没有和原来的实体接上`)
   return next
 }
@@ -876,19 +877,15 @@ function stats(body: Shape3D): BodyStats {
   const [a, b] = body.boundingBox.bounds as [V3, V3]
   const props = measureShapeVolumeProperties(body)
   const c = props.centerOfMass as unknown as V3
-  const faces = body.faces
-  const edges = body.edges
   const out: BodyStats = {
     bbox: [[r2(a[0]), r2(a[1]), r2(a[2])], [r2(b[0]), r2(b[1]), r2(b[2])]],
     size: [r2(b[0] - a[0]), r2(b[1] - a[1]), r2(b[2] - a[2])],
     volume: r2(props.volume),
     centerOfMass: [r2(c[0]), r2(c[1]), r2(c[2])],
-    faces: faces.length,
-    edges: edges.length,
-    solids: body.solids?.length ?? 1,
+    faces: countOf(body, "face"),
+    edges: countOf(body, "edge"),
+    solids: countOf(body, "solid"),
   }
-  faces.forEach((f) => f.delete())
-  edges.forEach((e) => e.delete())
   props.delete?.()
   return out
 }
@@ -1000,43 +997,45 @@ const overlaps = (a: [number[], number[]], b: [number[], number[]]) => a[0][0] <
 /**
  * A sketch may hold regions that overlap (a text's strokes): its extrusion is
  * then several solids crossing each other, which a boolean can't take as a
- * tool. Fuse the ones whose boxes meet; separate ones stay a compound.
+ * tool. Fuse them; separate ones come out as separate solids of the compound.
  */
 export function mergeOverlaps(shape: Shape3D): Shape3D {
-  const solids = ((shape as unknown as { solids?: Shape3D[] }).solids ?? []) as Shape3D[]
-  if (solids.length < 2) return shape
+  const solids = solidsOf(shape)
   const boxes = solids.map((s) => s.boundingBox.bounds as [V3, V3])
   const meet = (a: [V3, V3], b: [V3, V3]) => [0, 1, 2].every((k) => a[0][k] <= b[1][k] + 1e-9 && b[0][k] <= a[1][k] + 1e-9)
-  const group = solids.map((_, i) => i)
-  const root = (i: number): number => (group[i] === i ? i : (group[i] = root(group[i])))
-  for (let i = 0; i < solids.length; i++) for (let j = i + 1; j < solids.length; j++) if (meet(boxes[i], boxes[j])) group[root(i)] = root(j)
-  const groups = new Map<number, Shape3D[]>()
-  solids.forEach((s, i) => groups.set(root(i), [...(groups.get(root(i)) ?? []), s]))
-  if (groups.size === solids.length) return shape
-  // Straight through OCCT: each builder and intermediate result freed at once, and
-  // no same-domain clean-up (see below).
+  const crossing = boxes.some((a, i) => boxes.some((b, j) => j > i && meet(a, b)))
+  if (!crossing) {
+    solids.forEach((s) => s.delete())
+    return shape
+  }
+  // One fuse with every other solid as a tool: five hanzi take 0.27 s instead of
+  // 1.4 s fused pair by pair, and the wasm heap grows a quarter as much. No
+  // same-domain clean-up: on these polyline walls it loses whole strokes (偶 kept
+  // a quarter of its area). The body's own boolean cleans up afterwards.
   const oc = getOC() as unknown as OCFuse
-  const merged = [...groups.values()].map((g) => {
-    if (g.length === 1) return g[0]
-    const first = g[0].wrapped as unknown as { delete(): void }
-    let acc = first
-    for (const s of g.slice(1)) {
-      const builder = new oc.BRepAlgoAPI_Fuse(acc, s.wrapped)
-      builder.Build()
-      // No same-domain clean-up here: on these polyline walls it loses whole strokes
-      // (偶 kept a quarter of its area). The body's own boolean cleans up afterwards.
-      const next = builder.Shape()
-      builder.delete()
-      if (acc !== first) acc.delete()
-      acc = next
-    }
-    return cast(acc as never) as Shape3D
-  })
-  shape.delete()
-  return merged.length === 1 ? merged[0] : (makeCompound(merged) as unknown as Shape3D)
+  const args = new oc.NCollection_List_TopoDS_Shape()
+  const tools = new oc.NCollection_List_TopoDS_Shape()
+  const progress = new oc.Message_ProgressRange()
+  const fuse = new oc.BRepAlgoAPI_Fuse()
+  try {
+    args.Append(solids[0].wrapped)
+    for (const s of solids.slice(1)) tools.Append(s.wrapped)
+    fuse.SetArguments(args)
+    fuse.SetTools(tools)
+    fuse.Build(progress)
+    if (!fuse.IsDone()) throw new Error("重叠的笔画没能合并")
+    return cast(fuse.Shape() as never) as Shape3D
+  } finally {
+    for (const x of [fuse, progress, args, tools, ...solids, shape]) x.delete()
+  }
 }
 
-type OCFuse = { BRepAlgoAPI_Fuse: new (a: unknown, b: unknown) => { Build(): void; Shape(): { delete(): void }; delete(): void } }
+type OCList = { Append(s: unknown): unknown; delete(): void }
+type OCFuse = {
+  NCollection_List_TopoDS_Shape: new () => OCList
+  Message_ProgressRange: new () => { delete(): void }
+  BRepAlgoAPI_Fuse: new () => { SetArguments(l: OCList): void; SetTools(l: OCList): void; Build(p: unknown): void; IsDone(): boolean; Shape(): unknown; delete(): void }
+}
 
 /** A hole as a revolved half-section pointing down -Z from the origin. */
 function holeTool(r: number, depth: number, cbore?: { r: number; depth: number }, csink?: { r: number; angle: number }): Shape3D {

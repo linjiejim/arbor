@@ -96,17 +96,6 @@ function outline(font: Font, line: string, size: number): Piece[] {
   const solids = contours.filter((c) => Math.sign(signedArea(c.poly)) === filled)
   const holes = contours.filter((c) => Math.sign(signedArea(c.poly)) !== filled)
 
-  // Strokes that overlap another get fused in 3D later. Fusing their spline walls
-  // grows OpenCascade's heap by tens of MB per glyph (it never comes back), so
-  // they are drawn as polylines within 5 µm of the curves instead: flat walls fuse
-  // cheaply. Strokes on their own keep their exact curves.
-  const box = (c: Contour) => polyBounds(c.poly)
-  for (const c of solids) {
-    if (!c.run || !solids.some((o) => o !== c && overlaps(box(o), box(c)))) continue
-    c.bp = polylineBlueprint(fine(c.run))
-    for (const h of holes) if (h.run && contains(box(c), box(h))) h.bp = polylineBlueprint(fine(h.run))
-  }
-
   const owned = new Map<Contour, Contour[]>()
   for (const h of holes) {
     const inner = innerPoint(h.poly)
@@ -172,8 +161,6 @@ type Contour = {
   poly: Point2D[]
   /** Loops split from one self-crossing outline share a group: their holes are kept as is. */
   group?: number
-  /** The path commands, to redraw it as a fine polyline. */
-  run?: PathCommand[]
 }
 
 /**
@@ -194,8 +181,13 @@ function contoursOf(commands: PathCommand[]): Contour[] {
     const poly = flatten(run)
     if (poly.length < 3 || Math.abs(signedArea(poly)) < 1e-9) continue
     if (!crosses(poly)) {
-      const bp = curveBlueprint(run)
-      if (bp) out.push({ bp, poly, run })
+      // Walls as polylines within 5 µm of the curves. Any boolean against spline
+      // walls (fusing overlapping strokes, embossing onto the body) grows
+      // OpenCascade's heap by tens of MB per glyph, and it never comes back; flat
+      // walls don't, and they are faster to cut and mesh. (The chords lie inside
+      // the curve: a small dot like "." loses about 1% of its area.)
+      const loop = fine(run)
+      if (loop.length >= 3) out.push({ bp: polylineBlueprint(loop), poly })
       continue
     }
     group++
@@ -210,30 +202,6 @@ function contoursOf(commands: PathCommand[]): Contour[] {
     }
   }
   return out
-}
-
-function curveBlueprint(run: PathCommand[]): Blueprint | null {
-  let pen: BlueprintSketcher | null = null
-  let last: Point2D | null = null
-  let segments = 0
-  const same = (a: Point2D | null, b: Point2D) => !!a && Math.abs(a[0] - b[0]) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-9
-  for (const c of run) {
-    const p: Point2D = [c.x!, -c.y!]
-    if (c.type === "M") {
-      pen = new BlueprintSketcher()
-      pen.movePointerTo(p)
-      last = p
-      continue
-    }
-    if (!pen || same(last, p)) continue
-    if (c.type === "L") pen.lineTo(p)
-    else if (c.type === "Q") pen.quadraticBezierCurveTo(p, [c.x1!, -c.y1!])
-    else if (c.type === "C") pen.cubicBezierCurveTo(p, [c.x1!, -c.y1!], [c.x2!, -c.y2!])
-    segments++
-    last = p
-  }
-  // Two points and back is not an outline.
-  return pen && segments >= 2 ? pen.close() : null
 }
 
 /** The outline as a closed polygon (last point not repeated), curves cut into 12 pieces. */
@@ -299,17 +267,6 @@ function fine(run: PathCommand[], tol = 0.005): Point2D[] {
     return Math.hypot(q[0] - p[0], q[1] - p[1]) > 1e-7
   })
 }
-
-function polyBounds(poly: Point2D[]): Bounds {
-  const xs = poly.map((p) => p[0])
-  const ys = poly.map((p) => p[1])
-  return [
-    [Math.min(...xs), Math.min(...ys)],
-    [Math.max(...xs), Math.max(...ys)],
-  ]
-}
-
-const overlaps = (a: Bounds, b: Bounds) => a[0][0] <= b[1][0] && b[0][0] <= a[1][0] && a[0][1] <= b[1][1] && b[0][1] <= a[1][1]
 
 const signedArea = (poly: Point2D[]) => poly.reduce((a, p, i) => a + (p[0] * poly[(i + 1) % poly.length][1] - poly[(i + 1) % poly.length][0] * p[1]), 0) / 2
 
