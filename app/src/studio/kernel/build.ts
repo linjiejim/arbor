@@ -398,7 +398,12 @@ export class Kernel {
           origins,
           facts: `面积 ${fmt(measureArea(face.face))} mm²`,
           selector: uniqueFaceSelector(face, faces, this.scope, target.point),
-          sketch: plane && n ? { plane, offset: r2(face.center["XYZ".indexOf(n[1])]), uv: uv(target.point).map(r2) as [number, number] } : null,
+          sketch:
+            plane && n
+              ? { plane, offset: r2(face.center["XYZ".indexOf(n[1])]), uv: uv(target.point).map(r2) as [number, number] }
+              : face.kind === "plane" && face.normal
+                ? slopeSketch(face.center, face.normal, target.point)
+                : null,
         }
       }
       const edges = edgeInfos(step.body, faces)
@@ -624,9 +629,8 @@ export class Kernel {
           if (sel.length > 1) throw new InputError("斜面只能选一个：加 near 或 expect: 1")
           if (ref.tilt) throw new InputError("贴在斜面上时不用 tilt")
           const f = sel[0]
-          const normal = unit(f.normal!)
-          const x = Math.abs(normal[2]) < 0.999 ? unit(cross([0, 0, 1], normal)) : ([1, 0, 0] as V3)
-          return { name: ref.plane, origin: add(f.center, mul(normal, coord)), x, y: cross(normal, x), normal, label: `斜面（${describeFace(f).split(" 来自")[0]}）`, custom: true }
+          const fr = faceFrame(f.center, f.normal!)
+          return { name: ref.plane, origin: add(fr.origin, mul(fr.normal, coord)), x: fr.x, y: fr.y, normal: fr.normal, label: `斜面（${describeFace(f).split(" 来自")[0]}）`, custom: true }
         }
         const coords = new Set(sel.map((x) => r2(x.center[P.axis])))
         if (coords.size > 1) throw new InputError("选中的面不在同一高度，加 near 或 expect 只选一个")
@@ -1011,6 +1015,25 @@ export class Kernel {
 function regionOf(sk: NonNullable<Step["sketch"]>, id: string): Drawing {
   if (!sk.drawing) throw new InputError(`草图「${id}」只有开放的线：开放的线只能做薄壁拉伸（thin）或筋（rib）`)
   return sk.drawing
+}
+
+/**
+ * The sketch frame of an inclined plane face, the one rule `on.face` and
+ * annotations share: origin at the face's centre, x level (Z × n; X when the
+ * face is nearly flat, made square to n), y = n × x, up the slope.
+ */
+function faceFrame(center: V3, n: V3): Frame {
+  const normal = unit(n)
+  const x = Math.abs(normal[2]) < 0.999 ? unit(cross([0, 0, 1], normal)) : unit(sub([1, 0, 0], mul(normal, normal[0])))
+  return { origin: center, x, y: cross(normal, x), normal }
+}
+
+/** A click on an inclined face, in that face's own sketch coordinates. */
+function slopeSketch(center: V3, n: V3, p: V3): PickInfo["sketch"] {
+  const fr = faceFrame(center, n)
+  const d = sub(p, fr.origin)
+  const r = (v: V3) => v.map(r2) as V3
+  return { plane: "XY", offset: 0, uv: [r2(dot(d, fr.x)), r2(dot(d, fr.y))], face: { origin: r(fr.origin), x: r(fr.x), y: r(fr.y), normal: r(fr.normal) } }
 }
 
 const frameOf = (p: ResolvedPlane): Frame => ({ origin: p.origin, x: p.x, y: p.y, normal: p.normal })

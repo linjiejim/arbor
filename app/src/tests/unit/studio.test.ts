@@ -813,3 +813,57 @@ describe("more features: up to, thin, taper, rib", () => {
     for (const s of ["trace(path_p, line_width=3)", "until=Until.NEXT", "taper=3", "def rib(", "tool_r = rib(part, plane_p, pts_p, 4)"]) expect(code).toContain(s)
   })
 })
+
+describe("annotations on a slope", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+  const wedge = (hiRight: number): Tree =>
+    ({
+      params: {},
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XZ" }, shapes: [{ type: "polyline", points: [[-20, 0], [20, 0], [20, hiRight], [-20, 10]] }] },
+        { id: "w", op: "extrude", sketch: "s", distance: 40, direction: "both" },
+      ],
+    }) as unknown as Tree
+
+  for (const [name, hi] of [["27°", 30], ["1°", 10 + 40 * Math.tan(Math.PI / 180)]] as const) {
+    it(`gives the slope's own sketch coordinates, and a hole drilled there passes through the click (${name})`, () => {
+      const tree = wedge(hi)
+      k.rebuild(tree)
+      const z = (x: number) => 10 + ((hi - 10) * (x + 20)) / 40
+      for (const [x, y] of [[0, 0], [8, -12], [-12, 9]]) {
+        k.rebuild(tree)
+        const point: [number, number, number] = [x, y, z(x)]
+        const [hash] = k.locate("face", { near: point })!
+        const info = k.pick({ kind: "face", hash, point })!
+        expect(info.sketch?.face, "an inclined face gets its own frame").toBeTruthy()
+        const { expect: _e, ...face } = info.selector!
+        const r = k.rebuild({
+          ...tree,
+          features: [
+            ...tree.features,
+            { id: "hs", op: "sketch", on: { plane: "XY", face }, shapes: [{ type: "circle", d: 2, center: info.sketch!.uv }] },
+            { id: "h", op: "extrude", sketch: "hs", distance: 3, mode: "cut", direction: "reverse" },
+          ] as Tree["features"],
+        })
+        expect(r.features.every((f) => f.state === "ok"), JSON.stringify(r.features.map((f) => f.message))).toBe(true)
+        const c = [...k.inspect("faces", undefined, { kind: "cylinder", radius: 1 }).matchAll(/中心\(([^)]+)\)/g)].map((m) => m[1].split(",").map(Number))[0]
+        const n = info.sketch!.face!.normal
+        const d = [point[0] - c[0], point[1] - c[1], point[2] - c[2]]
+        const off = Math.hypot(d[1] * n[2] - d[2] * n[1], d[2] * n[0] - d[0] * n[2], d[0] * n[1] - d[1] * n[0])
+        expect(off, `axis misses the click at (${x}, ${y})`).toBeLessThan(0.02)
+      }
+    })
+  }
+
+  it("says so in the text the model reads", () => {
+    const text = annotationText([
+      { n: 1, note: "在这里打孔", kind: "face", what: "平面", where: "来自「w」", origins: ["w"], facts: "", point: [0, 0, 20], selector: { of: "w", near: [0, 0, 20], expect: 1 }, sketch: { plane: "XY", offset: 0, uv: [1, 2], face: { origin: [0, 0, 20], x: [0, -1, 0], y: [0.89, 0, 0.45], normal: [-0.45, 0, 0.89] } } },
+    ])
+    expect(text).toContain("在这个斜面上画草图")
+    expect(text).toContain("点击处的斜面草图坐标 (1, 2)")
+  })
+})

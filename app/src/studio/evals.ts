@@ -70,6 +70,30 @@ export const EVALS: EvalCase[] = [
     },
   },
   {
+    id: "anno-slope",
+    prompt: "按标注修改。",
+    start: {
+      params: {},
+      features: [
+        { id: "s", op: "sketch", name: "楔形截面", on: { plane: "XZ" }, shapes: [{ type: "polyline", points: [[-20, 0], [20, 0], [20, 30], [-20, 10]] }] },
+        { id: "w", op: "extrude", name: "楔形块", sketch: "s", distance: 40, direction: "both" },
+      ],
+    },
+    notes: [{ kind: "face", match: (p) => p.sketch?.face !== undefined, point: [8, -10, 24], note: "在这里开一个 ⌀6、深 5 的孔，孔垂直于斜面" }],
+    size: [40, 40, 30],
+    upright: true,
+    extra: (q) => {
+      const c = centres(q.inspect("faces", { kind: "cylinder", radius: 3 }))
+      // The hole's axis is the slope's normal; it must pass within 1 mm of the click.
+      const n = [-0.447, 0, 0.894]
+      const off = c.map((x) => {
+        const d = [8 - x[0], -10 - x[1], 24 - x[2]]
+        return Math.hypot(d[1] * n[2] - d[2] * n[1], d[2] * n[0] - d[0] * n[2], d[0] * n[1] - d[1] * n[0])
+      })
+      return [{ name: "孔在点的位置、垂直斜面", pass: c.length === 1 && off[0] < 1, detail: c.map((x, i) => `(${x.join(", ")}) 偏 ${off[i].toFixed(2)}`).join(" ") || "没有 R3 的孔" }]
+    },
+  },
+  {
     id: "anno-edge",
     prompt: "按标注修改。",
     start: plate(60, 40, 20),
