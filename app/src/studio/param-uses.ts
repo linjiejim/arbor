@@ -38,7 +38,7 @@ const SELECTORS = new Set(["edges", "faces", "open", "face", "not"])
 export type ParamUse = { feature: Feature; what: string }
 
 /** What a field path means, in words: ["shapes", 0, "w"] on a rect → 「矩形宽」. */
-function label(f: Feature, path: (string | number)[]): string {
+export function fieldLabel(f: Feature, path: (string | number)[]): string {
   if (path.some((k) => typeof k === "string" && SELECTORS.has(k))) return "选择条件"
   const keys = path.filter((k): k is string => typeof k === "string")
   const last = keys[keys.length - 1] ?? ""
@@ -48,6 +48,8 @@ function label(f: Feature, path: (string | number)[]): string {
   if (keys.includes("profile")) return `截面${FIELD[last] ?? last}`
   if (keys[0] === "on" || keys[0] === "neutral") return "草图平面偏移"
   if (f.op === "hole" && last === "d") return "孔径"
+  if (f.op === "chamfer" && last === "d") return "倒角距离"
+  if (f.op === "fillet" && last === "r") return "圆角半径"
   return FIELD[last] ?? last
 }
 
@@ -58,7 +60,7 @@ export function paramUses(tree: Tree, name: string): ParamUse[] {
     const whats = new Set<string>()
     const walk = (v: unknown, path: (string | number)[]) => {
       if (typeof v === "string") {
-        if (path.length && !["id", "name", "intent", "sketch", "of", "text", "op"].includes(String(path[path.length - 1])) && safeNames(v).includes(name)) whats.add(label(f, path))
+        if (path.length && !["id", "name", "intent", "sketch", "of", "text", "op"].includes(String(path[path.length - 1])) && safeNames(v).includes(name)) whats.add(fieldLabel(f, path))
       } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, [...path, i]))
       else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) walk(x, [...path, k])
     }

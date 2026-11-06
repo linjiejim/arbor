@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { getOC } from "replicad"
 import type { UIMessage } from "ai"
-import { applyEdit, executeTool, moveFeature, replaceFeature, type KernelPort } from "@/studio/apply"
+import { applyEdit, executeTool, moveFeature, promoteToParam, replaceFeature, setFieldAt, type KernelPort } from "@/studio/apply"
 import { toBuild123d } from "@/studio/codegen"
 import { EMPTY_TREE, type Tree } from "@/studio/dsl"
 import { evaluate, resolveParams } from "@/studio/expr"
@@ -13,6 +13,7 @@ import { STARTERS } from "@/studio/starters"
 import { closeOpen, splitBlocks } from "@/studio/md-blocks"
 import { describeUse, drivenFeatures, paramDependents, paramUses } from "@/studio/param-uses"
 import { standardHole } from "@/studio/holes"
+import { dimSource } from "@/studio/dim-source"
 import { glyphArea } from "./glyph-area"
 
 describe("parameter expressions", () => {
@@ -548,4 +549,67 @@ describe("tier-1 tools", () => {
     expect(code).toContain("on_face(")
     expect(toBuild123d(tilted.features.length ? { params: {}, features: [{ id: "t", op: "sketch", on: { plane: "XY", tilt: { axis: "Y", angle: 30 } }, shapes: [{ type: "rect", w: 20, h: 10 }] }] } : EMPTY_TREE, { body: true })).toContain(".move(Rot(Y=30))")
   }, 60_000)
+})
+
+describe("dimensions on the model", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+  const box = STARTERS.find((s) => s.id === "box-fillet-first")!.tree
+  const flange = STARTERS.find((s) => s.id === "flange")!.tree
+  const dist = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+  it("tells parameters, factors and plain numbers from derived values", () => {
+    const scope = { W: 60, pcd: 90, R: 30, rb: 5, L: 80, r: 4 }
+    expect(dimSource("W", scope)).toEqual({ type: "param", name: "W" })
+    for (const e of ["pcd/2", "-L/2", "2*r", "L/4"]) expect(dimSource(e, scope).type).toBe("factor")
+    expect(dimSource("pcd/2", scope)).toMatchObject({ name: "pcd", k: 0.5 })
+    expect(dimSource(12, scope).type).toBe("literal")
+    expect(dimSource("12", scope).type).toBe("literal")
+    for (const e of ["R-rb", "R-11.2", "R-0.293*rb", "L+36.5"]) expect(dimSource(e, scope).type).toBe("derived")
+  })
+
+  it("draws a box's sketch, height, fillet and wall where they are", () => {
+    k.rebuild(box)
+    const dims = k.dimensions()
+    const by = (id: string) => dims.find((d) => d.id === id)!
+    const L = by("sk1:shapes.0.w")
+    expect(L.text).toBe("L = 60")
+    expect(L.geom.type === "line" && dist(L.geom.a, L.geom.b)).toBeCloseTo(60)
+    expect(by("sk1:shapes.0.h").geom.type === "line" && dist((by("sk1:shapes.0.h").geom as { a: number[] }).a, (by("sk1:shapes.0.h").geom as { b: number[] }).b)).toBeCloseTo(40)
+    const H = by("ext1:distance")
+    expect(H.geom.type === "line" && H.geom.b[2] - H.geom.a[2]).toBeCloseTo(30)
+    expect(by("fil1:r").text).toMatch(/^\d+×R4（r）$/)
+    const t = by("shell1:t")
+    expect(t.geom.type === "line" && dist(t.geom.a, t.geom.b)).toBeCloseTo(2.5)
+    expect(t.label).toBe("壁厚（抽壳向内）")
+  })
+
+  it("draws a bolt circle as one pitch diameter, with the count", () => {
+    k.rebuild(flange)
+    const dims = k.dimensions()
+    const pcd = dims.find((d) => d.id === "ring:pcd")!
+    expect(pcd.text).toBe("⌀90（pcd）")
+    expect(pcd.geom.type === "circle" && pcd.geom.r).toBeCloseTo(45)
+    expect(pcd.source).toEqual({ type: "param", name: "pcd" })
+    expect(dims.find((d) => d.id === "ring:count")!.text).toBe("6× 均布（n）")
+    expect(dims.find((d) => d.id === "h1:d")!.text).toBe("⌀8（bolt）")
+    // The seed hole's position is the pitch circle, not a separate x dimension.
+    expect(dims.some((d) => d.id === "h1:at.0.0")).toBe(false)
+  })
+
+  it("edits one field in place, or makes it a parameter without changing the model", () => {
+    const t = setFieldAt(flange, "ch", ["d"], 2)
+    expect((t.features.find((f) => f.id === "ch") as { d: number }).d).toBe(2)
+    expect(t.features.filter((f) => f.id !== "ch")).toEqual(flange.features.filter((f) => f.id !== "ch"))
+    const before = k.rebuild(flange).body!.volume
+    const p = promoteToParam(flange, "ch", ["d"], "c", "外缘倒角", 1)
+    expect(p.params.c).toBe(1)
+    expect(p.paramNotes?.c).toBe("外缘倒角")
+    expect((p.features.find((f) => f.id === "ch") as { d: unknown }).d).toBe("c")
+    expect(k.rebuild(p).body!.volume).toBeCloseTo(before)
+    expect(() => promoteToParam(flange, "ch", ["d"], "pcd", "", 1)).toThrow(/已经有参数/)
+  })
 })

@@ -31,7 +31,8 @@ import { referencesOf } from "../apply"
 import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
 import { measure, type MeasureResult, type MeasureTarget } from "./measure"
-import { countOf, facesOf, solidsOf } from "./topo"
+import { countOf, edgesOf, facesOf, solidsOf } from "./topo"
+import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
 import { standardHole } from "../holes"
 import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
@@ -46,6 +47,8 @@ import {
   selectFaces,
   uniqueEdgeSelector,
   uniqueFaceSelector,
+  type EdgeInfo,
+  type FaceInfo,
 } from "./select"
 
 type V3 = [number, number, number]
@@ -59,6 +62,7 @@ const PLANES: Record<PlaneName, { normal: V3; x: V3; y: V3; axis: 0 | 1 | 2; lab
 }
 const AXIS: Record<string, V3> = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] }
 const add = (a: V3, b: V3): V3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+const sub = (a: V3, b: V3): V3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
 const mul = (a: V3, k: number): V3 => [a[0] * k, a[1] * k, a[2] * k]
 const dot = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
@@ -159,6 +163,8 @@ type Step = {
   tools?: Tool[]
   /** Tapped holes this step drilled: drill radius and the thread's nominal diameter. */
   threads?: Thread[]
+  /** Where this step's dimensions go (kernel/dims.ts). */
+  geom?: StepGeom
 }
 
 type Thread = { r: number; major: number }
@@ -445,6 +451,16 @@ export class Kernel {
     }
   }
 
+  /** Dimensions of every feature that built (kernel/dims.ts). */
+  dimensions(): Dim[] {
+    const geoms = new Map<string, StepGeom>()
+    for (const s of this.steps) if (s.result.state === "ok" && s.geom) geoms.set(s.feature.id, s.geom)
+    const last = this.lastBuilt(this.steps.length)
+    const bb = last?.body ? (last.body.boundingBox.bounds as [V3, V3]) : null
+    const diag = bb ? Math.hypot(bb[1][0] - bb[0][0], bb[1][1] - bb[0][1], bb[1][2] - bb[0][2]) : 50
+    return dimensionsOf(this.tree, this.scope, geoms, Math.max(3, 0.06 * diag))
+  }
+
   /** Sizes of one or two clicked faces / edges of the latest body, and how they relate. */
   measure(targets: MeasureTarget[]): MeasureResult | null {
     const step = this.lastBuilt(this.steps.length)
@@ -509,6 +525,7 @@ export class Kernel {
       if (out.sketch) step.sketch = out.sketch
       if (out.tools) step.tools = out.tools
       if (out.threads) step.threads = out.threads
+      if (out.geom) step.geom = out.geom
       if (out.body) this.commitBody(step, prev, out.body, f.id)
     } catch (e) {
       const ex = explain(f.op, describeError(e))
@@ -613,7 +630,7 @@ export class Kernel {
     f: Feature,
     prev: Step | null,
     warnings: string[],
-  ): { body?: Shape3D; summary: string; selected?: number; sketch?: Step["sketch"]; tools?: Tool[]; threads?: Thread[] } {
+  ): { body?: Shape3D; summary: string; selected?: number; sketch?: Step["sketch"]; tools?: Tool[]; threads?: Thread[]; geom?: StepGeom } {
     const n = (v: number | string) => num(v, this.scope)
     const int = (v: number | string, min: number, what: string) => count(n(v), min, what)
     const body = prev?.body ?? null
@@ -628,7 +645,7 @@ export class Kernel {
         faceShape.delete?.()
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ;(sk as any).delete?.()
-        return { sketch: { drawing, plane, lines }, summary: `${plane.label} · ${f.shapes.map(shapeName).join("、")}` }
+        return { sketch: { drawing, plane, lines }, geom: { op: "sketch", plane: frameOf(plane) }, summary: `${plane.label} · ${f.shapes.map(shapeName).join("、")}` }
       }
       case "extrude": {
         const { drawing, plane } = this.sketchOf(f.sketch)
@@ -648,7 +665,13 @@ export class Kernel {
         const tool = mergeOverlaps(sketchOn(drawing.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D)
         const next = applyTool(body, tool, mode, warnings)
         const how = f.through ? "贯穿" : `${f.direction === "both" ? "两侧对称 " : f.direction === "reverse" ? "反向 " : ""}${fmt(d)} mm`
-        return { body: next, tools: [{ tool, mode }], summary: `${mode === "cut" ? "切除" : "加料"} ${how}` }
+        const box = drawing.boundingBox.bounds as [[number, number], [number, number]]
+        return {
+          body: next,
+          tools: [{ tool, mode }],
+          geom: { op: "extrude", plane: frameOf(plane), start: origin, dir, box: [box[0], box[1]] },
+          summary: `${mode === "cut" ? "切除" : "加料"} ${how}`,
+        }
       }
       case "revolve": {
         const { drawing, plane } = this.sketchOf(f.sketch)
@@ -666,7 +689,7 @@ export class Kernel {
         const mode = f.mode ?? "add"
         const tool = mergeOverlaps(sketchOn(drawing.clone(), plane).revolve(axis, { origin: [0, 0, 0], angle }) as Shape3D)
         const next = applyTool(body, tool, mode, warnings)
-        return { body: next, tools: [{ tool, mode }], summary: `${mode === "cut" ? "旋转切除" : "旋转"} ${fmt(angle)}° · 绕 ${f.axis} 轴` }
+        return { body: next, tools: [{ tool, mode }], geom: { op: "revolve", plane: frameOf(plane) }, summary: `${mode === "cut" ? "旋转切除" : "旋转"} ${fmt(angle)}° · 绕 ${f.axis} 轴` }
       }
       case "fillet":
       case "chamfer": {
@@ -679,7 +702,9 @@ export class Kernel {
           const sel = selectEdges(f.edges, edges, faces, this.scope)
           const list = sel.map((e) => e.edge)
           const next = f.op === "fillet" ? body.fillet(size, (e) => e.inList(list)) : body.chamfer(size, (e) => e.inList(list))
-          return { body: next, selected: sel.length, summary: `${f.op === "fillet" ? "R" : "C"}${fmt(size)} · ${sel.length} 条边` }
+          const first = sel[0]
+          const geom: StepGeom = { op: "edges", at: first.mid, out: outward(first, faces), count: sel.length }
+          return { body: next, selected: sel.length, geom, summary: `${f.op === "fillet" ? "R" : "C"}${fmt(size)} · ${sel.length} 条边` }
         } finally {
           disposeInfos(faces, edges)
         }
@@ -696,7 +721,7 @@ export class Kernel {
           const before = measureShapeVolumeProperties(body).volume
           const after = measureShapeVolumeProperties(next).volume
           if (after > before * 0.98) throw new InputError("抽壳后体积几乎没变：内核没有真正抽空，试试更小的壁厚")
-          return { body: next, selected: sel.length, summary: `壁厚 ${fmt(t)} · 开口 ${sel.length} 个面` }
+          return { body: next, selected: sel.length, geom: shellGeom(sel[0]), summary: `壁厚 ${fmt(t)} · 开口 ${sel.length} 个面` }
         } finally {
           disposeInfos(faces)
         }
@@ -718,7 +743,8 @@ export class Kernel {
         const cbore = f.cbore ? { r: n(f.cbore.d) / 2, depth: n(f.cbore.depth) } : std?.cbore && { r: std.cbore.d / 2, depth: std.cbore.depth }
         const csink = f.csink ? { r: n(f.csink.d) / 2, angle: f.csink.angle !== undefined ? n(f.csink.angle) : 90 } : std?.csink && { r: std.csink.d / 2, angle: 90 }
         const template = () => holeTool(d / 2, depth, cbore, csink)
-        const parts = f.at.map(([u, v]) => orient(template(), drill, add(plane.origin, add(mul(plane.x, n(u)), mul(plane.y, n(v))))))
+        const centers = f.at.map(([u, v]) => add(plane.origin, add(mul(plane.x, n(u)), mul(plane.y, n(v)))))
+        const parts = centers.map((c) => orient(template(), drill, c))
         const tool = parts.length === 1 ? parts[0] : (makeCompound(parts) as unknown as Shape3D)
         const next = applyTool(body, tool, "cut", warnings)
         const kind = std ? std.label : `${cbore ? "沉头孔" : csink ? "埋头孔" : "孔"} ⌀${fmt(d)}`
@@ -727,6 +753,7 @@ export class Kernel {
           tools: [{ tool, mode: "cut" }],
           summary: `${kind} × ${f.at.length} · ${f.depth !== undefined ? `深 ${fmt(depth)}` : "贯穿"}`,
           threads: std?.thread ? [{ r: d / 2, major: std.thread.major }] : undefined,
+          geom: { op: "hole", plane: frameOf(plane), centers, r: d / 2 },
         }
       }
       case "linear_pattern":
@@ -754,7 +781,7 @@ export class Kernel {
           for (let i = 1; i < c; i++) moves.push((s) => s.rotate(stepA * i, [0, 0, 0], AXIS[f.axis]))
           summary = `×${c} · ${fmt(total)}° · 绕 ${f.axis} 轴`
         }
-        return this.copyTools(body, sources, moves, summary, warnings)
+        return { ...this.copyTools(body, sources, moves, summary, warnings), geom: { op: "pattern", seed: centerOf(sources) } as StepGeom }
       }
       case "sweep": {
         const plane = this.plane(f.path.on, prev)
@@ -799,7 +826,8 @@ export class Kernel {
           const origin: V3 = [0, 0, 0]
           origin[PLANES[f.neutral.plane].axis] = f.neutral.offset !== undefined ? n(f.neutral.offset) : 0
           const next = body.draft(angle, (ff) => ff.inList(list), makePlane(f.neutral.plane, origin))
-          return { body: next, selected: sel.length, summary: `${fmt(angle)}° · ${sel.length} 个面 · 中性面 ${PLANES[f.neutral.plane].label}` }
+          const geom: StepGeom = { op: "faces", at: sel[0].center, out: sel[0].normal ?? [0, 0, 1] }
+          return { body: next, selected: sel.length, geom, summary: `${fmt(angle)}° · ${sel.length} 个面 · 中性面 ${PLANES[f.neutral.plane].label}` }
         } finally {
           disposeInfos(faces)
         }
@@ -835,6 +863,45 @@ export class Kernel {
     }
     return { body: cur, tools, summary }
   }
+}
+
+const frameOf = (p: ResolvedPlane): Frame => ({ origin: p.origin, x: p.x, y: p.y, normal: p.normal })
+
+/** Away from the part at an edge: the mean of its two faces' normals there. */
+function outward(e: EdgeInfo, faces: FaceInfo[]): V3 {
+  let sum: V3 = [0, 0, 0]
+  for (const i of e.faces) {
+    const n = faces[i].face.normalAt(e.mid)
+    sum = add(sum, [n.x, n.y, n.z])
+    n.delete?.()
+  }
+  return unit(Math.hypot(...sum) > 1e-9 ? sum : [0, 0, 1])
+}
+
+/** The wall thickness at the opening: from the middle of its longest edge, inwards. */
+function shellGeom(open: FaceInfo): StepGeom | undefined {
+  const edges = edgesOf(open.face)
+  try {
+    const longest = edges.reduce((a, b) => (b.length > a.length ? b : a))
+    const p = longest.pointAt(0.5)
+    const mid: V3 = [p.x, p.y, p.z]
+    p.delete?.()
+    const n = open.normal ?? [0, 0, 1]
+    const toward = sub(open.center, mid)
+    const inward = unit(sub(toward, mul(n, dot(toward, n))))
+    return { op: "shell", at: mid, inward, out: n }
+  } catch {
+    return undefined
+  } finally {
+    edges.forEach((e) => e.delete())
+  }
+}
+
+/** Middle of the first tool a pattern copies. */
+function centerOf(tools: Tool[]): V3 | null {
+  if (!tools.length) return null
+  const [a, b] = tools[0].tool.boundingBox.bounds as [V3, V3]
+  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]
 }
 
 function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut", warnings: string[]): Shape3D {

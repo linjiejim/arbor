@@ -49,7 +49,7 @@ export function TreeOverlay({ studio, onHover }: { studio: Studio; onHover: (h: 
     const box = root.current
     if (!box) return
     setPeek({ id: f.id, top: el.getBoundingClientRect().top - box.getBoundingClientRect().top, bound: box.clientHeight })
-    onHover(f.op === "sketch" ? null : { ids: [f.id], label: "该特征生成的面" })
+    onHover({ ids: f.op === "sketch" ? [] : [f.id], label: "该特征生成的面", feature: f.id })
   }
   const hide = () => {
     setPeek(null)

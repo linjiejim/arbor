@@ -18,6 +18,9 @@ import { edgeHighlight, groupAt, modelObject, repaint, type Hover, type Paint } 
 import type { Annotations } from "../use-annotations"
 import type { Studio } from "../use-studio"
 import { sectionPlane, type Section } from "../section"
+import { declutter, dimensionLayer, dimParam } from "../dimension-layer"
+import type { Dim } from "../kernel/dims"
+import { DimEditor } from "./dim-editor"
 import { MeasurePanel, ViewTools } from "./viewport-tools"
 
 type V3 = [number, number, number]
@@ -61,6 +64,57 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
     setPicked([])
   }, [])
 
+  // Dimensions on the model: a parameter's or a feature row's when pointed at, the main ones when switched on.
+  const [showDims, setShowDims] = React.useState(false)
+  const [editingDim, setEditingDim] = React.useState<{ dim: Dim; el: HTMLElement } | null>(null)
+  const held = useHeldHover(hover)
+  const shownDims = React.useMemo(() => {
+    const upTo = new Set(studio.tree.features.slice(0, (display?.index ?? -1) + 1).map((f) => f.id))
+    const drawable = studio.dims.filter((d) => d.source.type !== "derived" && upTo.has(d.feature))
+    let list: Dim[] = []
+    let accent = false
+    if (held.hover?.param) {
+      list = drawable.filter((d) => dimParam(d) === held.hover!.param)
+      accent = true
+    } else if (held.hover?.feature) {
+      list = drawable.filter((d) => d.feature === held.hover!.feature)
+      accent = true
+    } else if (showDims) list = [...drawable].sort((a, b) => b.priority - a.priority).slice(0, DIMS_SHOWN)
+    const editing = editingDim && studio.dims.find((d) => d.id === editingDim.dim.id)
+    if (editing && !list.some((d) => d.id === editing.id)) list = [...list, editing]
+    return { list, accent, total: drawable.length }
+  }, [studio.dims, studio.tree, display, held.hover, showDims, editingDim])
+  const scale = React.useMemo(() => {
+    const b = display?.bbox
+    return b ? Math.max(1, 0.02 * Math.hypot(b[1][0] - b[0][0], b[1][1] - b[0][1], b[1][2] - b[0][2])) : 2
+  }, [display])
+  const setLabelPointed = held.setLabelPointed
+  React.useEffect(() => {
+    if (!viewer || !shownDims.list.length) return
+    const layer = dimensionLayer(shownDims.list, viewer.kit, {
+      scale,
+      accent: new Set(shownDims.accent ? shownDims.list.map((d) => d.id) : editingDim ? [editingDim.dim.id] : []),
+      onClick: busy ? undefined : (dim, el) => setEditingDim({ dim, el }),
+      onPointLabel: setLabelPointed,
+    })
+    viewer.scene.add(layer.group)
+    viewer.invalidate()
+    // Labels move with the camera: sort out overlaps once each move has been drawn.
+    let raf = requestAnimationFrame(() => declutter(layer.group))
+    const stop = viewer.onCameraChange(() => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => declutter(layer.group))
+    })
+    return () => {
+      stop()
+      cancelAnimationFrame(raf)
+      viewer.scene.remove(layer.group)
+      disposeObject(layer.group)
+      layer.dispose()
+      viewer.invalidate()
+    }
+  }, [viewer, shownDims, scale, busy, editingDim, setLabelPointed])
+
   const onReady = React.useCallback((v: Viewer) => {
     setViewer(v)
     return () => setViewer(null)
@@ -69,7 +123,7 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
   const paint = React.useMemo<Paint>(() => {
     if (measuring && picked.length) return { status: false, faces: picked.filter((t) => t.kind === "face").map((t) => t.hash) }
     if (focus) return { status: false, faces: focus.kind === "face" ? focus.hashes : [] }
-    return { status: true, highlight: hover?.ids }
+    return { status: true, highlight: hover?.ids.length ? hover.ids : undefined }
   }, [focus, hover, measuring, picked])
   const edgeHashes = React.useMemo(
     () => (measuring ? picked.filter((t) => t.kind === "edge").map((t) => t.hash) : focus?.kind === "edge" ? focus.hashes : []),
@@ -309,6 +363,8 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
           section={section}
           onSection={setSection}
           bbox={display.bbox}
+          dims={{ on: showDims, shown: Math.min(DIMS_SHOWN, shownDims.total), total: shownDims.total }}
+          onDims={setShowDims}
         />
       )}
       {display?.mesh && !busy && !draft && !measuring && annotations.pending.length === 0 && (
@@ -325,9 +381,9 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
           ) : (
             <>
               <span className="flex items-center gap-1.5">
-                <span className="size-2.5 rounded-xs bg-primary" /> {hover ? hover.label : "这一步新生成"}
+                <span className="size-2.5 rounded-xs bg-primary" /> {hover?.ids.length ? hover.label : "这一步新生成"}
               </span>
-              {!hover && (
+              {!hover?.ids.length && (
                 <span className="flex items-center gap-1.5">
                   <span className="size-2.5 rounded-xs bg-scene-modified" /> 被修改
                 </span>
@@ -335,6 +391,9 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
             </>
           )}
         </div>
+      )}
+      {editingDim && !busy && (
+        <DimEditor key={editingDim.dim.id} dim={studio.dims.find((d) => d.id === editingDim.dim.id) ?? editingDim.dim} anchor={editingDim.el} studio={studio} onClose={() => setEditingDim(null)} />
       )}
       {viewer && draft && (
         <AnnotationCard
@@ -348,6 +407,30 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
       )}
     </Viewport>
   )
+}
+
+/** At most this many dimensions with 「显示尺寸」 on, parameters first. */
+const DIMS_SHOWN = 12
+
+/**
+ * The hover from a panel row, held a moment after the pointer leaves it, and
+ * for as long as it rests on a dimension label: so the learner can travel from
+ * the row to the label and click it.
+ */
+function useHeldHover(hover: Hover | null) {
+  const [last, setLast] = React.useState<Hover | null>(hover)
+  const [expired, setExpired] = React.useState(false)
+  const [onLabel, setOnLabel] = React.useState(false)
+  if (hover && (hover !== last || expired)) {
+    setLast(hover)
+    setExpired(false)
+  }
+  React.useEffect(() => {
+    if (hover || onLabel) return
+    const t = window.setTimeout(() => setExpired(true), 1200)
+    return () => window.clearTimeout(t)
+  }, [hover, onLabel])
+  return { hover: hover ?? (expired ? null : last), setLabelPointed: setOnLabel }
 }
 
 type Target = { hash: number; point: V3 }

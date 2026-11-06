@@ -91,6 +91,35 @@ test.describe("工作台", () => {
     await expectRendered(page.locator("canvas").first(), "/studio section")
   })
 
+  test("/studio 尺寸标在模型上：指向参数连线，单击就改", async ({ page }) => {
+    await page.goto("/studio?start=flange")
+    const tree = page.getByRole("navigation", { name: "特征树" })
+    await expect(tree.getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
+    await page.getByRole("tab", { name: "参数" }).click()
+
+    // Pointing at pcd: the pitch circle on the model, joined to the row by a line.
+    await page.getByText("螺栓孔所在圆的直径（节圆）").hover()
+    const label = page.getByRole("button", { name: /螺栓孔所在圆的直径（节圆）：⌀90（pcd）/ })
+    await expect(label).toBeVisible()
+    await expect(page.locator("svg path.stroke-primary"), "a connector from the row to the label").toHaveCount(1)
+
+    // Click it, type a new value: the parameter changes; undo brings it back.
+    await label.click()
+    const editor = page.getByRole("dialog", { name: /修改 螺栓孔所在圆的直径/ })
+    await editor.getByRole("textbox").fill("100")
+    await editor.getByRole("button", { name: "应用" }).click()
+    await expect(editor).toHaveCount(0)
+    await expect(page.getByLabel("pcd", { exact: true })).toHaveValue("100")
+    await page.getByRole("button", { name: "撤销" }).click()
+    await expect(page.getByLabel("pcd", { exact: true })).toHaveValue("90")
+
+    // 「显示尺寸」: the main dimensions without pointing at anything.
+    await page.mouse.move(5, 5)
+    await page.getByRole("button", { name: "显示尺寸" }).click()
+    await expect(page.locator("[data-dim-id]").first()).toBeVisible()
+    expect(await page.locator("[data-dim-id]").count()).toBeLessThanOrEqual(12)
+  })
+
   test("/studio?start=flange 现成特征树与改参数", async ({ page }) => {
     await page.goto("/studio?start=flange")
     await expect(page.getByText("5 个特征").first()).toBeVisible({ timeout: 90_000 })

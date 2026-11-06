@@ -14,6 +14,7 @@ import { toBuild123d } from "@/studio/codegen"
 import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
 import type { Hover } from "@/studio/scene"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
+import { ConnectorOverlay } from "@/studio/ui/connector-overlay"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
 import { useAnnotations } from "@/studio/use-annotations"
 import { useStudio } from "@/studio/use-studio"
@@ -99,6 +100,7 @@ export function StudioPage() {
           <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={chat.busy} />
           <TreeOverlay studio={studio} onHover={setHover} />
         </main>
+        <ConnectorOverlay param={hover?.param ?? null} row={hover?.row ?? null} />
 
         <Tabs
           defaultValue="chat"

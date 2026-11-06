@@ -17,6 +17,7 @@ export type WorkerRequest =
   | { id: number; type: "pick"; kind: "face" | "edge"; hash: number; point: [number, number, number] }
   | { id: number; type: "locate"; kind: "face" | "edge"; selector: unknown }
   | { id: number; type: "measure"; targets: MeasureTarget[] }
+  | { id: number; type: "dimensions" }
 
 export type WorkerMessage =
   | { id: number; ok: true; result: unknown; heapMB: number }
@@ -108,6 +109,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         break
       case "measure":
         result = k.measure(req.targets)
+        break
+      case "dimensions":
+        result = k.dimensions()
         break
     }
     post({ id: req.id, ok: true, result, heapMB: oc.wasmMemory.buffer.byteLength / 1048576 }, transfer)
