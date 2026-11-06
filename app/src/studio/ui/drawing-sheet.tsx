@@ -46,7 +46,8 @@ export function DrawingSheet({ studio, title }: { studio: Studio; title: string 
   const [iso, setIso] = React.useState(false)
   const [names, setNames] = React.useState(false)
   const [data, setData] = React.useState<DrawingData | null | undefined>(undefined)
-  const [date] = React.useState(() => new Date().toISOString().slice(0, 10))
+  // The local date (sv-SE writes it as YYYY-MM-DD), not UTC: a sheet printed at 1 a.m. in China carries today.
+  const [date] = React.useState(() => new Date().toLocaleDateString("sv-SE"))
   const svg = React.useRef<SVGSVGElement>(null)
   const { report, drawing } = studio
   React.useEffect(() => {

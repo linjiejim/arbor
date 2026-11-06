@@ -1,6 +1,6 @@
 # 工作台：分享链接与导入
 
-- 状态：已实现，待上线（2026-11-07，一期）。
+- 状态：已上线（2026-11-07，#20）
   - 和方案不同的一处：`/studio/s/*` 的 noindex 不改 Caddy，由页面在 `<head>` 里动态加 `<meta name="robots" content="noindex">`，接口 `GET /api/studio/share/:id` 另带 `X-Robots-Tag: noindex`。
   - 快照里暂时没有需求核对项：核对表还没做。
 - 日期：2026-11-07
