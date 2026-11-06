@@ -17,6 +17,8 @@ import type { Pin } from "../look"
 import { edgeHighlight, groupAt, modelObject, repaint, type Hover, type Paint } from "../scene"
 import type { Annotations } from "../use-annotations"
 import type { Studio } from "../use-studio"
+import type { Reselect } from "../use-reselect"
+import { displayName } from "../dsl"
 import { sectionPlane, type Section } from "../section"
 import { declutter, dimensionLayer, dimParam } from "../dimension-layer"
 import type { Dim } from "../kernel/dims"
@@ -31,11 +33,26 @@ const CLICK_PX = 5
  * The studio's 3D view: the model, coloured by step status or by what's
  * highlighted; click a face or an edge to annotate it.
  */
-export function StudioViewport({ studio, hover, annotations, busy }: { studio: Studio; hover: Hover | null; annotations: Annotations; busy: boolean }) {
+export function StudioViewport({
+  studio,
+  hover,
+  annotations,
+  busy,
+  reselect,
+}: {
+  studio: Studio
+  hover: Hover | null
+  annotations: Annotations
+  busy: boolean
+  reselect: Reselect
+}) {
   const [viewer, setViewer] = React.useState<Viewer | null>(null)
   const current = React.useRef<THREE.Group | null>(null)
   const fittedSize = React.useRef(0)
-  const { display, kernel } = studio
+  // While re-picking a feature's faces or edges, the view shows the body that feature starts from.
+  const rs = reselect.state
+  const display = rs?.display ?? studio.display
+  const { kernel } = studio
   const { focus, draft } = annotations
 
   // Measure mode: up to two picked faces / edges and what the kernel says about them.
@@ -73,7 +90,10 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
     const drawable = studio.dims.filter((d) => d.source.type !== "derived" && upTo.has(d.feature))
     let list: Dim[] = []
     let accent = false
-    if (held.hover?.param) {
+    if (held.hover?.dim) {
+      list = drawable.filter((d) => d.id === held.hover!.dim)
+      accent = true
+    } else if (held.hover?.param) {
       list = drawable.filter((d) => dimParam(d) === held.hover!.param)
       accent = true
     } else if (held.hover?.feature) {
@@ -90,7 +110,7 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
   }, [display])
   const setLabelPointed = held.setLabelPointed
   React.useEffect(() => {
-    if (!viewer || !shownDims.list.length) return
+    if (!viewer || !shownDims.list.length || rs) return
     const layer = dimensionLayer(shownDims.list, viewer.kit, {
       scale,
       accent: new Set(shownDims.accent ? shownDims.list.map((d) => d.id) : editingDim ? [editingDim.dim.id] : []),
@@ -113,7 +133,7 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
       layer.dispose()
       viewer.invalidate()
     }
-  }, [viewer, shownDims, scale, busy, editingDim, setLabelPointed])
+  }, [viewer, shownDims, scale, busy, editingDim, setLabelPointed, rs])
 
   const onReady = React.useCallback((v: Viewer) => {
     setViewer(v)
@@ -121,13 +141,14 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
   }, [])
 
   const paint = React.useMemo<Paint>(() => {
+    if (rs) return { status: false, faces: rs.kind === "face" ? rs.hashes : [] }
     if (measuring && picked.length) return { status: false, faces: picked.filter((t) => t.kind === "face").map((t) => t.hash) }
     if (focus) return { status: false, faces: focus.kind === "face" ? focus.hashes : [] }
     return { status: true, highlight: hover?.ids.length ? hover.ids : undefined }
-  }, [focus, hover, measuring, picked])
+  }, [focus, hover, measuring, picked, rs])
   const edgeHashes = React.useMemo(
-    () => (measuring ? picked.filter((t) => t.kind === "edge").map((t) => t.hash) : focus?.kind === "edge" ? focus.hashes : []),
-    [measuring, picked, focus],
+    () => (rs ? (rs.kind === "edge" ? rs.hashes : []) : measuring ? picked.filter((t) => t.kind === "edge").map((t) => t.hash) : focus?.kind === "edge" ? focus.hashes : []),
+    [measuring, picked, focus, rs],
   )
   const paintRef = React.useRef(paint)
   React.useEffect(() => {
@@ -230,6 +251,17 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
     }
   }, [viewer, plane, display])
 
+  // Esc leaves re-picking (the card's 取消 does the same).
+  const cancelReselect = reselect.cancel
+  React.useEffect(() => {
+    if (!rs) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !(e.target as HTMLElement)?.closest?.("input, textarea")) cancelReselect()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [rs, cancelReselect])
+
   // Esc leaves measure mode.
   React.useEffect(() => {
     if (!measuring) return
@@ -282,10 +314,10 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
 
   // ---------------------------------------------------------------- clicking
 
-  const latest = React.useRef({ studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane })
+  const latest = React.useRef({ studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect })
   React.useEffect(() => {
-    latest.current = { studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane }
-  }, [studio, busy, display, annotations.open, annotations.cancel, measuring, plane])
+    latest.current = { studio, busy, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect }
+  }, [studio, busy, display, annotations.open, annotations.cancel, measuring, plane, reselect])
 
   React.useEffect(() => {
     if (!viewer) return
@@ -300,10 +332,11 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
       if (at && Math.hypot(e.clientX - at.x, e.clientY - at.y) <= CLICK_PX) void onClick(e)
     }
     const onClick = async (e: PointerEvent) => {
-      const { studio: s, busy: isBusy, display: d, open, cancel, measuring: isMeasuring, plane: cut } = latest.current
+      const { studio: s, busy: isBusy, display: d, open, cancel, measuring: isMeasuring, plane: cut, reselect: rsel } = latest.current
       const mesh = current.current?.children.find((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh)
       if (!d?.mesh || !mesh || s.kernel.phase !== "ready") return
       const { edge, face } = pickTargets(viewer, d, mesh, e, cut)
+      if (rsel.state) return void rsel.toggle({ edge: edge?.hash ?? null, face: face?.hash ?? null })
       if (isMeasuring) {
         if (s.rollback) return notify("先回到最新一步，再测量")
         if (!edge && !face) return setPicked([])
@@ -352,7 +385,7 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
         </div>
       )}
       {measuring && <MeasurePanel result={result} count={picked.length} onClose={stopMeasuring} />}
-      {display?.mesh && kernel.phase === "ready" && (
+      {display?.mesh && kernel.phase === "ready" && !rs && (
         <ViewTools
           measuring={measuring}
           onMeasuring={(on) => {
@@ -367,7 +400,13 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
           onDims={setShowDims}
         />
       )}
-      {display?.mesh && !busy && !draft && !measuring && annotations.pending.length === 0 && (
+      {rs && (
+        <div role="status" className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border border-primary bg-background/95 px-2.5 py-1 text-center text-caption text-foreground">
+          现在显示的是「{displayName(studio.tree, studio.tree.features[rs.index])}」之前的样子：
+          {rs.kind === "edge" ? "点要选的边，再点一次取消；点一个面等于选它的一圈边" : "点要选的面，再点一次取消"}。Esc 退出
+        </div>
+      )}
+      {display?.mesh && !busy && !draft && !measuring && !rs && annotations.pending.length === 0 && (
         <div className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border bg-background/90 px-2.5 py-1 text-center text-caption text-muted-foreground">
           单击模型上的面或边，标注要改的地方
         </div>

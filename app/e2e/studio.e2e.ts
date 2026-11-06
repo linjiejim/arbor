@@ -20,7 +20,7 @@ test.describe("工作台", () => {
     const tree = page.getByRole("navigation", { name: "特征树" })
     await expect(tree.getByText("5 个特征")).toBeVisible()
     await tree.getByRole("button").nth(2).hover()
-    await expect(page.getByRole("tooltip").getByText("单击编辑这一步"), "hovering a feature shows its details").toBeVisible()
+    await expect(page.getByRole("tooltip").getByText("单击看尺寸和选择"), "hovering a feature shows its details").toBeVisible()
     await expect(page.getByRole("status"), "the turn's status line is gone once it's done").toHaveCount(0)
     await page.getByRole("tab", { name: "代码" }).first().click()
     await expect(page.getByText(/extrude\(sk_sk1, amount=H\)/).first()).toBeVisible()
@@ -51,21 +51,38 @@ test.describe("工作台", () => {
     await expect(pins, "pins clear once the reply is done").toHaveCount(0)
   })
 
-  test("/studio 不用 AI：编辑特征、参数说明、测量、剖视", async ({ page }) => {
+  test("/studio 不用 AI：特征卡片、参数说明、测量、剖视", async ({ page }) => {
     await page.goto("/studio?start=flange")
     const tree = page.getByRole("navigation", { name: "特征树" })
     await expect(tree.getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
     await expectRendered(page.locator("canvas").first(), "/studio tools")
 
-    // Click a feature: its fields as a form; apply rebuilds.
+    // Click a feature: what it did and its dimensions in words; a dimension edits in place.
     await tree.getByRole("button", { name: /螺栓孔/ }).click()
-    const editor = page.getByRole("dialog", { name: /编辑「螺栓孔」/ })
-    await editor.getByLabel("直径", { exact: true }).fill("10")
-    await editor.getByRole("button", { name: "应用" }).click()
-    await expect(editor.getByRole("button", { name: "应用" }), "applied: nothing left to apply").toBeDisabled()
-    await editor.getByRole("button", { name: "关闭" }).click()
-    await tree.getByRole("button", { name: /螺栓孔/ }).hover()
-    await expect(page.getByRole("tooltip").getByText(/孔 ⌀10 × 1/), "the edit rebuilt the hole").toBeVisible()
+    const card = page.getByRole("dialog", { name: "「螺栓孔」" })
+    await expect(card.getByText(/第 3 步 · 孔/)).toBeVisible()
+    await card.getByRole("button", { name: /螺栓孔直径/ }).click()
+    await card.getByRole("textbox", { name: "螺栓孔直径" }).fill("10")
+    await card.getByRole("textbox", { name: "螺栓孔直径" }).press("Enter")
+    await expect(card.getByRole("button", { name: /⌀10（bolt）/ }), "the edit rebuilt the hole").toBeVisible()
+    // 「让助教改这一步」 starts a message about this step.
+    await card.getByRole("button", { name: /让助教改这一步/ }).click()
+    await expect(page.getByLabel("给建模助教的消息")).toHaveValue("改「螺栓孔」（h1）：")
+    await card.getByRole("button", { name: "关闭" }).click()
+
+    // Re-pick on the model: the view goes back to what a fillet-like step starts from.
+    await page.goto("/studio?start=box-fillet-first")
+    await expect(tree.getByText("4 个特征")).toBeVisible({ timeout: 90_000 })
+    await tree.getByRole("button", { name: /外圆角/ }).click()
+    const fillet = page.getByRole("dialog", { name: "「外圆角」" })
+    await expect(fillet.getByText("除了最上面一圈以外的边")).toBeVisible()
+    await fillet.getByRole("button", { name: "在模型上重选" }).click()
+    await expect(page.getByRole("status").filter({ hasText: "之前的样子" })).toBeVisible()
+    await expect(fillet.getByText("直线边，除了最上面一圈 · 8 条")).toBeVisible()
+    await fillet.getByRole("button", { name: "取消" }).click()
+    await expect(page.getByRole("status").filter({ hasText: "之前的样子" })).toHaveCount(0)
+    await page.goto("/studio?start=flange")
+    await expect(tree.getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
 
     // Parameters say what they are and where they're used.
     await page.getByRole("tab", { name: "参数" }).click()

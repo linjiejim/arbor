@@ -224,6 +224,12 @@ export function useStudio() {
 
   const locate = React.useCallback(async (kind: "face" | "edge", selector: unknown) => client.current?.locate(kind, selector) ?? null, [])
 
+  /** What step `index` starts from: the body before it, for re-picking its faces or edges. */
+  const stepInput = React.useCallback(async (index: number) => client.current?.display(index - 1) ?? null, [])
+  const locateBefore = React.useCallback(async (kind: "face" | "edge", selector: unknown, before: number) => client.current?.locate(kind, selector, before) ?? null, [])
+  const selectorFor = React.useCallback(async (kind: "face" | "edge", hashes: number[], before: number) => client.current?.selectorFor(kind, hashes, before) ?? null, [])
+  const faceEdges = React.useCallback(async (hash: number, before: number) => client.current?.faceEdges(hash, before) ?? [], [])
+
   const measure = React.useCallback(async (targets: MeasureTarget[]) => (rollbackRef.current ? null : (client.current?.measure(targets) ?? null)), [])
 
   const setPins = React.useCallback((pins: Pin[]) => {
@@ -253,6 +259,10 @@ export function useStudio() {
     exportBody,
     pick,
     locate,
+    stepInput,
+    locateBefore,
+    selectorFor,
+    faceEdges,
     measure,
     setPins,
   }

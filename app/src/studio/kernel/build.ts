@@ -43,6 +43,8 @@ import {
   disposeInfos,
   edgeInfos,
   faceInfos,
+  groupEdgeSelector,
+  groupFaceSelector,
   selectEdges,
   selectFaces,
   uniqueEdgeSelector,
@@ -431,9 +433,51 @@ export class Kernel {
     }
   }
 
-  /** Mesh hashes a selector picks on the latest body now; null when it no longer resolves. */
-  locate(kind: "face" | "edge", selector: unknown): number[] | null {
-    const step = this.lastBuilt(this.steps.length)
+  /**
+   * A selector for exactly these clicked faces / edges of the body that step
+   * `before` starts from (what a fillet is applied to), with what it says and
+   * picks; null when there's no plain description for this set.
+   */
+  selectorFor(kind: "face" | "edge", hashes: number[], before: number): { selector: Record<string, unknown>; count: number } | null {
+    const step = this.lastBuilt(before)
+    if (!step?.body || !hashes.length) return null
+    const faces = faceInfos(step.body, step.origins)
+    try {
+      if (kind === "face") {
+        const targets = faces.filter((f) => hashes.includes(f.face.hashCode))
+        const sel = targets.length === hashes.length ? groupFaceSelector(targets, faces, this.scope) : null
+        return sel ? { selector: sel, count: targets.length } : null
+      }
+      const edges = edgeInfos(step.body, faces)
+      try {
+        const targets = edges.filter((e) => hashes.includes(e.edge.hashCode))
+        const sel = targets.length === hashes.length ? groupEdgeSelector(targets, edges, faces, this.scope) : null
+        return sel ? { selector: sel, count: targets.length } : null
+      } finally {
+        disposeInfos([], edges)
+      }
+    } finally {
+      disposeInfos(faces)
+    }
+  }
+
+  /** The edges around a face of the body step `before` starts from (clicking a face in an edge box picks its rim). */
+  faceEdges(faceHash: number, before: number): number[] {
+    const step = this.lastBuilt(before)
+    if (!step?.body) return []
+    const faces = faceInfos(step.body, step.origins)
+    const edges = edgeInfos(step.body, faces)
+    try {
+      const face = faces.find((f) => f.face.hashCode === faceHash)
+      return face ? edges.filter((e) => e.faces.includes(face.index)).map((e) => e.edge.hashCode) : []
+    } finally {
+      disposeInfos(faces, edges)
+    }
+  }
+
+  /** Mesh hashes a selector picks on the latest body now (or on the body step `before` starts from); null when it no longer resolves. */
+  locate(kind: "face" | "edge", selector: unknown, before?: number): number[] | null {
+    const step = this.lastBuilt(before ?? this.steps.length)
     if (!step?.body) return null
     const faces = faceInfos(step.body, step.origins)
     try {

@@ -44,7 +44,7 @@ export function replaceFeature(tree: Tree, f: unknown): Tree {
 }
 
 /** One field of one feature set to `value` (a dimension edited on the model). */
-export function setFieldAt(tree: Tree, id: string, path: (string | number)[], value: number | string): Tree {
+export function setFieldAt(tree: Tree, id: string, path: (string | number)[], value: unknown): Tree {
   const f = tree.features.find((x) => x.id === id)
   if (!f) throw new InputError(`找不到特征「${id}」`)
   const copy = structuredClone(f) as Record<string | number, unknown>

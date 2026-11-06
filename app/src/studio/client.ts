@@ -69,8 +69,16 @@ export class KernelClient implements KernelPort {
     return this.call("pick", { type: "pick", kind, hash, point })
   }
 
-  locate(kind: "face" | "edge", selector: unknown): Promise<number[] | null> {
-    return this.call("locate", { type: "locate", kind, selector })
+  locate(kind: "face" | "edge", selector: unknown, before?: number): Promise<number[] | null> {
+    return this.call("locate", { type: "locate", kind, selector, before })
+  }
+
+  selectorFor(kind: "face" | "edge", hashes: number[], before: number): Promise<{ selector: Record<string, unknown>; count: number } | null> {
+    return this.call("selectorFor", { type: "selectorFor", kind, hashes, before })
+  }
+
+  faceEdges(hash: number, before: number): Promise<number[]> {
+    return this.call("faceEdges", { type: "faceEdges", hash, before })
   }
 
   measure(targets: MeasureTarget[]): Promise<MeasureResult | null> {

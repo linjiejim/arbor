@@ -15,9 +15,11 @@ export type WorkerRequest =
   | { id: number; type: "inspect"; what: "body" | "faces" | "edges"; selector?: unknown }
   | { id: number; type: "export"; format: "step" | "stl"; index?: number }
   | { id: number; type: "pick"; kind: "face" | "edge"; hash: number; point: [number, number, number] }
-  | { id: number; type: "locate"; kind: "face" | "edge"; selector: unknown }
+  | { id: number; type: "locate"; kind: "face" | "edge"; selector: unknown; before?: number }
   | { id: number; type: "measure"; targets: MeasureTarget[] }
   | { id: number; type: "dimensions" }
+  | { id: number; type: "selectorFor"; kind: "face" | "edge"; hashes: number[]; before: number }
+  | { id: number; type: "faceEdges"; hash: number; before: number }
 
 export type WorkerMessage =
   | { id: number; ok: true; result: unknown; heapMB: number }
@@ -105,13 +107,19 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         result = k.pick({ kind: req.kind, hash: req.hash, point: req.point })
         break
       case "locate":
-        result = k.locate(req.kind, req.selector)
+        result = k.locate(req.kind, req.selector, req.before)
         break
       case "measure":
         result = k.measure(req.targets)
         break
       case "dimensions":
         result = k.dimensions()
+        break
+      case "selectorFor":
+        result = k.selectorFor(req.kind, req.hashes, req.before)
+        break
+      case "faceEdges":
+        result = k.faceEdges(req.hash, req.before)
         break
     }
     post({ id: req.id, ok: true, result, heapMB: oc.wasmMemory.buffer.byteLength / 1048576 }, transfer)

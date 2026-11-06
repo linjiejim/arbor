@@ -19,6 +19,8 @@ export type Hover = {
   row?: HTMLElement
   /** Pointing at a feature row: that step's dimensions. */
   feature?: string
+  /** Pointing at one dimension (a row of the feature card). */
+  dim?: string
 }
 
 /**

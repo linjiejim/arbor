@@ -92,7 +92,11 @@ export function useAnnotations(studio: Studio) {
     setFocus(null)
   }, [])
 
-  return { draft, pending, sent, pins, focus, viewDir, open, cancel, add, remove, show, setFocus, snapshot, markSent, clearSent, reset }
+  /** Text to start the next message with (「让助教改这一步」); the composer takes it and focuses. */
+  const [prefill, setPrefill] = React.useState<{ text: string; n: number } | null>(null)
+  const startMessage = React.useCallback((text: string) => setPrefill((p) => ({ text, n: (p?.n ?? 0) + 1 })), [])
+
+  return { draft, pending, sent, pins, focus, viewDir, open, cancel, add, remove, show, setFocus, snapshot, markSent, clearSent, reset, prefill, startMessage }
 }
 
 export type Annotations = ReturnType<typeof useAnnotations>

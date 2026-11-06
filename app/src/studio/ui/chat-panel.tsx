@@ -85,6 +85,20 @@ export function ChatPanel({
     return () => ro.disconnect()
   }, [])
 
+  // 「让助教改这一步」: start the message with the step's name, cursor at the end.
+  const box = React.useRef<HTMLTextAreaElement>(null)
+  const [prefilled, setPrefilled] = React.useState(annotations.prefill)
+  if (prefilled !== annotations.prefill) {
+    setPrefilled(annotations.prefill)
+    if (annotations.prefill) setText(annotations.prefill.text)
+  }
+  React.useEffect(() => {
+    const el = box.current
+    if (!annotations.prefill || !el) return
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  }, [annotations.prefill])
+
   const notes = annotations.pending
   const canSend = (text.trim() || files.length || notes.length) && !chat.busy && ready
   const submit = () => {
@@ -187,6 +201,7 @@ export function ChatPanel({
         )}
         {fileError && <p className="mb-2 text-small text-destructive">{fileError}</p>}
         <Textarea
+          ref={box}
           rows={2}
           value={text}
           placeholder={!ready ? "建模内核加载中…" : notes.length ? "补充说明（可以不写）… Enter 发送" : "描述你想做的零件，或者说要改哪里… Enter 发送"}
