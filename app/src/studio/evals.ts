@@ -26,6 +26,8 @@ export type EvalCase = {
   start?: Tree
   notes?: EvalNote[]
   extra?: (q: EvalQuery) => EvalCheck[]
+  /** A sketch text that must be in the tree. */
+  text?: string
 }
 
 const plate = (L: number, W: number, T: number): Tree => ({
@@ -95,6 +97,30 @@ export const EVALS: EvalCase[] = [
     upright: true,
     volume: 100 * 100 * 10 + PI * 225 * 30,
   },
+  {
+    id: "nameplate",
+    prompt: "做一块 70×30×4 的铭牌，四个竖角 R3 圆角，顶面居中刻上「FeatureTree」，字号 7，深 0.5。",
+    size: [70, 30, 4],
+    upright: true,
+    maxVolume: 70 * 30 * 4 - 10,
+    text: "FeatureTree",
+    extra: (q) => {
+      const floor = centres(q.inspect("faces", { normal: "+Z" })).filter((c) => Math.abs(c[2] - 3.5) < 0.05)
+      return [{ name: "刻在顶面下 0.5", pass: floor.length > 0, detail: `${floor.length} 个字底面在 z=3.5` }]
+    },
+  },
+  {
+    id: "back-text",
+    prompt: "做一个 60×40×20 的方块（长沿 X、宽沿 Y），在朝 +Y 的背面中间刻上「工程」两个字，字号 10，深 0.5。",
+    size: [60, 40, 20],
+    upright: true,
+    maxVolume: 60 * 40 * 20 - 10,
+    text: "工程",
+    extra: (q) => {
+      const floor = centres(q.inspect("faces", { normal: "+Y" })).filter((c) => Math.abs(c[1] - 19.5) < 0.05)
+      return [{ name: "刻在背面里 0.5", pass: floor.length > 0, detail: `${floor.length} 个字底面在 y=19.5` }]
+    },
+  },
   { id: "rib-plate", prompt: "做一块 120×80×4 的底板，顶面上沿 X 方向等距放 3 条加强筋（每条长 100、宽 3、高 12），筋间距 25，中间那条在 Y=0。", size: [120, 80, 16], upright: true, volume: 120 * 80 * 4 + 3 * 100 * 3 * 12 },
 ]
 
@@ -120,6 +146,10 @@ export function checkCase(c: EvalCase, tree: Tree, report: BuildReport, q?: Eval
     const have = new Set(tree.features.map((f) => f.op))
     const missing = c.ops.filter((o) => !have.has(o as never))
     out.push({ name: "用到的特征", pass: missing.length === 0, detail: missing.length ? `缺 ${missing.join(", ")}` : "ok" })
+  }
+  if (c.text) {
+    const texts = tree.features.flatMap((f) => (f.op === "sketch" ? f.shapes.flatMap((s) => (s.type === "text" ? [s.text] : [])) : []))
+    out.push({ name: "文字", pass: texts.some((t) => t.includes(c.text!)), detail: texts.join(" / ") || "没有文字" })
   }
   if (c.extra && q) out.push(...c.extra(q))
   return out

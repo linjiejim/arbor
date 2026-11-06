@@ -22,6 +22,7 @@ import type { PickInfo } from "../annotations"
 import { displayName, EMPTY_TREE, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
 import { describeError, explain, InputError } from "./errors"
+import { normalizeText, textDrawing } from "./fonts"
 import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
   axisDir,
@@ -54,7 +55,8 @@ const cross = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[
 const r2 = (x: number) => Math.round(x * 100) / 100
 const fmt = (x: number) => String(r2(x))
 
-type ResolvedPlane = { name: PlaneName; origin: V3; label: string }
+/** `flipped`: sketched on a face that looks the other way from its datum plane (the back, the bottom…). */
+type ResolvedPlane = { name: PlaneName; origin: V3; label: string; flipped?: boolean }
 
 export type FeatureResult = {
   id: string
@@ -427,6 +429,7 @@ export class Kernel {
     const P = PLANES[ref.plane]
     let coord = ref.offset !== undefined ? num(ref.offset, this.scope) : 0
     let label = ref.offset !== undefined && coord !== 0 ? `${P.label}偏移 ${fmt(coord)}` : P.label
+    let flipped = false
     if (ref.face) {
       if (!prev?.body) throw new InputError("还没有实体，草图不能贴在面上")
       const faces = faceInfos(prev.body, prev.origins)
@@ -437,14 +440,21 @@ export class Kernel {
           throw new InputError(`选中的面不是与 ${ref.plane} 平行的平面，草图贴不上去`)
         if (coords.size > 1) throw new InputError("选中的面不在同一高度，加 near 或 expect 只选一个")
         coord += sel[0].center[P.axis]
+        flipped = dot(sel[0].normal!, P.normal) < 0
         label = `面（${describeFace(sel[0]).split(" 来自")[0]}）`
       } finally {
         disposeInfos(faces)
       }
     }
+    // A datum plane flush with the body's far side (the back, the bottom…) is seen from outside that side too.
+    if (!ref.face && prev?.body) {
+      const [lo, hi] = (prev.body.boundingBox.bounds as [V3, V3]).map((b) => b[P.axis])
+      const outward = Math.abs(coord - hi) < 1e-3 ? 1 : Math.abs(coord - lo) < 1e-3 ? -1 : 0
+      flipped = outward !== 0 && outward !== Math.sign(P.normal[P.axis])
+    }
     const origin: V3 = [0, 0, 0]
     origin[P.axis] = coord
-    return { name: ref.plane, origin, label }
+    return { name: ref.plane, origin, label, flipped }
   }
 
   private sketchOf(id: string): NonNullable<Step["sketch"]> {
@@ -478,7 +488,7 @@ export class Kernel {
     switch (f.op) {
       case "sketch": {
         const plane = this.plane(f.on, prev)
-        const drawing = sketchDrawing(f.shapes, this.scope)
+        const drawing = sketchDrawing(f.shapes, this.scope, plane.flipped)
         const sk = drawing.clone().sketchOnPlane(plane.name, plane.origin)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const faceShape: any = (sk as any).faces()
@@ -757,10 +767,13 @@ function shapeName(s: SketchShape) {
       return `长圆孔 ${s.length}×${s.width}${tag}`
     case "polyline":
       return `轮廓 ${s.points.length} 点${tag}`
+    case "text":
+      return `文字「${s.text.replace(/\n/g, " ")}」${tag}`
   }
 }
 
-function sketchDrawing(shapes: SketchShape[], scope: Scope): Drawing {
+/** `mirrorText`: the sketch is seen from behind its datum plane, so text is mirrored to read right from outside. */
+function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false): Drawing {
   const n = (v: number | string) => num(v, scope)
   let out: Drawing | null = null
   for (const s of shapes) {
@@ -802,6 +815,15 @@ function sketchDrawing(shapes: SketchShape[], scope: Scope): Drawing {
           .threePointsArcTo([-a, -W / 2], [-a - W / 2, 0])
           .close()
         if (s.angle !== undefined) d = d.rotate(n(s.angle), [0, 0])
+        d = d.translate(c[0], c[1])
+        break
+      }
+      case "text": {
+        const size = n(s.size)
+        if (!(size > 0)) throw new InputError("字号必须大于 0")
+        d = textDrawing(normalizeText(s.text), size)
+        if (s.angle !== undefined) d = d.rotate(n(s.angle), [0, 0])
+        if (mirrorText) d = d.mirror([0, 1], [0, 0], "plane")
         d = d.translate(c[0], c[1])
         break
       }

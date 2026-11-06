@@ -31,6 +31,8 @@ FeatureTree 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和�
 | JetBrains Mono（经 `@fontsource-variable/jetbrains-mono` 打包） | 5.3.0 | SIL OFL 1.1 | 等宽字体 | <https://github.com/JetBrains/JetBrainsMono> |
 | **planegcs**（`@salusoft89/planegcs`） | 1.3.0 | **LGPL-2.1**，见下 | 「几何约束与自由度」课的草图求解器 | <https://github.com/Salusoft89/planegcs> |
 | replicad | 1.2.0 | MIT | AI 建模工作台的建模 API（浏览器里的 Web Worker） | <https://github.com/sgenoud/replicad> |
+| opentype.js（replicad 依赖） | 2.0.0 | MIT | 读取字体轮廓，做草图文字 | <https://github.com/opentypejs/opentype.js> |
+| 思源黑体 SC（Noto Sans SC Regular 的子集：`app/src/studio/fonts/text-*.ttf`，取自 `@expo-google-fonts/noto-sans-sc` 0.4.4） | 2.004 | SIL OFL 1.1，许可全文在 `app/src/studio/fonts/OFL.txt` | 工作台草图文字（刻字、凸字）的字形 | <https://github.com/notofonts/noto-cjk> |
 | **replicad-opencascadejs** | 1.1.0 | **LGPL-2.1-only**，见下 | 工作台的几何内核：OpenCascade 编译成的 WebAssembly | <https://github.com/sgenoud/replicad> |
 | AI SDK（`ai`、`@ai-sdk/react`） | 7.0 / 4.0 | Apache-2.0 | 工作台的对话与工具调用 | <https://github.com/vercel/ai> |
 | Zod | 4.6.7 | MIT | 工作台特征树和工具参数的 schema | <https://github.com/colinhacks/zod> |

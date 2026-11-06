@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest"
+import { getOC } from "replicad"
 import type { UIMessage } from "ai"
 import { applyEdit, executeTool, type KernelPort } from "@/studio/apply"
 import { toBuild123d } from "@/studio/codegen"
@@ -249,6 +250,107 @@ describe("kernel", () => {
     })
     expect(rep.features[1].message).toMatch(/跨过了旋转轴/)
   })
+
+  const plate = (on: Tree["features"][number], cut: Tree["features"][number]): Tree => ({
+    params: { L: 90, W: 40, H: 6 },
+    features: [
+      { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W" }] },
+      { id: "base", op: "extrude", sketch: "sk", distance: "H" },
+      on,
+      cut,
+    ],
+  })
+  const volume = 90 * 40 * 6
+
+  it("engraves and embosses text, Chinese with overlapping strokes included, as one clean solid", () => {
+    const text = { type: "text", text: "特征树 回\nFT-01 ⌀8", size: 8 } as const
+    const sketch = { id: "tx", op: "sketch", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, shapes: [text] } as const
+    const engraved = k.rebuild(plate(sketch, { id: "eng", op: "extrude", sketch: "tx", distance: 0.6, mode: "cut", direction: "reverse" }))
+    expect(engraved.features.map((f) => f.state)).toEqual(["ok", "ok", "ok", "ok"])
+    expect(engraved.features[2].summary).toContain("文字「特征树 回 FT-01 ⌀8」")
+    expect(engraved.body!.solids).toBe(1)
+    expect(engraved.body!.volume).toBeLessThan(volume - 5)
+    expect(engraved.body!.volume).toBeGreaterThan(volume - 0.6 * 90 * 40 * 0.5)
+    expect(engraved.body!.size[2]).toBeCloseTo(6)
+
+    const embossed = k.rebuild(plate(sketch, { id: "emb", op: "extrude", sketch: "tx", distance: 1 }))
+    expect(embossed.body!.solids).toBe(1)
+    expect(embossed.body!.size[2]).toBeCloseTo(7)
+    // Same outlines, so what one adds the other removes.
+    expect(embossed.body!.volume - volume).toBeCloseTo(((volume - engraved.body!.volume) / 0.6) * 1, 0)
+  }, 60_000)
+
+  it("mirrors text on a face seen from behind its datum plane, and says which characters it can't draw", () => {
+    const engrave = (normal: "+Y" | "-Y", text: string, flush = false) =>
+      plate(
+        {
+          id: "tx",
+          op: "sketch",
+          // On the face itself, or on the datum plane moved out to where that face is.
+          on: flush ? { plane: "XZ", offset: normal === "+Y" ? 20 : -20 } : { plane: "XZ", face: { normal } },
+          shapes: [{ type: "text", text, size: 5, center: [-20, 3] }],
+        },
+        { id: "eng", op: "extrude", sketch: "tx", distance: 0.5, mode: "cut", direction: normal === "+Y" ? "normal" : "reverse" },
+      )
+    // Where the floor of the engraved "F" has its area, along X, relative to the middle of its box.
+    // An F is heavier on its stem side: the left as you read it.
+    const stemSide = (normal: "+Y" | "-Y", flush = false) => {
+      const rep = k.rebuild(engrave(normal, "F", flush))
+      expect(rep.body!.solids).toBe(1)
+      const d = k.display()
+      const v = d.mesh!.vertices
+      const t = d.mesh!.triangles
+      let area = 0
+      let ax = 0
+      let min = Infinity
+      let max = -Infinity
+      for (const g of d.groups.filter((g) => g.origin === "eng")) {
+        for (let i = g.start; i < g.start + g.count; i += 3) {
+          const [a, b, c] = [t[i] * 3, t[i + 1] * 3, t[i + 2] * 3]
+          const e1 = [v[b] - v[a], v[b + 1] - v[a + 1], v[b + 2] - v[a + 2]]
+          const e2 = [v[c] - v[a], v[c + 1] - v[a + 1], v[c + 2] - v[a + 2]]
+          const ny = e1[2] * e2[0] - e1[0] * e2[2]
+          // Only the floor, which faces the same way as the face it was cut into.
+          if (Math.sign(ny) !== (normal === "+Y" ? 1 : -1)) continue
+          const w = Math.abs(ny) / 2
+          area += w
+          ax += (w * (v[a] + v[b] + v[c])) / 3
+          for (const x of [v[a], v[b], v[c]]) {
+            min = Math.min(min, x)
+            max = Math.max(max, x)
+          }
+        }
+      }
+      expect(min).toBeGreaterThan(-24)
+      expect(max).toBeLessThan(-16)
+      return Math.sign(ax / area - (min + max) / 2)
+    }
+    // Seen from the front (-Y), +X is to the right: the stem is at smaller X.
+    expect(stemSide("-Y")).toBe(-1)
+    // Seen from the back (+Y), +X is to the left: mirrored, the stem is at larger X, and the F still reads as F.
+    expect(stemSide("+Y")).toBe(1)
+    expect(stemSide("-Y", true)).toBe(-1)
+    expect(stemSide("+Y", true)).toBe(1)
+
+    // Text on two faces: new glyph walls are checked only against old faces near them, so the heap stays put.
+    const heap = () => (getOC() as unknown as { wasmMemory?: { buffer: ArrayBuffer }; HEAP8?: Int8Array }).wasmMemory?.buffer.byteLength ?? 0
+    const before = heap()
+    const both = k.rebuild({
+      ...engrave("+Y", "工程 R&D"),
+      features: [
+        ...engrave("+Y", "工程 R&D").features,
+        { id: "tx2", op: "sketch", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, shapes: [{ type: "text", text: "TOP ⌀8", size: 7 }] },
+        { id: "emb", op: "extrude", sketch: "tx2", distance: 1 },
+      ],
+    })
+    expect(both.features.map((f) => f.state)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok"])
+    expect(both.body!.solids).toBe(1)
+    expect((heap() - before) / 1048576).toBeLessThan(400)
+
+    const bad = k.rebuild(engrave("-Y", "Привет"))
+    expect(bad.features[2].state).toBe("error")
+    expect(bad.features[2].message).toMatch(/字体里没有这些字：П/)
+  }, 60_000)
 })
 
 describe("trimMessages", () => {

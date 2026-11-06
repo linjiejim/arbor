@@ -5,6 +5,7 @@ import wasmUrl from "replicad-opencascadejs/wasm?url"
 import { setOC } from "replicad"
 import type { Tree } from "./dsl"
 import { Kernel } from "./kernel/build"
+import { ensureFonts } from "./kernel/fonts"
 
 export type WorkerRequest =
   | { id: number; type: "init" }
@@ -21,6 +22,12 @@ export type WorkerMessage =
   | { type: "progress"; loadedMB: number }
 
 const post = (m: WorkerMessage, transfer: Transferable[] = []) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m, transfer)
+
+const fetchBuffer = async (url: URL) => {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.arrayBuffer()
+}
 
 let kernel: Kernel | null = null
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -73,6 +80,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
       case "init":
         break
       case "rebuild":
+        // A text whose font didn't arrive fails on its own step, with a message saying so.
+        await ensureFonts(req.tree, fetchBuffer).catch(() => {})
         result = k.rebuild(req.tree)
         break
       case "display": {

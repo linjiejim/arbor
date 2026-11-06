@@ -103,6 +103,14 @@ export const SketchShape = z.discriminatedUnion("type", [
     cut: Cut,
   }),
   z.object({
+    type: z.literal("text"),
+    text: z.string().min(1).max(60).describe("文字内容（常用汉字、英文、数字和常用符号；\\n 换行）"),
+    size: Num.describe("字号 mm：汉字高度约等于它，大写字母约 0.73 倍"),
+    center: Vec2.optional().describe("文字外框的中心，草图坐标，缺省 [0, 0]"),
+    angle: Num.optional().describe("相对草图 x 轴旋转的角度"),
+    cut: Cut,
+  }),
+  z.object({
     type: z.literal("polyline"),
     points: z
       .array(z.union([Vec2, z.object({ to: Vec2, via: Vec2.describe("圆弧经过的中间点") })]))

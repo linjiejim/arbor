@@ -47,6 +47,9 @@ function shape2d(s: SketchShape): string {
       return `${at}Circle(${py(s.d)} / 2)`
     case "polygon":
       return `${at}RegularPolygon(${py(s.d)} / 2, ${pyInt(s.sides)}${s.rotate !== undefined ? `, rotation=${py(s.rotate)}` : ""})`
+    case "text":
+      // Needs Noto Sans SC installed (or font_path=…) for the same outlines as the studio.
+      return `${at}Text(${JSON.stringify(s.text)}, ${py(s.size)}, font="Noto Sans SC"${s.angle !== undefined ? `, rotation=${py(s.angle)}` : ""})`
     case "slot":
       return `${at}SlotOverall(${py(s.length)}, ${py(s.width)}${s.angle !== undefined ? `, rotation=${py(s.angle)}` : ""})`
     case "polyline": {

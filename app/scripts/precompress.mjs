@@ -1,6 +1,6 @@
 // Write .br and .gz next to every compressible file in dist/, so Caddy can
 // serve them as-is (`file_server { precompressed br gzip }`) instead of
-// compressing the 23 MB OpenCascade wasm on every request.
+// compressing the 23 MB OpenCascade wasm (or the 2 MB text font) on every request.
 // Results are cached by content hash, so only changed files cost time.
 import crypto from "node:crypto"
 import fs from "node:fs"
@@ -9,7 +9,7 @@ import zlib from "node:zlib"
 
 const DIST = "dist"
 const CACHE = "node_modules/.cache/precompress"
-const EXT = /\.(js|mjs|css|html|json|svg|wasm|glb|txt|xml)$/
+const EXT = /\.(js|mjs|css|html|json|svg|wasm|glb|ttf|txt|xml)$/
 const MIN = 1024
 
 fs.mkdirSync(CACHE, { recursive: true })

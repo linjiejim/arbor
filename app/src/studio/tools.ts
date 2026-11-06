@@ -9,7 +9,7 @@ import { EdgeSelector, FaceSelector, Feature, Num, type FeatureOp } from "./dsl"
  */
 
 const OP_DOCS: Record<FeatureOp, string> = {
-  sketch: "在基准面（或贴在某个平面上）画一个闭合草图，可以由多个图形组合，cut=true 的图形挖掉前面的图形。草图本身不改变实体。",
+  sketch: "在基准面（或贴在某个平面上）画一个闭合草图，可以由多个图形组合，cut=true 的图形挖掉前面的图形；图形也可以是文字（刻字、凸字）。草图本身不改变实体。",
   extrude: "把草图沿法向拉伸成实体：mode=add 加料、mode=cut 切除；direction=both 两侧对称；through=true 切除贯穿。",
   revolve: "把草图绕过原点的一根坐标轴旋转成回转体。轮廓只能在轴的一侧（可以贴着轴）。",
   fillet: "对选中的边做圆角。用语义选择器选边；半径不能大于相邻面的宽度或壁厚。外观圆角通常放在最后。",
