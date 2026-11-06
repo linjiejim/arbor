@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Check, ChevronRight, Eye, ImagePlus, Pencil, Search, SlidersHorizontal, Square, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react"
+import { Check, ChevronRight, Eye, ImagePlus, ListChecks, Pencil, Search, SlidersHorizontal, Square, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react"
 import type { FileUIPart, UIMessage } from "ai"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
@@ -42,10 +42,11 @@ const TOOL_LABEL: Record<string, { label: string; op?: OpId; icon?: LucideIcon }
   delete_feature: { label: "删除特征", icon: Trash2 },
   inspect: { label: "查看模型", icon: Search },
   look: { label: "看一眼", icon: Eye },
+  check: { label: "核对要求", icon: ListChecks },
 }
 
 /** Tools that only look at the model. */
-const READ_TOOLS = new Set(["inspect", "look"])
+const READ_TOOLS = new Set(["inspect", "look", "check"])
 
 export function ChatPanel({
   chat,
@@ -443,7 +444,10 @@ function ToolCard({ part, onSelectFeature }: { part: ToolPart; onSelectFeature: 
   const meta = TOOL_LABEL[name] ?? { label: name }
   const input = part.input ?? {}
   const featureId = (input.id as string | undefined) ?? undefined
-  const title = [meta.label, (input.name as string) ?? featureId].filter(Boolean).join(" · ")
+  // A check card is the table itself: one row per requirement, as it stood at that moment.
+  const rows = name === "check" && part.state === "output-available" ? (part.output?.text ?? "").split("\n").filter((l) => /^[✓✗] /.test(l)) : []
+  const passed = rows.filter((l) => l.startsWith("✓")).length
+  const title = rows.length ? `${meta.label} · ${passed}/${rows.length}` : [meta.label, (input.name as string) ?? featureId].filter(Boolean).join(" · ")
   const running = part.state === "input-streaming" || part.state === "input-available"
   const failed = part.state === "output-error" || (part.state === "output-available" && part.output && !part.output.ok)
   const text = part.state === "output-error" ? part.errorText : part.output?.text
@@ -469,7 +473,17 @@ function ToolCard({ part, onSelectFeature }: { part: ToolPart; onSelectFeature: 
         <span className="min-w-0 flex-1 truncate font-medium">{title}</span>
         {running ? <Spinner className="size-3.5" /> : failed ? <X className="size-4 text-destructive" /> : <Check className="size-4 text-success" />}
       </button>
-      {!running && firstLine && !open && <div className="truncate px-3 pb-2 text-muted-foreground">{firstLine.replace(/^[✓✗]\s*/, "")}</div>}
+      {rows.length > 0 && !open && (
+        <ul className="space-y-0.5 px-3 pb-2">
+          {rows.map((l, i) => (
+            <li key={i} className="flex items-start gap-1.5">
+              {l.startsWith("✓") ? <Check className="mt-0.5 size-3.5 shrink-0 text-success" aria-label="满足" /> : <TriangleAlert className="mt-0.5 size-3.5 shrink-0 text-destructive" aria-label="不满足" />}
+              <span className="min-w-0 text-muted-foreground">{l.slice(2).replace(/^\S+「/, "「")}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {!running && firstLine && !open && !rows.length && <div className="truncate px-3 pb-2 text-muted-foreground">{firstLine.replace(/^[✓✗]\s*/, "")}</div>}
       {open && text && <div className="border-t px-3 py-2 whitespace-pre-wrap text-muted-foreground">{text}</div>}
       {open && typeof input.intent === "string" && <div className="border-t px-3 py-2 text-muted-foreground">设计意图：{input.intent}</div>}
       {part.output?.images?.length ? (

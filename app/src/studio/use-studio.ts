@@ -39,6 +39,11 @@ export function useStudio() {
   const [display, setDisplay] = React.useState<DisplayData | null>(null)
   /** Dimensions of every feature that built, for the model and the feature card. */
   const [dims, setDims] = React.useState<Dim[]>([])
+  /**
+   * Which requirements held after the assistant's last step. A check that held
+   * then and fails now was moved by the learner's own edit: 「已偏离」, not an error.
+   */
+  const [checkBaseline, setCheckBaseline] = React.useState<Record<string, boolean>>({})
   const [kernel, setKernel] = React.useState<KernelState>({ phase: "loading", loadedMB: 0 })
   /** Feature the viewport rolls back to; null = latest. */
   const [rollback, setRollback] = React.useState<string | null>(null)
@@ -164,6 +169,7 @@ export function useStudio() {
         }
         const run = await executeTool(c, treeRef.current, name, input, look)
         if (run.tree !== treeRef.current || run.report) await commit(run.tree, run.report)
+        if (run.report) setCheckBaseline(Object.fromEntries((run.report.checks ?? []).map((r) => [r.id, r.pass])))
         return run
       })
       queue.current = job.catch(() => undefined)
@@ -245,6 +251,7 @@ export function useStudio() {
     summary,
     display,
     dims,
+    checkBaseline,
     kernel,
     rollback,
     canUndo: history.length > 0,

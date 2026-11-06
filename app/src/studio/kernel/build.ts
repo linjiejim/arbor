@@ -33,6 +33,7 @@ import { normalizeText, textDrawing } from "./fonts"
 import { measure, type MeasureResult, type MeasureTarget } from "./measure"
 import { countOf, edgesOf, facesOf, solidsOf } from "./topo"
 import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
+import { runChecks, type CheckResult } from "./check"
 import { standardHole } from "../holes"
 import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
@@ -132,6 +133,8 @@ export type BuildReport = {
   /** Index of the last feature that built. -1 = nothing built. */
   lastOk: number
   body: BodyStats | null
+  /** The learner's requirements (`tree.checks`) measured on the latest body. */
+  checks?: CheckResult[]
   ms: number
 }
 
@@ -238,6 +241,7 @@ export class Kernel {
       features,
       lastOk,
       body: last?.body ? stats(last.body) : null,
+      checks: tree.checks?.length && last?.body ? runChecks(last.body, last.origins, tree.checks, this.scope) : undefined,
       ms: performance.now() - t0,
     }
   }

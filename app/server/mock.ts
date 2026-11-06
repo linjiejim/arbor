@@ -12,6 +12,18 @@ const SCRIPT: { text?: string; tool?: [string, Record<string, unknown>] }[] = [
   { tool: ["shell", { id: "hollow", name: "抽壳", open: { normal: "+Z", extreme: "+Z" }, t: "t", intent: "去掉顶面，留 t 的壁厚" }] },
   { tool: ["hole", { id: "holes", name: "底孔", on: { plane: "XY" }, reverse: true, at: [["L/4", 0], ["-L/4", 0]], d: 4, intent: "底部两个固定孔，位置跟着 L 走" }] },
   { tool: ["look", {}] },
+  {
+    tool: [
+      "check",
+      {
+        items: [
+          { id: "size", said: "80×50×30", kind: "size", expect: [80, 50, 30] },
+          { id: "wall", said: "壁厚 2", kind: "thickness", faces: { normal: "+X", extreme: "+X" }, expect: 2 },
+          { id: "holes", said: "两个 ⌀4 孔", kind: "holes", faces: { kind: "cylinder", radius: 2 }, count: 2, d: 4 },
+        ],
+      },
+    ],
+  },
   { text: "做好了：拉伸 → 竖边圆角 → 抽壳 → 底孔。试着把参数 r 拖到比 t 小，看看抽壳后内角怎么变——这就是「先圆角还是先抽壳」那一课讲的事：/lesson/fillet-shell-order" },
 ]
 

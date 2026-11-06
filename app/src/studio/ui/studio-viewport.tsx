@@ -144,11 +144,12 @@ export function StudioViewport({
     if (rs) return { status: false, faces: rs.kind === "face" ? rs.hashes : [] }
     if (measuring && picked.length) return { status: false, faces: picked.filter((t) => t.kind === "face").map((t) => t.hash) }
     if (focus) return { status: false, faces: focus.kind === "face" ? focus.hashes : [] }
+    if (hover?.faces?.length || hover?.edges?.length) return { status: false, faces: hover.faces ?? [] }
     return { status: true, highlight: hover?.ids.length ? hover.ids : undefined }
   }, [focus, hover, measuring, picked, rs])
   const edgeHashes = React.useMemo(
-    () => (rs ? (rs.kind === "edge" ? rs.hashes : []) : measuring ? picked.filter((t) => t.kind === "edge").map((t) => t.hash) : focus?.kind === "edge" ? focus.hashes : []),
-    [measuring, picked, focus, rs],
+    () => (rs ? (rs.kind === "edge" ? rs.hashes : []) : hover?.edges?.length ? hover.edges : measuring ? picked.filter((t) => t.kind === "edge").map((t) => t.hash) : focus?.kind === "edge" ? focus.hashes : []),
+    [measuring, picked, focus, rs, hover],
   )
   const paintRef = React.useRef(paint)
   React.useEffect(() => {

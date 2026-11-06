@@ -108,7 +108,11 @@ for (const c of cases) {
   const sec = (performance.now() - t0) / 1000
   results.push({ id: c.id, pass, checks, calls, failedCalls, sec, usage, usd, hosts: [...hosts], error, tree, text, log })
   const hit = usage.inputTokens ? Math.round((100 * usage.cacheReadTokens) / usage.inputTokens) : 0
-  console.log(`${pass ? "PASS" : "FAIL"} ${c.id.padEnd(14)} ${calls} calls (${failedCalls} failed) ${sec.toFixed(1)}s $${usd.toFixed(4)} cache ${hit}%${hosts.size ? ` · ${[...hosts].join(",")}` : ""}`)
+  // The assistant's own requirement checks: how many it listed, whether they held at the end, whether it caught one first.
+  const own = report.checks ?? []
+  const caught = log.some((l) => l.name === "check" && /^✗ /m.test(l.text))
+  const ownText = own.length ? ` · check ${own.filter((x) => x.pass).length}/${own.length}${caught ? " (caught)" : ""}` : log.some((l) => l.name === "check") ? " · check 0" : " · no check"
+  console.log(`${pass ? "PASS" : "FAIL"} ${c.id.padEnd(14)} ${calls} calls (${failedCalls} failed) ${sec.toFixed(1)}s $${usd.toFixed(4)} cache ${hit}%${hosts.size ? ` · ${[...hosts].join(",")}` : ""}${ownText}`)
   for (const x of checks.filter((k) => !k.pass)) console.log(`     ✗ ${x.name}: ${x.detail}`)
   if (error) console.log(`     error: ${error}`)
   kernel.dispose()

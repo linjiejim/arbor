@@ -24,6 +24,17 @@ test.describe("工作台", () => {
     await expect(page.getByRole("status"), "the turn's status line is gone once it's done").toHaveCount(0)
     await page.getByRole("tab", { name: "代码" }).first().click()
     await expect(page.getByText(/extrude\(sk_sk1, amount=H\)/).first()).toBeVisible()
+
+    // The requirements, measured by the kernel: a card in the chat, a live list on the parameters tab.
+    await page.getByRole("tab", { name: "对话" }).click()
+    await expect(page.getByRole("button", { name: "核对要求 · 3/3" })).toBeVisible()
+    await page.getByRole("tab", { name: "参数" }).click()
+    const list = page.getByRole("region", { name: "要求核对" })
+    await expect(list.getByText("3/3")).toBeVisible()
+    // The learner's own edit moves a requirement: 「已偏离」, not a red failure.
+    await page.getByLabel("t", { exact: true }).fill("3")
+    await page.getByLabel("t", { exact: true }).press("Enter")
+    await expect(list.getByText(/已偏离：要求 2 mm，现在 3 mm/)).toBeVisible()
   })
 
   test("/studio 在模型上标注（脚本模型）", async ({ page }) => {
