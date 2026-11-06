@@ -21,6 +21,15 @@ function memFiles() {
       watchers.set(p, cb)
       return () => watchers.delete(p)
     },
+    // No symlinks in memory: `..` resolves by name, as the real file system would here.
+    canonical: (p) => {
+      const out: string[] = []
+      for (const seg of p.split("/")) {
+        if (seg === "..") out.pop()
+        else out.push(seg)
+      }
+      return out.join("/")
+    },
   }
   const touch = async (p: string, text: string) => {
     disk.set(p, text)
@@ -56,8 +65,9 @@ describe("arbor: paths and catalog", () => {
   it("normalizes part paths and derives names", () => {
     expect(normalizePartPath("parts/box", "/work")).toBe("/work/parts/box.arbor.json")
     expect(normalizePartPath("/abs/x.json")).toBe("/abs/x.json")
-    expect(normalizePartPath("./parts/../box", "/work/")).toBe("/work/box.arbor.json")
-    expect(normalizePartPath("/work//a/./b/../c.json")).toBe("/work/a/c.json")
+    // `..` is left to the file system: after a symlinked folder it means the target's parent.
+    expect(normalizePartPath("./parts/../box", "/work/")).toBe("/work/parts/../box.arbor.json")
+    expect(normalizePartPath("/work//a/./b.json")).toBe("/work/a/b.json")
     expect(partName("/a/b/lid.arbor.json")).toBe("lid")
     expect(notesPath("/a/lid.arbor.json")).toBe("/a/lid.notes.json")
   })

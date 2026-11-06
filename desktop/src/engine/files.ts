@@ -47,7 +47,8 @@ export const nodeFiles: Files = {
     const rest = [path.basename(p)]
     for (;;) {
       try {
-        return path.join(realpathSync(dir), ...rest)
+        // native: the OS resolves `..` after a symlink physically; the JS version folds it by name first.
+        return path.join(realpathSync.native(dir), ...rest)
       } catch {
         const up = path.dirname(dir)
         if (up === dir) return p

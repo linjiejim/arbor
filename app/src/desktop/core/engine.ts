@@ -114,19 +114,18 @@ export function notesPath(path: string) {
 }
 
 /**
- * A part path as given by a caller: made absolute against its directory, `.` / `..` / repeated
- * separators resolved (one file must be one part), `.arbor.json` added when there's no `.json`.
+ * A part path as given by a caller: made absolute against its directory, `.` and repeated
+ * separators dropped, `.arbor.json` added when there's no `.json`. `..` stays: after a symlinked
+ * folder it means the link target's parent, so only the file system (`Files.canonical`) resolves it.
  */
 export function normalizePartPath(path: string, cwd?: string) {
   let p = path.trim().replace(/\\/g, "/")
   if (!/^([A-Za-z]:)?\//.test(p) && cwd) p = `${cwd.replace(/\\/g, "/").replace(/\/+$/, "")}/${p}`
   const drive = /^[A-Za-z]:/.exec(p)?.[0] ?? ""
-  const parts: string[] = []
-  for (const seg of p.slice(drive.length).split("/")) {
-    if (!seg || seg === ".") continue
-    if (seg === "..") parts.pop()
-    else parts.push(seg)
-  }
+  const parts = p
+    .slice(drive.length)
+    .split("/")
+    .filter((seg) => seg && seg !== ".")
   p = `${drive}/${parts.join("/")}`
   if (!/\.json$/i.test(p)) p += PART_EXT
   return p
