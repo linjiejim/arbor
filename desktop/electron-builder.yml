@@ -1,0 +1,28 @@
+# Arbor.app (and a .dmg). Unsigned: macOS asks once on first open (right-click → Open).
+appId: com.linjiejim.arbor
+productName: Arbor
+copyright: Copyright © 2026 Jim Lin
+directories:
+  output: release
+  buildResources: resources
+files:
+  - dist/**/*
+  - "!dist/**/*.map"
+  - package.json
+# The kernel thread reads its wasm and fonts from plain files; the CLI runs them with Electron's Node.
+asar: false
+electronLanguages: [zh_CN, zh_TW, en]
+extraResources:
+  - from: resources/arbor-cli.sh
+    to: bin/arbor
+mac:
+  icon: resources/icon.icns
+  category: public.app-category.developer-tools
+  target:
+    - dir
+    - dmg
+  identity: null
+  extendInfo:
+    NSHumanReadableCopyright: Copyright © 2026 Jim Lin
+dmg:
+  title: Arbor
