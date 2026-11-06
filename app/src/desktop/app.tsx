@@ -1,0 +1,170 @@
+import * as React from "react"
+import { CircleAlert, MousePointerClick, Sparkles, X } from "lucide-react"
+import { Button, IconButton } from "@/components/ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { notify } from "@/components/ui/toast"
+import { renderViews } from "@/studio/look"
+import type { Hover } from "@/studio/scene"
+import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
+import { StudioViewport } from "@/studio/ui/studio-viewport"
+import { TreeOverlay } from "@/studio/ui/tree-overlay"
+import { arbor } from "./bridge"
+import type { PickRequest, ShowRequest } from "./core/protocol"
+import { asNote, useDesktopNotes, useDesktopStudio, useEngine } from "./use-desktop"
+import { AgentSetupDialog } from "./ui/agent-setup"
+import { PartsSidebar } from "./ui/parts-sidebar"
+import { ActivityPanel, NotesPanel } from "./ui/side-panels"
+import { TitleBar } from "./ui/title-bar"
+import { Welcome } from "./ui/welcome"
+
+const editing = () => {
+  const el = document.activeElement as HTMLElement | null
+  return Boolean(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)))
+}
+
+export function DesktopApp() {
+  const { snapshot, doc, pick, show, setShow } = useEngine()
+  const studio = useDesktopStudio(doc, snapshot)
+  const notes = useDesktopNotes(studio, doc, pick)
+  const [treeHover, setTreeHover] = React.useState<Hover | null>(null)
+  const [setupOpen, setSetupOpen] = React.useState(false)
+  const [tab, setTab] = React.useState("notes")
+
+  // The agent's `look`: render the views it asked for, from the mesh the engine sent.
+  React.useEffect(() => arbor.onLook(async (req) => renderViews(req.display, req.views, req.highlight, { pins: req.pins })), [])
+
+  // Menu items and shortcuts: ⌘Z undoes typing in a field, otherwise the last change to the part.
+  const path = doc?.path
+  React.useEffect(
+    () =>
+      arbor.onMenu((action) => {
+        if (action === "agent-setup") return setSetupOpen(true)
+        if (editing()) return void document.execCommand(action)
+        if (path) void arbor.call(action, {}, path).then((r) => !r.ok && notify(r.text.replace(/^✗ /, "")))
+      }),
+    [path],
+  )
+
+  // The agent points something out: a feature lights up like a hover in the tree; faces or edges like a note.
+  const { setFocus } = notes
+  React.useEffect(() => {
+    if (!show || show.path !== path) return
+    if (show.hashes?.length && show.kind) setFocus({ kind: show.kind, hashes: show.hashes })
+  }, [show, path, setFocus])
+  const agentHover: Hover | null = show?.feature && show.path === path ? { ids: [show.feature], label: show.label ?? "Agent 指的特征" } : null
+  const clearShow = () => {
+    setShow(null)
+    setFocus(null)
+  }
+
+  return (
+    <div className="flex h-dvh flex-col bg-background">
+      <TitleBar snapshot={snapshot} doc={doc} pick={pick} onSetup={() => setSetupOpen(true)} />
+      <div className="flex min-h-0 flex-1">
+        <PartsSidebar snapshot={snapshot} />
+        <main className="relative min-h-0 min-w-0 flex-1">
+          {doc ? (
+            <>
+              <StudioViewport
+                studio={studio}
+                hover={treeHover ?? agentHover}
+                annotations={notes}
+                busy={false}
+                copy={{ hint: pick ? null : "单击模型上的面或边，给 agent 留一条备注", add: pick ? "就是这里" : "记下备注", next: notes.nextPin }}
+              />
+              <TreeOverlay studio={studio} onHover={setTreeHover} />
+              <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex flex-col items-center gap-2 px-56">
+                {pick && <PickBanner request={pick} />}
+                {show && show.path === path && !pick && <ShowBanner request={show} onClose={clearShow} />}
+                {doc.error && (
+                  <Banner tone="danger" icon={<CircleAlert />}>
+                    {doc.error}
+                  </Banner>
+                )}
+              </div>
+            </>
+          ) : (
+            <Welcome onSetup={() => setSetupOpen(true)} />
+          )}
+        </main>
+        {doc && (
+          <Tabs value={tab} onValueChange={setTab} className="flex w-[380px] shrink-0 flex-col border-l max-xl:w-[340px]">
+            <TabsList className="shrink-0 px-3">
+              <TabsTrigger value="notes">
+                备注{doc.notes.some((n) => n.status === "open") ? ` ${doc.notes.filter((n) => n.status === "open").length}` : ""}
+              </TabsTrigger>
+              <TabsTrigger value="activity">动态</TabsTrigger>
+              <TabsTrigger value="params">参数</TabsTrigger>
+              <TabsTrigger value="code">代码</TabsTrigger>
+            </TabsList>
+            <TabsContent value="notes" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+              <NotesPanel doc={doc} onLocate={(n) => void notes.show(asNote(n))} />
+            </TabsContent>
+            <TabsContent value="activity" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+              <ActivityPanel doc={doc} snapshot={snapshot} />
+            </TabsContent>
+            <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
+              {Object.keys(doc.tree.params).length ? (
+                <ParamsPanel studio={studio} onHover={setTreeHover} />
+              ) : (
+                <p className="px-4 py-4 text-body text-muted-foreground">还没有参数。Agent 会把关键尺寸定成参数，之后可以在这里直接改。</p>
+              )}
+            </TabsContent>
+            <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
+              <CodePanel studio={studio} />
+            </TabsContent>
+          </Tabs>
+        )}
+      </div>
+      <AgentSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
+    </div>
+  )
+}
+
+function Banner({ tone, icon, children, action }: { tone: "info" | "warning" | "danger"; icon: React.ReactNode; children: React.ReactNode; action?: React.ReactNode }) {
+  const color = { info: "border-info/40", warning: "border-warning/50", danger: "border-destructive/40" }[tone]
+  const iconColor = { info: "text-info", warning: "text-warning", danger: "text-destructive" }[tone]
+  return (
+    <div role={tone === "danger" ? "alert" : "status"} className={`pointer-events-auto flex max-w-xl items-center gap-2.5 rounded-lg border bg-background py-1.5 pr-1.5 pl-3 shadow-popover ${color}`}>
+      <span className={`shrink-0 [&_svg]:size-4 ${iconColor}`}>{icon}</span>
+      <span className="min-w-0 flex-1 text-body">{children}</span>
+      {action}
+    </div>
+  )
+}
+
+/** The agent is waiting for a click: say what it asked, and let the person decline. */
+function PickBanner({ request }: { request: PickRequest }) {
+  const what = request.kind === "face" ? "一个面" : request.kind === "edge" ? "一条边" : "一个面或一条边"
+  return (
+    <Banner
+      tone="warning"
+      icon={<MousePointerClick />}
+      action={
+        <Button size="sm" variant="ghost" onClick={() => void arbor.answerPick(request.id, null)}>
+          不点了
+        </Button>
+      }
+    >
+      <span className="font-medium">Agent 请你点{what}：</span>
+      {request.prompt}
+    </Banner>
+  )
+}
+
+function ShowBanner({ request, onClose }: { request: ShowRequest; onClose: () => void }) {
+  return (
+    <Banner
+      tone="info"
+      icon={<Sparkles />}
+      action={
+        <IconButton label="取消高亮" size="icon-sm" onClick={onClose}>
+          <X />
+        </IconButton>
+      }
+    >
+      <span className="font-medium">Agent 指给你看：</span>
+      {request.label ?? (request.hashes ? `${request.hashes.length} ${request.kind === "face" ? "个面" : "条边"}` : "")}
+    </Banner>
+  )
+}
