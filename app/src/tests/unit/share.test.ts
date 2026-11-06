@@ -195,6 +195,12 @@ describe("kernel count cap", () => {
     })
     expect(grid.features.find((f) => f.id === "g")).toMatchObject({ state: "error", message: expect.stringMatching(/一共最多 500/) })
   })
+
+  it("counts what a pattern of a pattern would make", () => {
+    // The ring holds 5 copies of the seed hole; 200 more of each is 995 bodies, though both counts are under 500.
+    const rep = k.rebuild({ ...flange, features: [...flange.features, { id: "again", op: "circular_pattern", features: ["ring"], axis: "X", count: 200 }] })
+    expect(rep.features.find((f) => f.id === "again")).toMatchObject({ state: "error", message: expect.stringMatching(/复制出 995 个实体，最多 500/) })
+  })
 })
 
 describe("share server", () => {
@@ -313,6 +319,25 @@ describe("share server", () => {
     expect(fs.existsSync(file(ids[1]))).toBe(true)
     expect(fs.existsSync(file(ids[2]))).toBe(true)
     expect(totalBytes).toBe(fs.statSync(file(ids[1])).size + fs.statSync(file(ids[2])).size)
+  })
+
+  it("keeps the total right when links come and go during a cleanup", async () => {
+    const a = app()
+    const ids: string[] = []
+    for (let i = 0; i < 20; i++) ids.push(((await (await post(a, good)).json()) as { id: string }).id)
+    const sweep = store.cleanup()
+    expect(store.cleanup(), "one cleanup at a time").toBe(sweep)
+    const made = ((await (await post(a, good)).json()) as { id: string; deleteToken: string })
+    const gone = await post(a, good).then((r) => r.json() as Promise<{ id: string; deleteToken: string }>)
+    await a.request(`/api/studio/share/${gone.id}`, { method: "DELETE", headers: { "x-share-token": gone.deleteToken } })
+    await a.request(`/api/studio/share/${ids[0]}`, { method: "DELETE", headers: { "x-share-token": "wrong" } })
+    await sweep
+    const onDisk = fs
+      .readdirSync(path.join(dir, "shares"), { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith(".json"))
+      .reduce((n, e) => n + fs.statSync(path.join(e.parentPath, e.name)).size, 0)
+    expect(made.id).toMatch(/^[0-9A-Za-z]{10}$/)
+    expect(store.totalBytes).toBe(onDisk)
   })
 
   it("builds the stored fields one by one", () => {
