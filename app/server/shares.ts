@@ -106,6 +106,9 @@ export class ShareStore {
   readonly maxTotalBytes: number
   readonly keepMs: number
   private total = 0
+  private cleaning: Promise<{ removed: number; totalBytes: number }> | null = null
+  /** What changed during a cleanup's scan. */
+  private scan: { created: Map<string, number>; removed: Set<string> } | null = null
 
   constructor(dataDir: string, opts: { maxTotalBytes?: number; keepMs?: number } = {}) {
     this.dir = path.join(dataDir, "shares")
@@ -143,6 +146,7 @@ export class ShareStore {
     await fsp.rename(tmp, file)
     const bytes = Buffer.byteLength(text)
     this.total += bytes
+    this.scan?.created.set(id, bytes)
     return { id, deleteToken, bytes }
   }
 
@@ -177,28 +181,45 @@ export class ShareStore {
     if (!token || want.length !== got.length || !crypto.timingSafeEqual(want, got)) return "forbidden"
     await fsp.rm(file, { force: true })
     this.total = Math.max(0, this.total - size)
+    if (this.scan) {
+      this.scan.created.delete(id)
+      this.scan.removed.add(id)
+    }
     return "deleted"
   }
 
-  /** Delete what nobody opened within `keepMs` (and stray temp files); recount the total. */
-  async cleanup(now = Date.now()): Promise<{ removed: number; totalBytes: number }> {
+  /** Delete what nobody opened within `keepMs` (and stray temp files); recount the total. One run at a time. */
+  cleanup(now = Date.now()): Promise<{ removed: number; totalBytes: number }> {
+    this.cleaning ??= this.sweep(now).finally(() => (this.cleaning = null))
+    return this.cleaning
+  }
+
+  private async sweep(now: number) {
+    // Links made or deleted while the scan runs are reconciled at the end, so the recount doesn't lose them.
+    const scan = (this.scan = { created: new Map<string, number>(), removed: new Set<string>() })
+    const counted = new Map<string, number>()
     let removed = 0
-    let total = 0
-    for (const sub of await fsp.readdir(this.dir).catch(() => [] as string[])) {
-      const d = path.join(this.dir, sub)
-      for (const name of await fsp.readdir(d).catch(() => [] as string[])) {
-        const f = path.join(d, name)
-        const st = await fsp.stat(f).catch(() => null)
-        if (!st?.isFile()) continue
-        const stale = name.endsWith(".tmp") ? now - st.mtimeMs > 3600_000 : now - st.mtimeMs > this.keepMs
-        if (stale) {
-          await fsp.rm(f, { force: true })
-          if (!name.endsWith(".tmp")) removed++
-        } else total += st.size
+    try {
+      for (const sub of await fsp.readdir(this.dir).catch(() => [] as string[])) {
+        const d = path.join(this.dir, sub)
+        for (const name of await fsp.readdir(d).catch(() => [] as string[])) {
+          const f = path.join(d, name)
+          const st = await fsp.stat(f).catch(() => null)
+          if (!st?.isFile()) continue
+          const temp = name.endsWith(".tmp")
+          if (now - st.mtimeMs > (temp ? 3600_000 : this.keepMs)) {
+            await fsp.rm(f, { force: true })
+            if (!temp) removed++
+          } else if (!temp) counted.set(name.replace(/\.json$/, ""), st.size)
+        }
       }
+      for (const id of scan.removed) counted.delete(id)
+      for (const [id, bytes] of scan.created) counted.set(id, bytes)
+      this.total = [...counted.values()].reduce((a, b) => a + b, 0)
+    } finally {
+      this.scan = null
     }
-    this.total = total
-    return { removed, totalBytes: total }
+    return { removed, totalBytes: this.total }
   }
 }
 

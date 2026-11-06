@@ -13,6 +13,7 @@ import { documentTitle } from "@/lib/page-meta"
 import { saveBlob } from "@/studio/download"
 import type { Hover } from "@/studio/scene"
 import { deleteShare, loadShare, shareToken, type Loaded, type SharedSnapshot } from "@/studio/share"
+import { ConnectorOverlay } from "@/studio/ui/connector-overlay"
 import { Markdown } from "@/studio/ui/markdown"
 import { PanelResizer } from "@/studio/ui/panel-resizer"
 import { usePanelWidth } from "@/studio/ui/panel-width"
@@ -150,6 +151,7 @@ function SharedStudio({ snap, onDeleted }: { snap: SharedSnapshot; onDeleted: ()
           <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={false} readOnly />
           <TreeOverlay studio={studio} onHover={setHover} readOnly />
         </main>
+        <ConnectorOverlay param={hover?.param ?? null} row={hover?.row ?? null} />
         <Tabs
           defaultValue="about"
           style={{ "--panel-w": `${panel.width}px` } as React.CSSProperties}

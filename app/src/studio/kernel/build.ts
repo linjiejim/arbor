@@ -853,6 +853,9 @@ export class Kernel {
   }
 
   private copyTools(body: Shape3D, sources: Tool[], moves: ((s: Shape3D) => Shape3D)[], summary: string, warnings: string[]) {
+    // A pattern of a pattern (or of a many-hole feature) multiplies: count the bodies this step makes.
+    const made = sources.reduce((n, s) => n + countOf(s.tool, "solid"), 0) * moves.length
+    if (made > MAX_COUNT) throw new InputError(`这一步要复制出 ${made} 个实体，最多 ${MAX_COUNT} 个`)
     let cur = body
     const tools: Tool[] = []
     for (const { tool, mode } of sources) {
