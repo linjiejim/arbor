@@ -184,7 +184,7 @@ export function StudioViewport({ studio, hover, annotations, busy }: { studio: S
         </div>
       )}
       {display?.mesh && !busy && !draft && annotations.pending.length === 0 && (
-        <div className="pointer-events-none absolute top-3 left-3 rounded-md border bg-background/90 px-2.5 py-1 text-caption text-muted-foreground">
+        <div className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border bg-background/90 px-2.5 py-1 text-center text-caption text-muted-foreground">
           单击模型上的面或边，标注要改的地方
         </div>
       )}

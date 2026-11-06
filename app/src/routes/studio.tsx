@@ -11,8 +11,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { notify } from "@/components/ui/toast"
 import { ChatPanel } from "@/studio/ui/chat-panel"
 import { toBuild123d } from "@/studio/codegen"
-import { CodePanel, ParamsPanel, TreePanel } from "@/studio/ui/side-panels"
+import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
+import { TreeOverlay } from "@/studio/ui/tree-overlay"
 import { useAnnotations } from "@/studio/use-annotations"
 import { useStudio } from "@/studio/use-studio"
 import { KEY_STORE, useStudioChat } from "@/studio/use-studio-chat"
@@ -34,8 +35,6 @@ export function StudioPage() {
   const [status, setStatus] = React.useState<Status | null>(null)
   const ready = studio.kernel.phase === "ready"
   const panel = usePanelWidth()
-  // Arriving with ?start=… (from a teardown) means "let me play with this tree".
-  const [tab, setTab] = React.useState(() => (new URLSearchParams(window.location.search).has("start") ? "tree" : "chat"))
 
   React.useEffect(() => {
     fetch("/api/studio/status")
@@ -97,18 +96,17 @@ export function StudioPage() {
       <div className="flex min-h-0 flex-1 max-lg:flex-col">
         <main className="relative min-h-0 min-w-0 flex-1">
           <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={chat.busy} />
+          <TreeOverlay studio={studio} onHover={setHover} />
         </main>
 
         <Tabs
-          value={tab}
-          onValueChange={setTab}
+          defaultValue="chat"
           style={{ "--panel-w": `${panel.width}px` } as React.CSSProperties}
           className="relative flex shrink-0 flex-col border-l lg:w-(--panel-w) max-lg:h-[55dvh] max-lg:w-full max-lg:border-t max-lg:border-l-0"
         >
           <PanelResizer {...panel} />
           <TabsList className="shrink-0 px-3">
             <TabsTrigger value="chat">对话</TabsTrigger>
-            <TabsTrigger value="tree">特征树</TabsTrigger>
             <TabsTrigger value="params">参数</TabsTrigger>
             <TabsTrigger value="code">代码</TabsTrigger>
           </TabsList>
@@ -121,14 +119,8 @@ export function StudioPage() {
               annotations={annotations}
               ready={ready}
               onSelectFeature={studio.showFeature}
-              onLoad={(t) => {
-                studio.load(t)
-                setTab("tree")
-              }}
+              onLoad={studio.load}
             />
-          </TabsContent>
-          <TabsContent value="tree" className="min-h-0 flex-1 overflow-y-auto">
-            <TreePanel studio={studio} onHover={setHover} />
           </TabsContent>
           <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
             <ParamsPanel studio={studio} />
