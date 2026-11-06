@@ -180,6 +180,15 @@ function feature(f: Feature, tree: Tree): string[] {
       const opts = f.direction === "both" ? `amount=${d} / 2, both=True` : f.direction === "reverse" ? `amount=${d}, dir=-${sk}.faces()[0].normal_at()` : `amount=${d}`
       return [...out, `tool_${f.id} = extrude(${sk}, ${opts}${taper})`, combine(f.id, f.mode)]
     }
+    case "split": {
+      const [back, front] = f.parts
+      return [
+        ...head,
+        `split_plane = ${sketchPlane(f.by)}`,
+        `parts = {${JSON.stringify(back)}: split(part, bisect_by=split_plane, keep=Keep.BOTTOM), ${JSON.stringify(front)}: split(part, bisect_by=split_plane, keep=Keep.TOP)}`,
+        "part = Compound(list(parts.values()))",
+      ]
+    }
     case "rib":
       return [...head, `tool_${f.id} = rib(part, plane_${f.sketch}, pts_${f.sketch}, ${py(f.t)}${f.flip ? ", flip=True" : ""})`, combine(f.id, "add")]
     case "revolve":
@@ -290,11 +299,39 @@ function params(tree: Tree) {
 }
 
 /** `body: true` = just parameters and features (for reading); otherwise a runnable file. */
+/** Every feature in order; after a split, body features act on the parts dict. */
+function emit(tree: Tree, lines: string[]) {
+  let names: string[] = []
+  for (const f of tree.features) {
+    const out = feature(f, tree)
+    if (f.op === "split") names = names.filter((n) => n !== f.of).concat(f.parts)
+    lines.push(...(names.length && f.op !== "split" && f.op !== "sketch" ? onParts(out, f, names) : out), "")
+  }
+}
+
+/**
+ * A feature's lines rewritten for a split body: `part` names one entry of
+ * `parts`; a cut goes through every part; an addition joins the part it
+ * touches; anything else runs on each part. Then `part` is the compound again.
+ */
+function onParts(lines: string[], f: Feature, names: string[]): string[] {
+  const on = (name: string) => lines.map((l) => l.replace(/\bpart\b/g, `parts[${JSON.stringify(name)}]`))
+  const whole = "part = Compound(list(parts.values()))"
+  if (f.part) return [...on(f.part), whole]
+  const last = lines[lines.length - 1]
+  const cut = last.match(/^part = part - (tool_\w+)$/)
+  if (cut) return [...lines.slice(0, -1), `parts = {k: v - ${cut[1]} for k, v in parts.items()}`, whole]
+  const add = last.match(/^part = (tool_\w+) if part is None else part \+ \1$/)
+  if (add)
+    return [...lines.slice(0, -1), "# 加料接在它碰到的那个零件上", `joined = next(k for k, v in parts.items() if v.distance_to(${add[1]}) < 1e-6)`, `parts[joined] = parts[joined] + ${add[1]}`, whole]
+  return [...names.flatMap(on), whole]
+}
+
 export function toBuild123d(tree: Tree, opts: { title?: string; body?: boolean } = {}): string {
   const title = opts.title ?? "FeatureTree 工作台导出"
   if (opts.body) {
     const lines = ["# 参数", ...params(tree), "", "part = None", ""]
-    for (const f of tree.features) lines.push(...feature(f, tree), "")
+    emit(tree, lines)
     return lines.join("\n").trimEnd()
   }
   const lines = [
@@ -354,7 +391,7 @@ Z 轴朝上，单位毫米。选择器按语义转成 build123d 的过滤；「�
     "part = None",
     "",
   ]
-  for (const f of tree.features) lines.push(...feature(f, tree), "")
+  emit(tree, lines)
   lines.push("show_object(part) if 'show_object' in globals() else None", "")
   return lines.join("\n")
 }

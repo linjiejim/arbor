@@ -39,6 +39,7 @@ const TOOL_LABEL: Record<string, { label: string; op?: OpId; icon?: LucideIcon }
   loft: { label: "放样", op: "loft" },
   draft: { label: "拔模", op: "draft" },
   rib: { label: "筋", op: "rib" },
+  split: { label: "拆件", op: "cut" },
   edit_feature: { label: "修改特征", icon: Pencil },
   delete_feature: { label: "删除特征", icon: Trash2 },
   inspect: { label: "查看模型", icon: Search },

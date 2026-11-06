@@ -867,3 +867,69 @@ describe("annotations on a slope", () => {
     expect(text).toContain("点击处的斜面草图坐标 (1, 2)")
   })
 })
+
+describe("split into parts", () => {
+  let k: Kernel
+  beforeAll(async () => {
+    await initNodeKernel()
+    k = new Kernel()
+  }, 60_000)
+  const box = (extra: Record<string, unknown>[], Hs: number | string = "Hs"): Tree =>
+    ({
+      params: { L: 80, W: 50, H: 30, t: 2, Hs: 20 },
+      features: [
+        { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W" }] },
+        { id: "box", op: "extrude", sketch: "sk", distance: "H" },
+        { id: "sk2", op: "sketch", on: { plane: "XY", offset: "t" }, shapes: [{ type: "rect", w: "L-2*t", h: "W-2*t" }] },
+        { id: "cav", op: "extrude", sketch: "sk2", distance: "H-2*t", mode: "cut" },
+        { id: "sp", op: "split", by: { plane: "XY", offset: Hs }, parts: ["底壳", "上盖"] },
+        ...extra,
+      ],
+    }) as unknown as Tree
+  const shell = 80 * 50 * 30 - 76 * 46 * 26
+
+  it("cuts a closed enclosure into a base and a lid, volumes adding up, heights following the parameter", () => {
+    const r = k.rebuild(box([]))
+    expect(r.parts!.map((p) => p.name)).toEqual(["底壳", "上盖"])
+    expect(r.parts![0].volume + r.parts![1].volume).toBeCloseTo(shell, 3)
+    expect(r.parts![0].size[2]).toBe(20)
+    const lower = k.rebuild({ ...box([]), params: { L: 80, W: 50, H: 30, t: 2, Hs: 12 } })
+    expect(lower.parts![0].size[2]).toBe(12)
+    expect(k.rebuild(box([], 40)).features.at(-1)!.message).toMatch(/切面没有碰到实体：.*0–30.*40/)
+  })
+
+  it("applies later features per part: a lid hole, a hole through both, a fillet on one part; asks which part for a shell", () => {
+    const lid = k.rebuild(box([
+      { id: "bs", op: "sketch", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, shapes: [{ type: "circle", d: 10 }] },
+      { id: "btn", op: "extrude", sketch: "bs", distance: 5, mode: "cut", direction: "reverse" },
+    ]))
+    expect(lid.features.at(-1)!.summary).toMatch(/· 上盖$/)
+    expect(lid.parts![0].volume + lid.parts![1].volume).toBeCloseTo(shell - Math.PI * 25 * 2, 2)
+    const through = k.rebuild(box([{ id: "h", op: "hole", on: { plane: "XY" }, reverse: true, at: [[30, 15]], d: 3 }]))
+    expect(through.features.at(-1)!.summary).toMatch(/底壳、上盖$/)
+    const fil = k.rebuild(box([{ id: "f", op: "fillet", part: "上盖", edges: { parallel: "Z" }, r: 3 }]))
+    expect(fil.parts![0].volume).toBeCloseTo(k.rebuild(box([])).parts![0].volume, 6)
+    expect(k.rebuild(box([{ id: "s", op: "shell", open: { normal: "+Z", extreme: "+Z" }, t: 1 }])).features.at(-1)!.message).toMatch(/要写 part/)
+  })
+
+  it("explodes the lid upwards and exports named parts", async () => {
+    k.rebuild(box([]))
+    const d = k.display()
+    expect(d.parts!.map((p) => p.name)).toEqual(["底壳", "上盖"])
+    expect(d.parts![0].explode).toEqual([0, 0, 0])
+    expect(d.parts![1].explode[2]).toBeGreaterThan(0)
+    expect(d.groups.every((g) => g.part === 0 || g.part === 1)).toBe(true)
+    const step = await (await k.exportBody("step"))!.text()
+    expect(step).toContain("\\X2\\5E9558F3\\X0\\") // 底壳
+    const zip = (await k.exportBody("stl"))!
+    expect(zip.type).toBe("application/zip")
+    expect(new TextDecoder().decode(new Uint8Array(await zip.arrayBuffer()).slice(30, 30 + 10))).toBe("底壳.stl")
+  })
+
+  it("exports the split and per-part features to build123d", () => {
+    const code = toBuild123d(box([{ id: "h", op: "hole", on: { plane: "XY" }, reverse: true, at: [[30, 15]], d: 3 }, { id: "f", op: "fillet", part: "上盖", edges: { parallel: "Z" }, r: 3 }]))
+    expect(code).toContain('parts = {"底壳": split(part, bisect_by=split_plane, keep=Keep.BOTTOM), "上盖": split(part, bisect_by=split_plane, keep=Keep.TOP)}')
+    expect(code).toContain("parts = {k: v - tool_h for k, v in parts.items()}")
+    expect(code).toContain('parts["上盖"] = fillet(parts["上盖"].edges()')
+  })
+})

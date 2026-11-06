@@ -11,7 +11,7 @@ type V3 = [number, number, number]
 export type EvalNote = { kind: "face" | "edge"; match: (p: PickInfo) => boolean; point?: V3; note: string }
 
 /** Read access to the finished model, for checks the generic ones can't express. */
-export type EvalQuery = { inspect: (what: "faces" | "edges", selector: unknown) => string }
+export type EvalQuery = { inspect: (what: "body" | "faces" | "edges", selector: unknown) => string }
 
 export type EvalCase = {
   id: string
@@ -192,6 +192,37 @@ export const EVALS: EvalCase[] = [
     upright: true,
     volume: 60 * 30 * 6 + 6 * 30 * 44 + (34 * 34) / 2 * 4,
     uses: "rib",
+  },
+  {
+    id: "split-enclosure",
+    prompt: "做一个 80×50×30 的封闭外壳（长沿 X、宽沿 Y），壁厚 2，在离底 20 mm 处拆成底壳和上盖；上盖顶面中间开一个 ⌀10 的按键孔。",
+    size: [80, 50, 30],
+    upright: true,
+    volume: 80 * 50 * 30 - 76 * 46 * 26 - PI * 25 * 2,
+    uses: "split",
+    extra: (q) => {
+      const body = q.inspect("body", undefined)
+      const parts = body.match(/零件：(.*)/)?.[1] ?? ""
+      const ok = /底壳（80 × 50 × 20 mm/.test(parts) && /上盖（80 × 50 × 10 mm/.test(parts)
+      const hole = centres(q.inspect("faces", { kind: "cylinder", radius: 5 }))
+      return [
+        { name: "两个零件：底壳高 20、上盖高 10", pass: ok, detail: parts || "没有零件" },
+        { name: "按键孔只在上盖", pass: hole.length === 1 && hole[0][2] > 25, detail: hole.map((x) => `(${x.join(", ")})`).join(" ") || "没有 R5 的孔" },
+      ]
+    },
+  },
+  {
+    id: "split-long",
+    prompt: "做一根 300×20×20 的方杆（长沿 X，中心在原点）。打印机最长只能打 200，从中间把它拆成两段。",
+    size: [300, 20, 20],
+    upright: true,
+    volume: 300 * 20 * 20,
+    uses: "split",
+    extra: (q) => {
+      const parts = q.inspect("body", undefined).match(/零件：(.*)/)?.[1] ?? ""
+      const sizes = [...parts.matchAll(/（(\d+(?:\.\d+)?) × 20 × 20 mm/g)].map((m) => Number(m[1]))
+      return [{ name: "两段，各长 150", pass: sizes.length === 2 && sizes.every((x) => Math.abs(x - 150) < 0.5), detail: parts || "没有零件" }]
+    },
   },
   { id: "rib-plate", prompt: "做一块 120×80×4 的底板，顶面上沿 X 方向等距放 3 条加强筋（每条长 100、宽 3、高 12），筋间距 25，中间那条在 Y=0。", size: [120, 80, 16], upright: true, volume: 120 * 80 * 4 + 3 * 100 * 3 * 12 },
 ]

@@ -83,6 +83,8 @@
   --color-axis-y: var(--axis-y);
   --color-axis-z: var(--axis-z);
   --color-scene-modified: var(--scene-modified);
+  --color-scene-model: var(--scene-model);
+  --color-scene-model-dark: var(--scene-model-dark);
   --color-code-keyword: var(--code-keyword);
   --color-code-string: var(--code-string);
   --color-code-number: var(--code-number);

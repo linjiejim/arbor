@@ -139,6 +139,7 @@ const Base = {
   name: z.string().optional().describe('中文显示名，例如 "底座拉伸"'),
   intent: z.string().optional().describe("一句话设计意图：为什么这样做"),
   suppressed: z.boolean().optional().describe("压缩：暂时不参与重建（学习者在特征树里设置）"),
+  part: z.string().optional().describe("拆件之后：只作用在这个零件上（零件名）。不写时切除和孔作用在碰到的所有零件上，加料要正好接上一个零件"),
 }
 const Mode = z.enum(["add", "cut"]).optional().describe("add = 加料（默认），cut = 切除")
 
@@ -258,6 +259,13 @@ export const Feature = z.discriminatedUnion("op", [
   }),
   z.object({
     ...Base,
+    op: z.literal("split"),
+    by: PlaneRef.describe("切面：写法和草图平面一样（基准面加偏移，或贴在一个平面上）"),
+    parts: z.array(z.string().min(1).max(20)).length(2).describe("切开后两侧的零件名：先写切面法向背面一侧的，再写法向一侧的（XY 的法向是 +Z：先下后上）"),
+    of: z.string().optional().describe("已经有多个零件时，要拆哪一个"),
+  }),
+  z.object({
+    ...Base,
     op: z.literal("rib"),
     sketch: z.string().describe("只含一条开放的线（path）的草图，画在筋所在的平面上；线的两端可以不碰到实体，会自动延长到墙"),
     t: Num.describe("筋厚，在草图平面两侧各一半"),
@@ -330,6 +338,7 @@ export const OP_NAMES: Record<FeatureOp, string> = {
   loft: "放样",
   draft: "拔模",
   rib: "筋",
+  split: "拆件",
 }
 
 /** Display name: the model's own name, else 「拉伸2」 style numbering. */

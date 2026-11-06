@@ -185,7 +185,7 @@ export function checkText(report: BuildReport) {
   const invalid = rows.filter((r) => r.invalid).length
   return [
     ...rows.map((r) => (r.invalid ? `? ${r.id}「${r.said}」：量不了，${r.actual}` : `${r.pass ? "✓" : "✗"} ${r.id}「${r.said}」：要求 ${r.expected}，实际 ${r.actual}`)),
-    ...(failed ? [`${failed} 项不满足：先用 edit_feature 修模型，再核对一次；修不了就在回复里直说。不要为了通过去改期望值。`] : []),
+    ...(failed ? [`${failed} 项不满足：先确认量的位置对不对（size 是整个零件的外形；局部尺寸用 distance / thickness，选择器要正好选中那个面）。量错了就用同一个 id 改写这一项；确实没做到再用 edit_feature 修模型，然后再核对。不要为了通过去改期望值。`] : []),
     ...(invalid ? [`${invalid} 项量不了：是这一项的选择器写得不对（要正好选中要量的面或边，例如加上 normal、of），用同一个 id 改写这一项，不是改模型。`] : []),
     ...(!failed && !invalid ? ["全部满足。"] : []),
   ].join("\n")
@@ -200,6 +200,7 @@ function resultOk(report: BuildReport, target?: string) {
 export function bodyLine(report: BuildReport) {
   const b = report.body
   if (!b) return "还没有实体。"
+  if (report.parts) return `实体：${b.size.join(" × ")} mm，${report.parts.length} 个零件：${report.parts.map((p) => `${p.name}（${p.size.join(" × ")} mm，${r1(p.volume / 1000)} cm³）`).join("、")}。`
   const solids = b.solids > 1 ? `，${b.solids} 个不相连的实体` : ""
   return `实体：${b.size.join(" × ")} mm，体积 ${r1(b.volume / 1000)} cm³${solids}。`
 }

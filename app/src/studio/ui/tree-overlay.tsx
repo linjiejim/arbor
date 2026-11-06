@@ -1,12 +1,12 @@
 import * as React from "react"
-import { CircleAlert, CircleDashed } from "lucide-react"
+import { CircleAlert, CircleDashed, Eye, EyeOff } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Button } from "@/components/ui/button"
+import { Button, IconButton } from "@/components/ui/button"
 import { OpIcon } from "@/components/op-icon"
 import type { OpId } from "@/content/ops"
 import type { FeatureResult } from "../kernel/build"
 import { displayName, OP_NAMES, type Feature, type Tree } from "../dsl"
-import type { Hover } from "../scene"
+import type { Hover, PartsView } from "../scene"
 import { FeatureCard } from "./feature-card"
 import type { Annotations } from "../use-annotations"
 import type { Reselect } from "../use-reselect"
@@ -27,6 +27,7 @@ const OP_ICON: Record<Feature["op"], OpId> = {
   loft: "loft",
   draft: "draft",
   rib: "rib",
+  split: "cut",
 }
 
 function iconOf(f: Feature): OpId {
@@ -47,12 +48,16 @@ export function TreeOverlay({
   reselect,
   annotations,
   busy,
+  parts,
+  onParts,
 }: {
   studio: Studio
   onHover: (h: Hover | null) => void
   reselect: Reselect
   annotations: Annotations
   busy: boolean
+  parts: PartsView
+  onParts: (v: PartsView) => void
 }) {
   const { tree, report, rollback } = studio
   const root = React.useRef<HTMLElement>(null)
@@ -91,6 +96,33 @@ export function TreeOverlay({
           </Button>
         )}
       </div>
+      {studio.display?.parts && studio.display.parts.length > 1 && (
+        <ul aria-label="零件" className="pointer-events-auto mb-1 flex flex-col gap-0.5 border-b pb-1">
+          {studio.display.parts.map((p, k) => {
+            const hidden = parts.hidden.has(k)
+            const faces = studio.display!.groups.filter((g) => g.part === k).map((g) => g.hash)
+            return (
+              <li key={p.name} className="flex max-w-52 items-center gap-2 px-2 py-0.5 text-small text-muted-foreground" onMouseEnter={() => onHover({ ids: [], label: `零件「${p.name}」`, faces })} onMouseLeave={() => onHover(null)}>
+                <span aria-hidden className={cn("size-3 shrink-0 rounded-xs border", k % 2 ? "bg-scene-model-dark" : "bg-scene-model")} />
+                <span className={cn("truncate", hidden && "line-through opacity-60")}>{p.name}</span>
+                <IconButton
+                  label={hidden ? `显示「${p.name}」` : `隐藏「${p.name}」`}
+                  size="icon-sm"
+                  className="ml-auto size-6"
+                  onClick={() => {
+                    const next = new Set(parts.hidden)
+                    if (hidden) next.delete(k)
+                    else next.add(k)
+                    onParts({ ...parts, hidden: next })
+                  }}
+                >
+                  {hidden ? <EyeOff /> : <Eye />}
+                </IconButton>
+              </li>
+            )
+          })}
+        </ul>
+      )}
       <ol className="pointer-events-auto min-h-0 overflow-x-hidden overflow-y-auto overscroll-contain pr-4 pb-1" onMouseLeave={hide} onScroll={hide}>
         {tree.features.map((f, i) => {
           const r = report?.features[i]
@@ -117,6 +149,7 @@ export function TreeOverlay({
               >
                 <OpIcon op={iconOf(f)} className="size-4 shrink-0" />
                 <span className={cn("truncate max-sm:sr-only", f.suppressed && "line-through")}>{displayName(tree, f)}</span>
+                {f.part && <span className="shrink-0 rounded-xs bg-muted px-1 text-caption text-faint-foreground max-sm:sr-only">{f.part}</span>}
                 {f.suppressed && <span className="sr-only">（已压缩）</span>}
                 {r?.state === "error" ? (
                   <CircleAlert className="size-3.5 shrink-0 text-destructive" aria-label="失败" />

@@ -168,11 +168,15 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
 ## 特征树格式
 
 - 参数：`{ "L": 80, "inner": "L - 2*t" }`，任何数值字段都可以写参数名或表达式。
-- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`rib`。
+- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`rib`、`split`。
 - 拉伸的几种写法（`kernel/features2.ts`）：
   - `distance`、`through`、`until` 三者正好写一个。`until: "next"`：拉得很长，加料时减去实体、切除时与实体求交，只留贴着草图平面的那几块，所以挡住它的面是斜的、弯的都行；`until: { face }`：平行的面就是算好的距离，斜面用 replicad 的 `extrudeUntil`。
   - `thin`：封闭轮廓用 `Drawing.offset` 偏出一圈（向外偏时凸角会变圆）；开放的线（草图图形 `path`，圆弧按 5 µm 离散）按折线偏移、端头平齐，`inside` 是线拐弯的那一侧。
   - `draft`：先直拉，再把不平行于草图平面的面拔模；拔模失败（例如圆柱面）就改为原轮廓和内缩轮廓之间的直纹放样。
+- 拆件 `split`（`build.ts` 的 `split`、`onParts`）：用一个平面把实体（或 `of` 指定的零件）切成两个有名字的零件，背面一侧在前。每一步存一张零件表 `parts`，`body` 是各零件拼成的整体（`topo.ts` 的 `compoundOf`，不能用 replicad 的 makeCompound，它会释放传进去的形状），选择、显示、测量照旧用整体。
+  - 拆开以后的改实体特征在每个零件上各跑一次：写了 `part` 的只改那个零件；切除和孔改到所有碰到的零件；加料必须正好接上一个零件；抽壳、拔模、整体镜像必须写 `part`。
+  - 爆炸：每个零件带一个位移向量，切开时法向一侧的零件沿法向移开（至少 15 mm）。视图里炸开或隐藏零件时，每个零件单独成网格，这时不能点选。
+  - 导出：STEP 里每个零件是一个带名字的实体（非 ASCII 的名字转成 `\X2\…\X0\`）；STL 是一个 zip，每个零件一个文件（`zip.ts`，只存储不压缩，不加依赖）。build123d 导出用一个 `parts` 字典。
 - 筋 `rib`：一条 `path` 两端延长很远，在线的一侧围成一大块，厚 `t` 横跨草图平面；和实体包围盒求交、减去实体，只留不碰包围盒外框的块（被实体围住的空腔）。两侧都有时取靠近实体中心的一侧，`flip` 换另一侧。字段见 `dsl.ts`，每个字段都有中文 `describe`，同时也是给模型看的说明。
 - 阵列个数、多边形边数也可以写参数或表达式，结果必须是整数。
 - `paramNotes`：每个参数一句说明，只给人看，不参与计算。

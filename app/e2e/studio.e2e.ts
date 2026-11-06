@@ -148,6 +148,39 @@ test.describe("工作台", () => {
     expect(await page.locator("[data-dim-id]").count()).toBeLessThanOrEqual(12)
   })
 
+  test("/studio 拆件：零件行、隐藏、爆炸、分件导出", async ({ page }) => {
+    const tree = {
+      params: { L: 80, W: 50, H: 30, t: 2, Hs: 20 },
+      features: [
+        { id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W" }] },
+        { id: "box", op: "extrude", sketch: "sk", distance: "H" },
+        { id: "sk2", op: "sketch", on: { plane: "XY", offset: "t" }, shapes: [{ type: "rect", w: "L-2*t", h: "W-2*t" }] },
+        { id: "cav", op: "extrude", sketch: "sk2", distance: "H-2*t", mode: "cut" },
+        { id: "sp", op: "split", by: { plane: "XY", offset: "Hs" }, parts: ["底壳", "上盖"] },
+        { id: "btn", op: "hole", part: "上盖", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, at: [[0, 0]], d: 10 },
+      ],
+    }
+    await page.addInitScript((t) => localStorage.setItem("ft-studio-v1", JSON.stringify({ tree: t, history: [] })), tree)
+    await page.goto("/studio")
+    const parts = page.getByRole("list", { name: "零件" })
+    await expect(parts.getByText("上盖")).toBeVisible({ timeout: 90_000 })
+    await expectRendered(page.locator("canvas").first(), "/studio parts")
+    // Hide the lid, show it again.
+    await parts.getByRole("button", { name: "隐藏「上盖」" }).click()
+    await expect(parts.getByRole("button", { name: "显示「上盖」" })).toBeVisible()
+    await parts.getByRole("button", { name: "显示「上盖」" }).click()
+    // Explode: the slider appears and moves the parts apart.
+    await page.getByRole("button", { name: "爆炸" }).click()
+    const slider = page.getByRole("group", { name: "爆炸" }).getByLabel("零件分开的程度")
+    await slider.fill("1")
+    await expect(page.getByRole("group", { name: "爆炸" }).getByText("100%")).toBeVisible()
+    await expectRendered(page.locator("canvas").first(), "/studio exploded")
+    // Export offers one STEP with both parts, and a zip of STLs.
+    await page.getByRole("button", { name: "导出" }).click()
+    await expect(page.getByRole("menuitem", { name: "导出 STEP（2 个零件）" })).toBeVisible()
+    await expect(page.getByRole("menuitem", { name: "导出 STL（zip，每个零件一个文件）" })).toBeVisible()
+  })
+
   test("/studio?start=flange 现成特征树与改参数", async ({ page }) => {
     await page.goto("/studio?start=flange")
     await expect(page.getByText("5 个特征").first()).toBeVisible({ timeout: 90_000 })

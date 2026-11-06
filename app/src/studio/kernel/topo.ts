@@ -56,3 +56,14 @@ export function faceProps(face: { wrapped: unknown }): { area: number; center: V
   props.delete()
   return out
 }
+
+/** A compound of `shapes` that, unlike replicad's makeCompound, leaves them alive (the parts of a split body). */
+export function compoundOf(shapes: { wrapped: unknown }[]): Shape3D {
+  const oc: OC = getOC()
+  const builder = new oc.TopoDS_Builder()
+  const compound = new oc.TopoDS_Compound()
+  builder.MakeCompound(compound)
+  for (const s of shapes) builder.Add(compound, s.wrapped)
+  builder.delete()
+  return cast(compound as never) as Shape3D
+}

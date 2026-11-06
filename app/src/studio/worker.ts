@@ -101,7 +101,7 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
         result = k.inspect(req.what, undefined, req.selector)
         break
       case "export":
-        result = k.exportBody(req.format, req.index)
+        result = await k.exportBody(req.format, req.index)
         break
       case "pick":
         result = k.pick({ kind: req.kind, hash: req.hash, point: req.point })

@@ -14,7 +14,7 @@ import { circled, type PickInfo } from "../annotations"
 import type { DisplayData } from "../kernel/build"
 import type { MeasureResult, MeasureTarget } from "../kernel/measure"
 import type { Pin } from "../look"
-import { edgeHighlight, groupAt, modelObject, repaint, type Hover, type Paint } from "../scene"
+import { edgeHighlight, groupAt, modelObject, NO_PARTS_VIEW, repaint, type Hover, type Paint, type PartsView } from "../scene"
 import type { Annotations } from "../use-annotations"
 import type { Studio } from "../use-studio"
 import type { Reselect } from "../use-reselect"
@@ -39,12 +39,17 @@ export function StudioViewport({
   annotations,
   busy,
   reselect,
+  parts,
+  onParts,
 }: {
   studio: Studio
   hover: Hover | null
   annotations: Annotations
   busy: boolean
   reselect: Reselect
+  /** A split body: explode amount and hidden parts. */
+  parts: PartsView
+  onParts: (v: PartsView) => void
 }) {
   const [viewer, setViewer] = React.useState<Viewer | null>(null)
   const current = React.useRef<THREE.Group | null>(null)
@@ -156,9 +161,10 @@ export function StudioViewport({
     paintRef.current = paint
   }, [paint])
 
+  const view = display?.parts && !rs ? parts : NO_PARTS_VIEW
   React.useEffect(() => {
     if (!viewer || !display) return
-    const g = modelObject(display, viewer.kit, paintRef.current)
+    const g = modelObject(display, viewer.kit, paintRef.current, view)
     viewer.setContent(g)
     current.current = g
     if (display.bbox) {
@@ -170,7 +176,15 @@ export function StudioViewport({
         fittedSize.current = size
       }
     } else fittedSize.current = 0
-  }, [viewer, display])
+  }, [viewer, display, view])
+
+  // Frame the pulled-apart parts once the learner lets go of the explode slider.
+  const frameExploded = React.useCallback(() => {
+    if (!viewer || !display?.bbox || !display.parts) return
+    const box = new THREE.Box3(new THREE.Vector3(...display.bbox[0]), new THREE.Vector3(...display.bbox[1]))
+    for (const p of display.parts) box.expandByPoint(new THREE.Vector3(...p.center).addScaledVector(new THREE.Vector3(...p.explode), parts.explode))
+    void viewer.fit(box, { animate: true })
+  }, [viewer, display, parts.explode])
 
   React.useEffect(() => {
     if (!viewer || !current.current) return
@@ -334,6 +348,7 @@ export function StudioViewport({
     }
     const onClick = async (e: PointerEvent) => {
       const { studio: s, busy: isBusy, display: d, open, cancel, measuring: isMeasuring, plane: cut, reselect: rsel } = latest.current
+      if (current.current?.userData.partsMode) return notify("零件炸开或隐藏时不能点选：把爆炸拖回 0，并显示全部零件")
       const mesh = current.current?.children.find((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh)
       if (!d?.mesh || !mesh || s.kernel.phase !== "ready") return
       const { edge, face } = pickTargets(viewer, d, mesh, e, cut)
@@ -399,6 +414,9 @@ export function StudioViewport({
           bbox={display.bbox}
           dims={{ on: showDims, shown: Math.min(DIMS_SHOWN, shownDims.total), total: shownDims.total }}
           onDims={setShowDims}
+          explode={display.parts && display.parts.length > 1 ? parts.explode : null}
+          onExplode={(explode) => onParts({ ...parts, explode })}
+          onExplodeEnd={frameExploded}
         />
       )}
       {rs && (

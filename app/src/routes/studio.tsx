@@ -15,6 +15,7 @@ import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
 import type { Hover } from "@/studio/scene"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
 import { ConnectorOverlay } from "@/studio/ui/connector-overlay"
+import { NO_PARTS_VIEW, type PartsView } from "@/studio/scene"
 import { useReselect } from "@/studio/use-reselect"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
 import { useAnnotations } from "@/studio/use-annotations"
@@ -35,6 +36,8 @@ export function StudioPage() {
   }, [chat.busy, clearSent])
   const [hover, setHover] = React.useState<Hover | null>(null)
   const reselect = useReselect(studio)
+  // A split body: how far its parts are pulled apart, and which are hidden.
+  const [partsView, setPartsView] = React.useState<PartsView>(NO_PARTS_VIEW)
   // A message started from a feature card brings the conversation forward.
   const [tab, setTab] = React.useState("chat")
   const [seenPrefill, setSeenPrefill] = React.useState(annotations.prefill)
@@ -54,6 +57,7 @@ export function StudioPage() {
       .catch(() => setStatus(null))
   }, [])
 
+  const partCount = studio.report?.parts?.length ?? 0
   const download = async (format: "step" | "stl" | "json" | "py") => {
     const blob =
       format === "json"
@@ -64,7 +68,7 @@ export function StudioPage() {
     if (!blob) return notify("还没有实体可以导出")
     const a = document.createElement("a")
     a.href = URL.createObjectURL(blob)
-    a.download = `featuretree-model.${format}`
+    a.download = `featuretree-model.${format === "stl" && blob.type === "application/zip" ? "zip" : format}`
     a.click()
     setTimeout(() => URL.revokeObjectURL(a.href), 1000)
   }
@@ -92,8 +96,8 @@ export function StudioPage() {
               </IconButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
-              <DropdownMenuItem onSelect={() => void download("step")}>导出 STEP</DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => void download("stl")}>导出 STL</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void download("step")}>{partCount > 1 ? `导出 STEP（${partCount} 个零件）` : "导出 STEP"}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void download("stl")}>{partCount > 1 ? "导出 STL（zip，每个零件一个文件）" : "导出 STL"}</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void download("py")}>导出 build123d 代码</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void download("json")}>导出特征树（JSON）</DropdownMenuItem>
             </DropdownMenuContent>
@@ -106,8 +110,8 @@ export function StudioPage() {
 
       <div className="flex min-h-0 flex-1 max-lg:flex-col">
         <main className="relative min-h-0 min-w-0 flex-1">
-          <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={chat.busy} reselect={reselect} />
-          <TreeOverlay studio={studio} onHover={setHover} reselect={reselect} annotations={annotations} busy={chat.busy} />
+          <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={chat.busy} reselect={reselect} parts={partsView} onParts={setPartsView} />
+          <TreeOverlay studio={studio} onHover={setHover} reselect={reselect} annotations={annotations} busy={chat.busy} parts={partsView} onParts={setPartsView} />
         </main>
         <ConnectorOverlay param={hover?.param ?? null} row={hover?.row ?? null} />
 
