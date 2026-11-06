@@ -13,6 +13,7 @@ app/src/studio/
     select.ts      语义选择器 → 面 / 边
     mesh.ts        网格化与几何分类（移植自 spikes/replicad-kernel）
     measure.ts     测量：一个面或边的尺寸，两个之间的距离、角度
+    features2.ts   第二批特征：成形到（下一面 / 某个面）、薄壁（封闭轮廓 / 开放的线）、拉伸拔模、筋
     check.ts       需求核对：外形、壁厚、孔、距离、节圆、角度、体积，由内核量出来
     dims.ts        尺寸：每个建成的特征有哪些数、来自哪里、画在模型的哪里
     topo.ts        列出面、边、实体（按哈希去重，替代 replicad 的 O(n²) 列举）和面的面积、中心
@@ -165,7 +166,12 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
 ## 特征树格式
 
 - 参数：`{ "L": 80, "inner": "L - 2*t" }`，任何数值字段都可以写参数名或表达式。
-- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`。字段见 `dsl.ts`，每个字段都有中文 `describe`，同时也是给模型看的说明。
+- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`rib`。
+- 拉伸的几种写法（`kernel/features2.ts`）：
+  - `distance`、`through`、`until` 三者正好写一个。`until: "next"`：拉得很长，加料时减去实体、切除时与实体求交，只留贴着草图平面的那几块，所以挡住它的面是斜的、弯的都行；`until: { face }`：平行的面就是算好的距离，斜面用 replicad 的 `extrudeUntil`。
+  - `thin`：封闭轮廓用 `Drawing.offset` 偏出一圈（向外偏时凸角会变圆）；开放的线（草图图形 `path`，圆弧按 5 µm 离散）按折线偏移、端头平齐，`inside` 是线拐弯的那一侧。
+  - `draft`：先直拉，再把不平行于草图平面的面拔模；拔模失败（例如圆柱面）就改为原轮廓和内缩轮廓之间的直纹放样。
+- 筋 `rib`：一条 `path` 两端延长很远，在线的一侧围成一大块，厚 `t` 横跨草图平面；和实体包围盒求交、减去实体，只留不碰包围盒外框的块（被实体围住的空腔）。两侧都有时取靠近实体中心的一侧，`flip` 换另一侧。字段见 `dsl.ts`，每个字段都有中文 `describe`，同时也是给模型看的说明。
 - 阵列个数、多边形边数也可以写参数或表达式，结果必须是整数。
 - `paramNotes`：每个参数一句说明，只给人看，不参与计算。
 - 草图平面 `on`：

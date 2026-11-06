@@ -26,6 +26,7 @@ const OP_ICON: Record<Feature["op"], OpId> = {
   sweep: "sweep",
   loft: "loft",
   draft: "draft",
+  rib: "rib",
 }
 
 function iconOf(f: Feature): OpId {

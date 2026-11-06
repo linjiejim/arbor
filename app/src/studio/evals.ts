@@ -28,6 +28,8 @@ export type EvalCase = {
   extra?: (q: EvalQuery) => EvalCheck[]
   /** A sketch text that must be in the tree. */
   text?: string
+  /** A field the tree must use (design intent, e.g. "until"): searched in the features' JSON. */
+  uses?: string
 }
 
 const plate = (L: number, W: number, T: number): Tree => ({
@@ -144,6 +146,29 @@ export const EVALS: EvalCase[] = [
       return [{ name: "凸台立在斜面中心", pass: ok, detail: c.map((x) => `(${x.join(", ")})`).join(" ") || "没有 R5 的圆柱面" }]
     },
   },
+  {
+    id: "up-to-next",
+    prompt: "做一个门字形支架：底板 80×60×8，左右两侧各一块厚 8、高 40 的竖板（和底板一样宽，贴着底板两端），顶上盖一块 80×60×6 的顶板；在底板中心立一根 ⌀16 的圆柱，向上一直长到碰到顶板为止。",
+    size: [80, 60, 54],
+    upright: true,
+    volume: 80 * 60 * 8 + 2 * 8 * 60 * 40 + 80 * 60 * 6 + PI * 64 * 40,
+    uses: "until",
+  },
+  {
+    id: "thin-angle",
+    prompt: "用一条 L 形的开放线（横 40、竖 30，画在前视基准面上）做一根厚 3、长 50 的角钢：用薄壁拉伸，厚度向里。",
+    size: [40, 50, 30],
+    volume: (40 + 30 - 3) * 3 * 50,
+    uses: "thin",
+  },
+  {
+    id: "gusset",
+    prompt: "做一个 L 形支架：底板 60×30×6（长沿 X、宽沿 Y，中心在原点），在 X=-30 那头立一块厚 6、总高 50 的立板（和底板一样宽）。中间加一条厚 4 的三角加强筋：从立板内侧离地 40 处，斜着连到底板顶面 X=10 处。",
+    size: [60, 30, 50],
+    upright: true,
+    volume: 60 * 30 * 6 + 6 * 30 * 44 + (34 * 34) / 2 * 4,
+    uses: "rib",
+  },
   { id: "rib-plate", prompt: "做一块 120×80×4 的底板，顶面上沿 X 方向等距放 3 条加强筋（每条长 100、宽 3、高 12），筋间距 25，中间那条在 Y=0。", size: [120, 80, 16], upright: true, volume: 120 * 80 * 4 + 3 * 100 * 3 * 12 },
 ]
 
@@ -173,6 +198,10 @@ export function checkCase(c: EvalCase, tree: Tree, report: BuildReport, q?: Eval
   if (c.text) {
     const texts = tree.features.flatMap((f) => (f.op === "sketch" ? f.shapes.flatMap((s) => (s.type === "text" ? [s.text] : [])) : []))
     out.push({ name: "文字", pass: texts.some((t) => t.includes(c.text!)), detail: texts.join(" / ") || "没有文字" })
+  }
+  if (c.uses) {
+    const used = tree.features.some((f) => JSON.stringify(f).includes(`"${c.uses}"`))
+    out.push({ name: `用到 ${c.uses}`, pass: used, detail: used ? "ok" : "没用到，手算了尺寸" })
   }
   if (c.extra && q) out.push(...c.extra(q))
   return out

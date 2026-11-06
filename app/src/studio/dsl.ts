@@ -118,6 +118,13 @@ export const SketchShape = z.discriminatedUnion("type", [
     cut: Cut,
   }),
   z.object({
+    type: z.literal("path"),
+    points: z
+      .array(z.union([Vec2, z.object({ to: Vec2, via: Vec2.describe("圆弧经过的中间点") })]))
+      .min(2)
+      .describe("开放的线，依次连接，不自动闭合；只能用于薄壁拉伸（thin）和筋（rib）"),
+  }),
+  z.object({
     type: z.literal("polyline"),
     points: z
       .array(z.union([Vec2, z.object({ to: Vec2, via: Vec2.describe("圆弧经过的中间点") })]))
@@ -141,10 +148,25 @@ export const Feature = z.discriminatedUnion("op", [
     ...Base,
     op: z.literal("extrude"),
     sketch: z.string().describe("草图特征 id"),
-    distance: Num,
+    distance: Num.optional().describe("拉伸距离；用 until 或 through 时不写"),
     mode: Mode,
     direction: z.enum(["normal", "reverse", "both"]).optional().describe("normal = 沿草图法向（默认），reverse = 反向，both = 两侧对称"),
-    through: z.boolean().optional().describe("切除时贯穿全部（忽略 distance）"),
+    through: z.boolean().optional().describe("切除时贯穿全部（不写 distance）"),
+    until: z
+      .union([
+        z.literal("next").describe("成形到下一面：加料时一直长到碰到实体为止，切除时切到这段材料穿出为止"),
+        z.object({ face: FaceSelector.describe("成形到这个面（要正好选中一个）"), offset: Num.optional().describe("停在离这个面多远的地方，正值 = 还没到") }),
+      ])
+      .optional()
+      .describe("成形到：设计意图是「到那个面为止」，不用自己算距离（不写 distance）"),
+    thin: z
+      .object({
+        t: Num.describe("壁厚"),
+        side: z.enum(["center", "inside", "outside"]).optional().describe("厚度加在线的哪一侧：center = 两侧各一半（缺省）；inside = 向里（封闭轮廓向内，开放的线向拐弯的那一侧）"),
+      })
+      .optional()
+      .describe("薄壁拉伸：只沿着轮廓线长出一圈等厚的壁；草图可以是开放的线（path）"),
+    draft: Num.optional().describe("拔模角（度）：正值让侧壁沿拉伸方向向内收，一步拉出锥形凸台或带斜度的槽"),
   }),
   z.object({
     ...Base,
@@ -230,7 +252,16 @@ export const Feature = z.discriminatedUnion("op", [
     op: z.literal("draft"),
     faces: FaceSelector.describe("要加拔模角的面（通常是侧壁）"),
     angle: Num.describe("拔模角，度；正值让侧壁朝开模方向向内收"),
-    neutral: z.object({ plane: PlaneName, offset: Num.optional() }).describe("中性面：这里的尺寸保持不变，通常是分型面或底面"),
+    neutral: z
+      .object({ plane: PlaneName, offset: Num.optional(), face: FaceSelector.optional().describe("用这个平面作中性面（例如不在基准面上的分型面）；写了它时 plane、offset 不用") })
+      .describe("中性面：这里的尺寸保持不变，通常是分型面或底面"),
+  }),
+  z.object({
+    ...Base,
+    op: z.literal("rib"),
+    sketch: z.string().describe("只含一条开放的线（path）的草图，画在筋所在的平面上；线的两端可以不碰到实体，会自动延长到墙"),
+    t: Num.describe("筋厚，在草图平面两侧各一半"),
+    flip: z.boolean().optional().describe("材料长在线的另一侧（两侧都被实体围住、自动判断不明确时才用）"),
   }),
   z.object({
     ...Base,
@@ -298,6 +329,7 @@ export const OP_NAMES: Record<FeatureOp, string> = {
   sweep: "扫掠",
   loft: "放样",
   draft: "拔模",
+  rib: "筋",
 }
 
 /** Display name: the model's own name, else 「拉伸2」 style numbering. */

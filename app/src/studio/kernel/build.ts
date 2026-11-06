@@ -34,6 +34,7 @@ import { measure, type MeasureResult, type MeasureTarget } from "./measure"
 import { countOf, edgesOf, facesOf, solidsOf } from "./topo"
 import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
 import { runChecks, type CheckResult } from "./check"
+import { pathPoints, planeFace, ribTool, tapered, thinProfile, untilNext } from "./features2"
 import { standardHole } from "../holes"
 import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
@@ -164,7 +165,8 @@ type Step = {
   sigs: FaceSig[]
   mesh: Mesh | null
   edges: EdgeMesh | null
-  sketch?: { drawing: Drawing; plane: ResolvedPlane; lines: Float32Array }
+  /** `drawing`: the closed regions (null when only open paths); `paths`: open paths as points. */
+  sketch?: { drawing: Drawing | null; paths: [number, number][][]; plane: ResolvedPlane; lines: Float32Array }
   tools?: Tool[]
   /** Tapped holes this step drilled: drill radius and the thread's nominal diameter. */
   threads?: Thread[]
@@ -685,44 +687,115 @@ export class Kernel {
     switch (f.op) {
       case "sketch": {
         const plane = this.plane(f.on, prev)
-        const drawing = sketchDrawing(f.shapes, this.scope, plane.flipped)
-        const sk = sketchOn(drawing.clone(), plane)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const faceShape: any = (sk as any).faces()
-        const lines = meshEdges(faceShape).lines
-        faceShape.delete?.()
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        ;(sk as any).delete?.()
-        return { sketch: { drawing, plane, lines }, geom: { op: "sketch", plane: frameOf(plane) }, summary: `${plane.label} · ${f.shapes.map(shapeName).join("、")}` }
+        const { drawing, paths } = sketchDrawing(f.shapes, this.scope, plane.flipped)
+        let lines: number[] = []
+        if (drawing) {
+          const sk = sketchOn(drawing.clone(), plane)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const faceShape: any = (sk as any).faces()
+          lines = Array.from(meshEdges(faceShape).lines)
+          faceShape.delete?.()
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ;(sk as any).delete?.()
+        }
+        // Open paths drawn as their segments, on the plane.
+        const at = (p: [number, number]) => add(plane.origin, add(mul(plane.x, p[0]), mul(plane.y, p[1])))
+        const pathLines = paths.flatMap((pts) => pts.slice(1).flatMap((p, i) => [...at(pts[i]), ...at(p)]))
+        return { sketch: { drawing, paths, plane, lines: Float32Array.from([...lines, ...pathLines]) }, geom: { op: "sketch", plane: frameOf(plane) }, summary: `${plane.label} · ${f.shapes.map(shapeName).join("、")}` }
       }
       case "extrude": {
-        const { drawing, plane } = this.sketchOf(f.sketch)
+        const sk = this.sketchOf(f.sketch)
+        const { plane } = sk
         const mode = f.mode ?? "add"
-        let d = n(f.distance)
+        const ways = [f.distance !== undefined, !!f.through, !!f.until].filter(Boolean).length
+        if (ways !== 1) throw new InputError("拉伸的 distance、until、through 正好写一个")
+        const profile = f.thin ? thinProfile(sk.drawing, sk.paths, n(f.thin.t), f.thin.side ?? "center") : regionOf(sk, f.sketch)
         let origin = plane.origin
         let dir = plane.normal
+        if (f.direction === "reverse") dir = mul(plane.normal, -1)
+        let tool: Shape3D
+        let how: string
         if (f.through) {
           if (mode !== "cut") throw new InputError("「贯穿」只用于切除")
-          d = 2 * this.bigLength(body)
-          origin = add(origin, mul(plane.normal, -d / 2))
+          if (f.draft) throw new InputError("贯穿切除不能带拔模角")
+          const d = 2 * this.bigLength(body)
+          origin = add(plane.origin, mul(plane.normal, -d / 2))
+          dir = plane.normal
+          tool = mergeOverlaps(sketchOn(profile.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D)
+          how = "贯穿"
+        } else if (f.until) {
+          if (f.direction === "both") throw new InputError("两侧对称（both）不能和成形到（until）一起用")
+          if (f.draft) throw new InputError("成形到不能带拔模角：先成形到，再用拔模特征")
+          if (!body || !prev) throw new InputError("还没有实体，没有可以成形到的面")
+          if (f.until === "next") {
+            const long = mergeOverlaps(sketchOn(profile.clone(), plane, origin).extrude(2 * this.bigLength(body), { extrusionDirection: dir }) as Shape3D)
+            const got = untilNext(long, body, origin, dir, mode)
+            long.delete()
+            tool = got.tool
+            how = `成形到下一面（实际 ${fmt(got.length)} mm）`
+          } else {
+            const target = planeFace(body, prev.origins, f.until.face, this.scope, "成形到的面")
+            const offset = f.until.offset !== undefined ? n(f.until.offset) : 0
+            if (Math.abs(Math.abs(dot(target.normal, dir)) - 1) < 1e-6) {
+              const d = dot(sub(target.center, origin), dir) - offset
+              if (!(d > 1e-6)) throw new InputError("这个面在草图的另一侧：换个方向（direction: reverse），或者选别的面")
+              tool = mergeOverlaps(sketchOn(profile.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D)
+              how = `成形到面（${fmt(d)} mm）`
+            } else {
+              if (offset) throw new InputError("成形到斜面时不能带 offset")
+              const faces = faceInfos(body, prev.origins)
+              try {
+                const face = selectFaces(f.until.face, faces, this.scope)[0]
+                const skt = sketchOn(profile.clone(), plane, origin)
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                if (!("extrudeUntil" in (skt as any))) throw new InputError("成形到斜面只支持一个闭合轮廓")
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                tool = (skt as any).extrudeUntil(face.face, { extrusionDirection: dir }) as Shape3D
+              } catch (e) {
+                if (e instanceof InputError) throw e
+                throw new InputError("这个面挡不住整个轮廓：选一个能盖住整个草图的面")
+              } finally {
+                disposeInfos(faces)
+              }
+              how = "成形到斜面"
+            }
+          }
         } else {
+          const d = n(f.distance!)
           if (!(d > 0)) throw new InputError("拉伸距离必须大于 0")
           if (f.direction === "both") origin = add(origin, mul(plane.normal, -d / 2))
-          if (f.direction === "reverse") dir = mul(plane.normal, -1)
+          if (f.draft !== undefined && n(f.draft) !== 0) {
+            const angle = n(f.draft)
+            if (f.direction === "both") throw new InputError("两侧对称（both）不能带拔模角")
+            const inset = d * Math.tan((angle * Math.PI) / 180)
+            tool = tapered(
+              () => sketchOn(profile.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D,
+              () => {
+                const top = sketchOn(profile.offset(-inset), plane, add(origin, mul(dir, d)))
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return (sketchOn(profile.clone(), plane, origin) as any).loftWith([top], { ruled: true }) as Shape3D
+              },
+              origin,
+              plane.x,
+              dir,
+              angle,
+            )
+          } else tool = mergeOverlaps(sketchOn(profile.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D)
+          how = `${f.direction === "both" ? "两侧对称 " : f.direction === "reverse" ? "反向 " : ""}${fmt(d)} mm${f.draft ? ` · 拔模 ${fmt(n(f.draft))}°` : ""}`
         }
-        const tool = mergeOverlaps(sketchOn(drawing.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D)
         const next = applyTool(body, tool, mode, warnings)
-        const how = f.through ? "贯穿" : `${f.direction === "both" ? "两侧对称 " : f.direction === "reverse" ? "反向 " : ""}${fmt(d)} mm`
-        const box = drawing.boundingBox.bounds as [[number, number], [number, number]]
+        const box = profile.boundingBox.bounds as [[number, number], [number, number]]
         return {
           body: next,
           tools: [{ tool, mode }],
-          geom: { op: "extrude", plane: frameOf(plane), start: origin, dir, box: [box[0], box[1]] },
-          summary: `${mode === "cut" ? "切除" : "加料"} ${how}`,
+          geom: f.through ? undefined : { op: "extrude", plane: frameOf(plane), start: origin, dir, box: [box[0], box[1]] },
+          summary: `${f.thin ? `薄壁 ${fmt(n(f.thin.t))} · ` : ""}${mode === "cut" ? "切除" : "加料"} ${how}`,
         }
       }
       case "revolve": {
-        const { drawing, plane } = this.sketchOf(f.sketch)
+        const sk = this.sketchOf(f.sketch)
+        const { plane } = sk
+        const drawing = regionOf(sk, f.sketch)
         const P = PLANES[plane.name]
         const axis = AXIS[f.axis]
         const angle = f.angle !== undefined ? n(f.angle) : 360
@@ -852,7 +925,9 @@ export class Kernel {
       }
       case "loft": {
         const sketches = f.sketches.map((id) => {
-          const { drawing, plane } = this.sketchOf(id)
+          const src = this.sketchOf(id)
+          const { plane } = src
+          const drawing = regionOf(src, id)
           const sk = sketchOn(drawing.clone(), plane)
           if (!("wire" in sk)) throw new InputError(`放样的草图「${id}」有多个轮廓：每个截面只能是一个闭合轮廓`)
           return sk
@@ -871,14 +946,33 @@ export class Kernel {
         try {
           const sel = selectFaces(f.faces, faces, this.scope)
           const list = sel.map((x) => x.face)
-          const origin: V3 = [0, 0, 0]
-          origin[PLANES[f.neutral.plane].axis] = f.neutral.offset !== undefined ? n(f.neutral.offset) : 0
-          const next = body.draft(angle, (ff) => ff.inList(list), makePlane(f.neutral.plane, origin))
+          let neutral: Plane
+          if (f.neutral.face) {
+            const nf = planeFace(body, prev!.origins, f.neutral.face, this.scope, "中性面")
+            const x: V3 = Math.abs(nf.normal[2]) < 0.9 ? unit(cross([0, 0, 1], nf.normal)) : [1, 0, 0]
+            neutral = new Plane(nf.center, x, nf.normal)
+          } else {
+            const origin: V3 = [0, 0, 0]
+            origin[PLANES[f.neutral.plane].axis] = f.neutral.offset !== undefined ? n(f.neutral.offset) : 0
+            neutral = makePlane(f.neutral.plane, origin)
+          }
+          const next = body.draft(angle, (ff) => ff.inList(list), neutral)
           const geom: StepGeom = { op: "faces", at: sel[0].center, out: sel[0].normal ?? [0, 0, 1] }
-          return { body: next, selected: sel.length, geom, summary: `${fmt(angle)}° · ${sel.length} 个面 · 中性面 ${PLANES[f.neutral.plane].label}` }
+          return { body: next, selected: sel.length, geom, summary: `${fmt(angle)}° · ${sel.length} 个面 · 中性面 ${f.neutral.face ? "选中的面" : PLANES[f.neutral.plane].label}` }
         } finally {
           disposeInfos(faces)
         }
+      }
+      case "rib": {
+        if (!body) throw new InputError("还没有实体，筋要长在实体上")
+        const sk = this.sketchOf(f.sketch)
+        if (sk.drawing || sk.paths.length !== 1) throw new InputError("筋的草图只能有一条开放的线（path）")
+        const tool = ribTool(body, sk.paths[0], frameOf(sk.plane), n(f.t), 2 * this.bigLength(body), !!f.flip)
+        const next = applyTool(body, tool, "add", warnings)
+        const pts = sk.paths[0]
+        const mid = pts[Math.floor(pts.length / 2)]
+        const geom: StepGeom = { op: "faces", at: add(sk.plane.origin, add(mul(sk.plane.x, mid[0]), mul(sk.plane.y, mid[1]))), out: sk.plane.normal }
+        return { body: next, tools: [{ tool, mode: "add" }], geom, summary: `筋 厚 ${fmt(n(f.t))}` }
       }
       case "mirror": {
         if (!body) throw new InputError("还没有实体")
@@ -911,6 +1005,12 @@ export class Kernel {
     }
     return { body: cur, tools, summary }
   }
+}
+
+/** A sketch's closed regions, for features that need an area. */
+function regionOf(sk: NonNullable<Step["sketch"]>, id: string): Drawing {
+  if (!sk.drawing) throw new InputError(`草图「${id}」只有开放的线：开放的线只能做薄壁拉伸（thin）或筋（rib）`)
+  return sk.drawing
 }
 
 const frameOf = (p: ResolvedPlane): Frame => ({ origin: p.origin, x: p.x, y: p.y, normal: p.normal })
@@ -1006,7 +1106,7 @@ function stats(body: Shape3D): BodyStats {
 }
 
 function shapeName(s: SketchShape) {
-  const tag = s.cut ? "（挖）" : ""
+  const tag = "cut" in s && s.cut ? "（挖）" : ""
   switch (s.type) {
     case "rect":
       return `矩形 ${s.w}×${s.h}${tag}`
@@ -1018,16 +1118,23 @@ function shapeName(s: SketchShape) {
       return `长圆孔 ${s.length}×${s.width}${tag}`
     case "polyline":
       return `轮廓 ${s.points.length} 点${tag}`
+    case "path":
+      return `开放的线 ${s.points.length} 点`
     case "text":
       return `文字「${s.text.replace(/\n/g, " ")}」${tag}`
   }
 }
 
 /** `mirrorText`: the sketch is seen from behind its datum plane, so text is mirrored to read right from outside. */
-function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false): Drawing {
+function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false): { drawing: Drawing | null; paths: [number, number][][] } {
   const n = (v: number | string) => num(v, scope)
   let parts: Drawing[] = []
+  const paths: [number, number][][] = []
   for (const s of shapes) {
+    if (s.type === "path") {
+      paths.push(pathPoints(s.points.map((p) => (Array.isArray(p) ? { to: [n(p[0]), n(p[1])] as [number, number] } : { to: [n(p.to[0]), n(p.to[1])] as [number, number], via: [n(p.via[0]), n(p.via[1])] as [number, number] }))))
+      continue
+    }
     const c = s.type !== "polyline" && s.center ? [n(s.center[0]), n(s.center[1])] : [0, 0]
     let d: Drawing
     switch (s.type) {
@@ -1101,10 +1208,11 @@ function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false):
       parts = [...parts.filter((p) => !hit.includes(p)), merged]
     }
   }
-  if (parts.length === 1) return parts[0]
+  if (!parts.length) return { drawing: null, paths }
+  if (parts.length === 1) return { drawing: parts[0], paths }
   // Drawing keeps its shape private; disjoint regions are just listed together.
   const inner = (x: Drawing) => (x as unknown as { innerShape: Blueprint | Blueprints | CompoundBlueprint | null }).innerShape
-  return new Drawing(new Blueprints(parts.flatMap((p) => { const i = inner(p); return !i ? [] : i instanceof Blueprints ? i.blueprints : [i] })))
+  return { drawing: new Drawing(new Blueprints(parts.flatMap((p) => { const i = inner(p); return !i ? [] : i instanceof Blueprints ? i.blueprints : [i] }))), paths }
 }
 
 const overlaps = (a: [number[], number[]], b: [number[], number[]]) => a[0][0] <= b[1][0] && b[0][0] <= a[1][0] && a[0][1] <= b[1][1] && b[0][1] <= a[1][1]

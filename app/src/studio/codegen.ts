@@ -45,7 +45,7 @@ function sketchPlane(on: PlaneRef) {
 }
 
 function shape2d(s: SketchShape): string {
-  const at = s.type !== "polyline" && s.center ? `Pos(${py(s.center[0])}, ${py(s.center[1])}) * ` : ""
+  const at = s.type !== "polyline" && s.type !== "path" && s.center ? `Pos(${py(s.center[0])}, ${py(s.center[1])}) * ` : ""
   switch (s.type) {
     case "rect":
       return s.r !== undefined ? `${at}RectangleRounded(${py(s.w)}, ${py(s.h)}, ${py(s.r)})` : `${at}Rectangle(${py(s.w)}, ${py(s.h)})`
@@ -58,6 +58,8 @@ function shape2d(s: SketchShape): string {
       return `${at}Text(${JSON.stringify(s.text)}, ${py(s.size)}, font="Noto Sans SC"${s.angle !== undefined ? `, rotation=${py(s.angle)}` : ""})`
     case "slot":
       return `${at}SlotOverall(${py(s.length)}, ${py(s.width)}${s.angle !== undefined ? `, rotation=${py(s.angle)}` : ""})`
+    case "path":
+      return pathCurve(s.points)
     case "polyline": {
       const pts = s.points.map((p) => (Array.isArray(p) ? { to: p } : p))
       const xy = (p: [N, N]) => `(${py(p[0])}, ${py(p[1])})`
@@ -72,6 +74,19 @@ function shape2d(s: SketchShape): string {
       return `make_face([${segs.join(", ")}])`
     }
   }
+}
+
+/** An open path as one curve: straight runs as a Polyline, arcs as ThreePointArc. */
+function pathCurve(points: (N[] | { to: N[]; via: N[] })[]): string {
+  const pts = points.map((p) => (Array.isArray(p) ? { to: p } : p))
+  const xy = (p: N[]) => `(${py(p[0])}, ${py(p[1])})`
+  const segs = pts.slice(1).map((p, i) => ("via" in p && p.via ? `ThreePointArc(${xy(pts[i].to)}, ${xy(p.via)}, ${xy(p.to)})` : `Line(${xy(pts[i].to)}, ${xy(p.to)})`))
+  return segs.length === 1 ? segs[0] : `Curve() + [${segs.join(", ")}]`
+}
+
+/** An open path's corner points, for the rib helper (arcs by their end points). */
+function pathPointsPy(points: (N[] | { to: N[]; via: N[] })[]): string {
+  return `[${points.map((p) => (Array.isArray(p) ? p : p.to)).map((p) => `(${py(p[0])}, ${py(p[1])})`).join(", ")}]`
 }
 
 function faces(sel: FaceSelector, base = "part.faces()"): string {
@@ -119,16 +134,54 @@ function feature(f: Feature, tree: Tree): string[] {
   const head = [`# ${displayName(tree, f)}（${f.id}）${f.intent ? `：${f.intent}` : ""}`]
   switch (f.op) {
     case "sketch": {
-      const [first, ...rest] = f.shapes
-      const body = rest.reduce((acc, s) => `${acc} ${s.cut ? "-" : "+"} ${shape2d(s)}`, shape2d(first))
-      return [...head, `sk_${f.id} = ${sketchPlane(f.on)} * (${body})`]
+      const regions = f.shapes.filter((s) => s.type !== "path")
+      const paths = f.shapes.filter((s) => s.type === "path")
+      const out = [...head]
+      if (regions.length) {
+        const [first, ...rest] = regions
+        const body = rest.reduce((acc, s) => `${acc} ${"cut" in s && s.cut ? "-" : "+"} ${shape2d(s)}`, shape2d(first))
+        out.push(`sk_${f.id} = ${sketchPlane(f.on)} * (${body})`)
+      }
+      // An open path: a curve for thin walls (trace), its points for ribs.
+      if (paths[0]?.type === "path") out.push(`path_${f.id} = ${sketchPlane(f.on)} * (${shape2d(paths[0])})`, `plane_${f.id} = ${sketchPlane(f.on)}`, `pts_${f.id} = ${pathPointsPy(paths[0].points)}`)
+      return out
     }
     case "extrude": {
-      const sk = `sk_${f.sketch}`
-      if (f.through) return [...head, `tool_${f.id} = extrude(${sk}, amount=1000, both=True)`, combine(f.id, "cut")]
-      const opts = f.direction === "both" ? `amount=${py(f.distance)} / 2, both=True` : f.direction === "reverse" ? `amount=${py(f.distance)}, dir=-${sk}.faces()[0].normal_at()` : `amount=${py(f.distance)}`
-      return [...head, `tool_${f.id} = extrude(${sk}, ${opts})`, combine(f.id, f.mode)]
+      const src = tree.features.find((x) => x.id === f.sketch)
+      const open = src?.op === "sketch" && src.shapes.every((s) => s.type === "path")
+      let sk = `sk_${f.sketch}`
+      const out = [...head]
+      if (f.thin) {
+        const t = py(f.thin.t)
+        const side = f.thin.side ?? "center"
+        if (open) {
+          out.push(`# 薄壁：沿开放的线长出厚 ${t} 的壁${side === "center" ? "" : "（build123d 的 trace 是两侧各一半，偏向一侧时位置会差半个壁厚）"}`)
+          out.push(`thin_${f.id} = trace(path_${f.sketch}, line_width=${t})`)
+        } else {
+          const [a, b] = side === "center" ? [`${t} / 2`, `${t} / 2`] : side === "inside" ? ["0", t] : [t, "0"]
+          out.push(`thin_${f.id} = offset(${sk}, amount=${a}, kind=Kind.INTERSECTION) - offset(${sk}, amount=-${b}, kind=Kind.INTERSECTION)`)
+        }
+        sk = `thin_${f.id}`
+      }
+      const taper = f.draft !== undefined ? `, taper=${py(f.draft)}` : ""
+      if (f.through) return [...out, `tool_${f.id} = extrude(${sk}, amount=1000, both=True)`, combine(f.id, "cut")]
+      if (f.until === "next") return [...out, `tool_${f.id} = extrude(${sk}, until=Until.NEXT, target=part${f.direction === "reverse" ? `, dir=-${sk}.faces()[0].normal_at()` : ""})`, combine(f.id, f.mode)]
+      if (f.until) {
+        const off = f.until.offset !== undefined ? `.offset(-(${py(f.until.offset)}))` : ""
+        return [
+          ...out,
+          "# 成形到面：拉得足够长，再用那个面所在的平面切掉多出来的部分",
+          `limit_${f.id} = Plane(${faces(f.until.face)}[0])${off}`,
+          `tool_${f.id} = split(extrude(${sk}, amount=1000${f.direction === "reverse" ? `, dir=-${sk}.faces()[0].normal_at()` : ""}), bisect_by=limit_${f.id}, keep=Keep.BOTTOM)`,
+          combine(f.id, f.mode),
+        ]
+      }
+      const d = py(f.distance ?? 0)
+      const opts = f.direction === "both" ? `amount=${d} / 2, both=True` : f.direction === "reverse" ? `amount=${d}, dir=-${sk}.faces()[0].normal_at()` : `amount=${d}`
+      return [...out, `tool_${f.id} = extrude(${sk}, ${opts}${taper})`, combine(f.id, f.mode)]
     }
+    case "rib":
+      return [...head, `tool_${f.id} = rib(part, plane_${f.sketch}, pts_${f.sketch}, ${py(f.t)}${f.flip ? ", flip=True" : ""})`, combine(f.id, "add")]
     case "revolve":
       return [...head, `tool_${f.id} = revolve(sk_${f.sketch}, axis=${AXIS[f.axis]}${f.angle !== undefined ? `, revolution_arc=${py(f.angle)}` : ""})`, combine(f.id, f.mode)]
     case "fillet":
@@ -206,7 +259,7 @@ function feature(f: Feature, tree: Tree): string[] {
     case "loft":
       return [...head, `tool_${f.id} = loft([${f.sketches.map((id) => `sk_${id}`).join(", ")}], ruled=${f.ruled ? "True" : "False"})`, combine(f.id, f.mode)]
     case "draft":
-      return [...head, `part = draft(${faces(f.faces)}, ${plane(f.neutral)}, ${py(f.angle)})`]
+      return [...head, `part = draft(${faces(f.faces)}, ${f.neutral.face ? `Plane(${faces(f.neutral.face)}[0])` : plane(f.neutral)}, ${py(f.angle)})`]
     case "mirror": {
       const about = plane({ plane: f.plane, offset: f.offset })
       if (!f.features?.length) return [...head, `part = part + mirror(part, about=${about})`]
@@ -268,6 +321,25 @@ Z 轴朝上，单位毫米。选择器按语义转成 build123d 的过滤；「�
     "        return flat",
     "    x = Vector(0, 0, 1).cross(n) if abs(n.Z) < 0.999 else Vector(1, 0, 0)",
     "    return Plane(origin=face.center() + n * offset, x_dir=x.normalized(), z_dir=n)",
+    "",
+    "",
+    "def rib(part, plane, pts, t, flip=False):",
+    '    """筋：线的两端延长到很远，取被实体围住的那一侧，在草图平面两侧各 t/2。"""',
+    "    far = 10 * part.bounding_box().diagonal",
+    "    p = [Vector(*q) for q in pts]",
+    "    a = p[0] - (p[1] - p[0]).normalized() * far",
+    "    b = p[-1] + (p[-1] - p[-2]).normalized() * far",
+    "    side = Vector(-(b - a).Y, (b - a).X).normalized() * far",
+    "    bb = part.bounding_box()",
+    "    box = Pos(bb.center()) * Box(bb.size.X, bb.size.Y, bb.size.Z)",
+    "    inside = lambda s: all(lo > lo0 + 1e-3 and hi < hi0 - 1e-3 for lo, hi, lo0, hi0 in zip(s.bounding_box().min, s.bounding_box().max, bb.min, bb.max))",
+    "    for s in ([-1, 1] if flip else [1, -1]):",
+    "        outline = make_face(Polyline(a, *p[1:-1], b, b + side * s, a + side * s, close=True))",
+    "        slab = extrude(plane * outline, amount=t / 2, both=True)",
+    "        kept = [x for x in ((slab & box) - part).solids() if inside(x)]",
+    "        if kept:",
+    "            return Compound(kept)",
+    '    raise ValueError("筋碰不到实体")',
     "",
     "",
     "def on_feature(items, tool):",

@@ -10,7 +10,7 @@ import { Check, EdgeSelector, FaceSelector, Feature, Num, type FeatureOp } from 
 
 const OP_DOCS: Record<FeatureOp, string> = {
   sketch: "在基准面（或贴在某个平面上）画一个闭合草图，可以由多个图形组合，cut=true 的图形挖掉前面的图形；图形也可以是文字（刻字、凸字）。草图本身不改变实体。",
-  extrude: "把草图沿法向拉伸成实体：mode=add 加料、mode=cut 切除；direction=both 两侧对称；through=true 切除贯穿。",
+  extrude: "把草图沿法向拉伸成实体：mode=add 加料、mode=cut 切除；direction=both 两侧对称；through=true 切除贯穿；until 成形到下一面或某个面（柱子要长到上面的板时用 until: \"next\"，不要自己算距离）；thin 薄壁（等厚的壁，开放的线 path 也能用）；draft 拔模角（锥形凸台、带斜度的槽）。",
   revolve: "把草图绕过原点的一根坐标轴旋转成回转体。轮廓只能在轴的一侧（可以贴着轴）。",
   fillet: "对选中的边做圆角。用语义选择器选边；半径不能大于相邻面的宽度或壁厚。外观圆角通常放在最后。",
   chamfer: "对选中的边做倒角（等距）。",
@@ -22,6 +22,7 @@ const OP_DOCS: Record<FeatureOp, string> = {
   sweep: "扫掠：圆形或矩形截面沿一条平面路径走一遍（把手、管子、线槽）。路径拐弯要圆滑，拐弯半径要大于截面半宽。",
   loft: "放样：在两个以上的截面草图之间生成过渡实体（例如方变圆、键帽）。截面画在平行的偏移平面上。",
   draft: "拔模：给侧壁加脱模斜度（注塑件常用 1–3°），中性面上的尺寸不变。先拔模、后倒圆角。",
+  rib: "筋（加强筋）：草图里画一条开放的线（path），在线所在的平面上长出厚 t 的筋，线的两端会自动延长到墙，材料长在被实体围住的那一侧（例如 L 形支架的三角筋）。",
 }
 
 const featureTools = Object.fromEntries(
