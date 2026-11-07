@@ -12,6 +12,14 @@ import type { Manifest, ModelIndexEntry } from "../src/three/baked"
 export const test = base.extend<{ watch: void }>({
   watch: [
     async ({ page }, use, testInfo) => {
+      // The first-visit walkthrough (ⓘ hints) would sit over what the tests click; its own test turns it back on.
+      await page.addInitScript(() => {
+        try {
+          localStorage.setItem("arbor:tour:studio", "seen")
+        } catch {
+          /* opaque origins */
+        }
+      })
       const problems: string[] = []
       const where = () => route(page)
       page.on("pageerror", (e) => problems.push(`[${where()}] pageerror: ${e.stack ?? e.message}`))

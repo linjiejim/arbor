@@ -2,7 +2,8 @@ import * as React from "react"
 import { applyEdit, executeTool, treeText, type ToolRun } from "./apply"
 import { takeKernel } from "./boot"
 import type { KernelClient } from "./client"
-import { EMPTY_TREE, Tree } from "./dsl"
+import { EMPTY_TREE, Tree, type Check } from "./dsl"
+import { withPinned } from "./pinned"
 import type { BuildReport, DisplayData } from "./kernel/build"
 import type { Dim } from "./kernel/dims"
 import type { MeasureTarget } from "./kernel/measure"
@@ -72,12 +73,17 @@ export function useStudio(shared?: Tree) {
     setDisplay(await c.display(index >= 0 ? index : undefined))
   }, [])
 
+  /** A practice's checks: every tree adopted keeps them (pinned.ts). */
+  const pinnedRef = React.useRef<Check[] | null>(null)
+  const readyRef = React.useRef(false)
+
   /** Rebuild `t`, adopt it as the current tree, refresh the view. */
   const commit = React.useCallback(
-    async (t: Tree, rep?: BuildReport) => {
+    async (given: Tree, rep?: BuildReport) => {
       const c = client.current
       if (!c) return null
-      const r = rep ?? (await c.rebuild(t))
+      const t = withPinned(given, pinnedRef.current)
+      const r = t === given && rep ? rep : await c.rebuild(t)
       treeRef.current = t
       setTreeState(t)
       setReport(r)
@@ -99,6 +105,7 @@ export function useStudio(shared?: Tree) {
       .then(async () => {
         if (!life.alive) return
         setKernel({ phase: "ready" })
+        readyRef.current = true
         // /studio?start=<id> opens a ready-made tree (from a teardown, or a shared link).
         const url = new URL(location.href)
         const starter = persist ? STARTERS.find((x) => x.id === url.searchParams.get("start")) : undefined
@@ -246,6 +253,15 @@ export function useStudio(shared?: Tree) {
 
   const measure = React.useCallback(async (targets: MeasureTarget[]) => (rollbackRef.current ? null : (client.current?.measure(targets) ?? null)), [])
 
+  /** Pin a practice's checks (null: none); the current tree gets them now. */
+  const pinChecks = React.useCallback(
+    (checks: Check[] | null) => {
+      pinnedRef.current = checks
+      if (checks && readyRef.current && withPinned(treeRef.current, checks) !== treeRef.current) void commit(treeRef.current)
+    },
+    [commit],
+  )
+
   const setPins = React.useCallback((pins: Pin[]) => {
     pinsRef.current = pins
   }, [])
@@ -281,6 +297,7 @@ export function useStudio(shared?: Tree) {
     faceEdges,
     measure,
     setPins,
+    pinChecks,
   }
 }
 

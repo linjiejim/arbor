@@ -3,6 +3,7 @@ import { Download, Plug, Redo2, RotateCw, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
 import { StatusDot } from "@/components/ui/badge"
+import { Segmented } from "@/components/ui/segmented"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { arbor } from "../bridge"
 import type { DocState, PickRequest, Snapshot, UpdateStatus } from "../core/protocol"
@@ -10,7 +11,22 @@ import { ArborMark } from "@/components/arbor-mark"
 import { ago, commandLabel, useNow } from "./words"
 
 /** The window's top bar; on macOS it is also the title bar (drag to move, traffic lights on the left). */
-export function TitleBar({ snapshot, doc, pick, onSetup }: { snapshot: Snapshot | null; doc: DocState | null; pick: PickRequest | null; onSetup: () => void }) {
+export function TitleBar({
+  snapshot,
+  doc,
+  pick,
+  onSetup,
+  sheet,
+  onSheet,
+}: {
+  snapshot: Snapshot | null
+  doc: DocState | null
+  pick: PickRequest | null
+  onSetup: () => void
+  /** 「工程图」 over the 3D view. */
+  sheet: boolean
+  onSheet: (on: boolean) => void
+}) {
   const mac = arbor.platform === "darwin"
   const call = (name: string) => void arbor.call(name, {}, doc?.path)
   return (
@@ -29,6 +45,19 @@ export function TitleBar({ snapshot, doc, pick, onSetup }: { snapshot: Snapshot 
       <div className="ml-3 min-w-0 max-lg:hidden">
         <AgentStatus snapshot={snapshot} pick={pick} />
       </div>
+      {doc && (
+        <Segmented
+          size="sm"
+          aria-label="视图"
+          className="ml-auto [-webkit-app-region:no-drag]"
+          value={sheet ? "drawing" : "3d"}
+          onValueChange={(v) => onSheet(v === "drawing")}
+          options={[
+            { value: "3d", label: "3D" },
+            { value: "drawing", label: "工程图" },
+          ]}
+        />
+      )}
       <div className="ml-auto flex items-center gap-1 [-webkit-app-region:no-drag]">
         <UpdateStatusButton />
         <IconButton label="撤销（⌘Z）" disabled={!doc?.canUndo} onClick={() => call("undo")}>

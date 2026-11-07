@@ -11,6 +11,8 @@ import type { Hover } from "../scene"
 import type { Studio } from "../use-studio"
 import type { Annotations } from "../use-annotations"
 import type { CheckResult } from "../kernel/check"
+import { Hint } from "@/components/hint"
+import { useWords } from "./host-words"
 
 /**
  * Named parameters: edit a number and the whole tree rebuilds, no model
@@ -21,11 +23,23 @@ export function ParamsPanel({ studio, onHover, annotations }: { studio: Studio; 
   const { tree } = studio
   const entries = Object.entries(tree.params)
   const checks = studio.report?.checks ?? []
-  if (!entries.length && !checks.length) return <p className="px-4 py-4 text-body text-muted-foreground">还没有参数。助教会把关键尺寸定成参数，之后可以在这里直接改。</p>
+  const words = useWords()
+  if (!entries.length && !checks.length)
+    return (
+      <p className="flex items-center gap-1 px-4 py-4 text-body text-muted-foreground">
+        还没有参数
+        <Hint tips={[words.noParams]} />
+      </p>
+    )
   return (
     <div className="space-y-1 px-2 py-3" onMouseLeave={() => onHover(null)}>
       {checks.length > 0 && <Checklist rows={checks} baseline={studio.checkBaseline} rolledBack={!!studio.rollback} onHover={onHover} onFix={annotations?.startMessage} />}
-      <p className="px-2 pb-1 text-small text-muted-foreground">改完按 Enter，整棵特征树按新参数重算。指向一个参数，模型上会标出它的尺寸。</p>
+      {entries.length > 0 && (
+        <div className="flex h-6 items-center gap-1 px-2 text-caption text-faint-foreground">
+          {entries.length} 个参数
+          <Hint step={4} label="参数怎么用" tips={["改完按 Enter，整棵特征树按新参数重算。", "指向一个参数，模型上会标出它的尺寸。"]} />
+        </div>
+      )}
       {studio.report?.paramError && <p className="px-2 text-small text-destructive">{studio.report.paramError}</p>}
       {entries.map(([k, v]) => {
         const uses = paramUses(tree, k)
@@ -69,6 +83,7 @@ function Checklist({
   /** 「让助教修正」: not on a shared link, which has no chat. */
   onFix?: (text: string) => void
 }) {
+  const words = useWords()
   const state = (r: CheckResult): CheckState => (r.pass ? "pass" : r.invalid ? "invalid" : baseline[r.id] ? "drift" : "fail")
   const states = rows.map(state)
   const passed = states.filter((x) => x === "pass").length
@@ -114,7 +129,7 @@ function Checklist({
                 </div>
                 {st === "fail" && onFix && (
                   <Button size="sm" variant="ghost" className="mt-0.5 ml-5 h-6 px-2 text-caption" onClick={() => onFix(`核对没通过：「${r.said}」要求 ${r.expected}，现在是 ${r.actual}，请修正。`)}>
-                    让助教修正
+                    {words.fixCheck}
                   </Button>
                 )}
               </li>

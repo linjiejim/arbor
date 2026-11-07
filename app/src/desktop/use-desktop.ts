@@ -204,8 +204,12 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
     setPins: React.useCallback((pins: Pin[]) => {
       pinsRef.current = pins
     }, []),
+    // Practices are the site's.
+    pinChecks: noop,
   }
 }
+
+const noop = () => {}
 
 /** A note on a face or an edge, as the viewport's annotations. */
 export const asNote = (n: PartNote & { kind: "face" | "edge" }): Note => ({

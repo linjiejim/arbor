@@ -24,6 +24,8 @@ import { declutter, dimensionLayer, dimParam } from "../dimension-layer"
 import type { Dim } from "../kernel/dims"
 import { DimEditor } from "./dim-editor"
 import { MeasurePanel, ViewTools } from "./viewport-tools"
+import { Hint } from "@/components/hint"
+import { useWords } from "./host-words"
 
 type V3 = [number, number, number]
 /** A press that moves less than this is a click, not a camera drag. */
@@ -348,7 +350,8 @@ export function StudioViewport({
 
   // ---------------------------------------------------------------- clicking
 
-  const busyText = copy?.busy ?? "助教正在改模型，这一轮结束后再标注"
+  const words = useWords()
+  const busyText = copy?.busy ?? `${words.helper}正在改模型，这一轮结束后再标注`
   const latest = React.useRef({ studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly })
   React.useEffect(() => {
     latest.current = { studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly }
@@ -447,13 +450,8 @@ export function StudioViewport({
           {rs.kind === "edge" ? "点要选的边，再点一次取消；点一个面等于选它的一圈边" : "点要选的面，再点一次取消"}。Esc 退出
         </div>
       )}
-      {display?.mesh && !readOnly && !busy && !draft && !measuring && !rs && annotations.pending.length === 0 && copy?.hint !== null && (
-        <div className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border bg-background/90 px-2.5 py-1 text-center text-caption text-muted-foreground">
-          {copy?.hint ?? "单击模型上的面或边，标注要改的地方"}
-        </div>
-      )}
       {display?.mesh && !measuring && (
-        <div className="pointer-events-none absolute right-3 bottom-3 flex gap-3 rounded-md border bg-background/90 px-3 py-1.5 text-caption text-muted-foreground">
+        <div className="pointer-events-none absolute right-3 bottom-3 flex items-center gap-3 rounded-md border bg-background/90 py-1.5 pr-1.5 pl-3 text-caption text-muted-foreground">
           {focus ? (
             <span className="flex items-center gap-1.5">
               <span className="size-2.5 rounded-xs bg-primary" /> 标注选中的{focus.kind === "face" ? "面" : "边"}
@@ -470,6 +468,18 @@ export function StudioViewport({
               )}
             </>
           )}
+          <Hint
+            step={3}
+            label="视图怎么用"
+            side="top"
+            align="end"
+            className="pointer-events-auto"
+            tips={[
+              ...(readOnly || copy?.hint === null ? [] : [`${copy?.hint ?? "单击模型上的面或边，标注要改的地方"}。`]),
+              "蓝色是这一步新生成的面，橙色是被这一步修改的面。",
+              "右侧的工具可以标尺寸、剖开看、测量。",
+            ]}
+          />
         </div>
       )}
       {editingDim && !busy && (

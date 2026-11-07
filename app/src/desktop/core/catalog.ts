@@ -50,9 +50,19 @@ const own: CommandSpec[] = [
     }),
   },
   {
+    name: "open_project",
+    audience: "both",
+    description:
+      "把一个文件夹作为项目打开：窗口左栏列出里面的装配和零件。create=true 时新建这个文件夹，并放一个同名的空装配（*.arbor-asm.json）和共享参数文件（*.params.json），然后打开装配。多个零件组成的东西先建项目。",
+    input: z.object({
+      path: z.string().describe("项目文件夹，相对当前目录或绝对路径，例如 pen"),
+      create: z.boolean().optional().describe("文件夹不存在或还没有装配时新建"),
+    }),
+  },
+  {
     name: "list_parts",
     audience: "both",
-    description: "列出 Arbor 里打开的零件：路径、特征数、未处理的备注数，以及哪个是当前零件。",
+    description: "列出当前项目里的全部装配和零件（打开着的标出来）；没有项目时列出打开的零件。路径、特征数、未处理的备注数，以及哪个是当前零件。",
     input: z.object({}),
   },
   {
@@ -202,6 +212,18 @@ const own: CommandSpec[] = [
     description: "关闭一个零件（文件不动）。",
     input: z.object({ path: z.string() }),
   },
+  {
+    name: "scan_project",
+    audience: "user",
+    description: "重新扫描项目文件夹（窗口回到前台时）。",
+    input: z.object({}),
+  },
+  {
+    name: "add_part",
+    audience: "user",
+    description: "往当前装配里加零件：name 新建 parts/<name>.arbor.json 并在装配里编辑它；file 放一个已有的零件、装配或 STEP。",
+    input: z.object({ name: z.string().optional(), file: z.string().optional() }),
+  },
 ]
 
 export const COMMANDS: CommandSpec[] = [...own.slice(0, 2), ...studioTools, ...own.slice(2)]
@@ -256,6 +278,7 @@ ${promptSections(["数值", "坐标与基准面", "扫掠、放样、拔模", "�
 | 最多 3 件紧密配合、共用很多尺寸的零件（笔尖和笔舌、盒子和盖板） | 单文件：加料时 part 写一个新名字 |
 | 要复用的零件、标准件、外购件（STEP）、超过 3 件，或者体积大、要分开维护 | 多文件装配 |
 - 单文件新建零件：加料（拉伸、旋转、扫掠、放样）写 part: "笔尖"，名字还不存在就新建一个零件，不和别的料合并（重叠会给 ⚠）。第一次加料写的 part 就是主体的名字；没写的话，主体叫「主体」。之后写 part 只改那个零件；修形、刻字只切它自己。
+- 项目：多个零件组成的东西，先 open_project（path 写文件夹名，create: true），会建好同名的空装配和共享参数文件并打开装配。零件放在 parts/ 下（open_part path: "pen/parts/笔杆.arbor.json" create: true），再在装配里用 component 放进来。list_parts 列出项目里的全部文件。
 - 装配：每个零件一个文件（*.arbor.json），装配是 *.arbor-asm.json（open_part create: true 新建）。装配里只放 component：file 写零件文件、子装配或 .step 外购件，name 是它在装配里的名字，rotate、at 摆位置（先转后移，可以写参数）。装配不能放几何特征：要改形状就 open_part 打开那个零件。
 - 共用尺寸：share_params 让零件和装配用同一个共享参数文件（*.params.json，move 把已有参数移进去）。共享参数以文件为准，set_params 改到它们会写回文件，用到它的零件一起重建。
 - 在装配里改零件：open_part 带 context: "pen.arbor-asm.json"，装配里的其他零件按相对位置半透明地显示在旁边；look 能看到它们，measure 的 part、check 的 gap / clearance / interference 能写它们的名字。不带 context 再打开一次就退出。

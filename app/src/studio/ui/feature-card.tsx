@@ -17,6 +17,7 @@ import { selectorWords } from "../selector-words"
 import type { Annotations } from "../use-annotations"
 import type { Reselect } from "../use-reselect"
 import type { Studio } from "../use-studio"
+import { useWords } from "./host-words"
 
 /** The face / edge selector a feature carries, if any: where it lives and what it picks. */
 function selectionOf(f: Feature): { field: (string | number)[]; kind: "face" | "edge"; value: unknown; title: string } | null {
@@ -53,6 +54,7 @@ export function FeatureCard({
   onClose: () => void
   onPointDim: (id: string | null) => void
 }) {
+  const words = useWords()
   const { tree } = studio
   const name = displayName(tree, f)
   const index = tree.features.findIndex((x) => x.id === f.id)
@@ -150,13 +152,13 @@ export function FeatureCard({
                     : picking.result
                       ? selectorWords(picking.result.selector, sel.kind, tree)
                       : picking.hashes.length
-                        ? `这 ${picking.hashes.length} ${sel.kind === "edge" ? "条边" : "个面"}找不到一句共同的描述：少选几个，或者让助教来选`
+                        ? `这 ${picking.hashes.length} ${sel.kind === "edge" ? "条边" : "个面"}找不到一句共同的描述：少选几个，或者${words.pickFor}`
                         : `在模型上点要选的${sel.kind === "edge" ? "边" : "面"}`}
                 </p>
                 <div className="mt-2 flex justify-end gap-2">
                   {picking.result === null && picking.hashes.length > 0 && (
                     <Button size="sm" variant="ghost" className="mr-auto" onClick={() => void askToPick(studio, reselect, annotations, f, name, sel.kind)}>
-                      让助教来选
+                      {words.pickFor}
                     </Button>
                   )}
                   <Button size="sm" variant="ghost" onClick={reselect.cancel}>
@@ -199,7 +201,7 @@ export function FeatureCard({
             )}
           </div>
         )}
-        {busy && <p className="text-caption text-faint-foreground">助教正在改模型，这一轮结束后再改。</p>}
+        {busy && <p className="text-caption text-faint-foreground">{words.busy}</p>}
       </div>
 
       <div className="flex items-center gap-1 border-t px-2 py-2">
@@ -228,7 +230,7 @@ export function FeatureCard({
           </DropdownMenuContent>
         </DropdownMenu>
         <Button size="sm" variant="primary" className="ml-auto" disabled={busy} onClick={askAssistant}>
-          {failed ? "让助教修这一步" : "让助教改这一步…"}
+          {failed ? words.fixStep : words.askStep}
         </Button>
       </div>
     </div>

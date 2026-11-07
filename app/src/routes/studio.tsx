@@ -1,18 +1,21 @@
 import * as React from "react"
 import { useLocation, useNavigate } from "react-router"
-import { ArrowLeft, CircleAlert, Download, KeyRound, Share2, Undo2, X } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { ArrowLeft, CircleAlert, Download, Ellipsis, Share2, Undo2, X } from "lucide-react"
+import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog"
+import { Drawer, DrawerBody, DrawerContent, DrawerHeader } from "@/components/ui/drawer"
+import { Tour } from "@/components/hint"
+import { practiceById, type Practice } from "@/content/practice"
+import { PracticeCard } from "@/studio/ui/practice-card"
 import { Button, IconButton } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { notify } from "@/components/ui/toast"
 import { ChatPanel } from "@/studio/ui/chat-panel"
 import { buildCode } from "@/studio/codegen"
 import { saveBlob } from "@/studio/download"
-import type { Tree } from "@/studio/dsl"
+import { EMPTY_TREE, type Tree } from "@/studio/dsl"
 import { readTreeFile } from "@/studio/import"
 import { checkTree } from "@/studio/limits"
 import { PanelResizer } from "@/studio/ui/panel-resizer"
@@ -23,7 +26,6 @@ import type { Hover } from "@/studio/scene"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
 import { ConnectorOverlay } from "@/studio/ui/connector-overlay"
 import { NO_PARTS_VIEW, type PartsView } from "@/studio/scene"
-import { Segmented } from "@/components/ui/segmented"
 import { DrawingSheet } from "@/studio/ui/drawing-sheet"
 import { useReselect } from "@/studio/use-reselect"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
@@ -62,6 +64,18 @@ export function StudioPage() {
   }
   const [confirmNew, setConfirmNew] = React.useState(false)
   const [sharing, setSharing] = React.useState(false)
+  const [codeOpen, setCodeOpen] = React.useState(false)
+  /** A practice from a lesson (/studio?practice=<id>): its card over the chat, its checks pinned in the tree. */
+  // From the address (a lesson's link) or, after a reload, from storage.
+  const [arriving] = React.useState(() => new URL(window.location.href).searchParams.get("practice"))
+  const [practice, setPractice] = React.useState<Practice | null>(() => practiceById(arriving ?? localStorage.getItem(PRACTICE_STORE) ?? "") ?? null)
+  const { pinChecks } = studio
+  React.useEffect(() => pinChecks(practice?.checks ?? null), [practice, pinChecks])
+  const exitPractice = React.useCallback(() => {
+    setPractice(null)
+    localStorage.removeItem(PRACTICE_STORE)
+  }, [])
+  const [keyOpen, setKeyOpen] = React.useState(false)
   const [status, setStatus] = React.useState<Status | null>(null)
   const ready = studio.kernel.phase === "ready"
   const panel = usePanelWidth()
@@ -86,6 +100,21 @@ export function StudioPage() {
     },
     [resetAnnotations, addDivider, load, undo],
   )
+
+  // A practice from a lesson: once the kernel is up, start from its tree (undoable) and drop the parameter.
+  const practiceTaken = React.useRef(false)
+  React.useEffect(() => {
+    if (!ready || arriving === null || practiceTaken.current) return
+    practiceTaken.current = true
+    const url = new URL(window.location.href)
+    url.searchParams.delete("practice")
+    window.history.replaceState(null, "", url)
+    const p = practiceById(arriving)
+    if (!p) return void notify.error("没有找到这道练习")
+    localStorage.setItem(PRACTICE_STORE, p.id)
+    pinChecks(p.checks)
+    replaceModel({ ...(p.start ?? EMPTY_TREE), checks: p.checks }, `开始练习「${p.title}」`, "已换成练习的起始模型")
+  }, [ready, arriving, pinChecks, replaceModel])
 
   // 「复制到我的工作台」 from a shared link: replace once the kernel is up, then drop the state so a reload doesn't do it again.
   const incoming = (location.state as { incoming?: Incoming } | null)?.incoming
@@ -124,35 +153,27 @@ export function StudioPage() {
   }
 
   return (
+    <Tour page="studio">
     <div className="flex h-dvh flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
         <IconButton label="返回首页" onClick={() => navigate("/")}>
           <ArrowLeft />
         </IconButton>
-        <span className="truncate text-body font-semibold">AI 建模工作台</span>
-        <Badge tone="outline" className="max-sm:hidden">
-          Beta
-        </Badge>
-        {status && <span className="font-mono text-caption text-faint-foreground max-md:hidden">{status.model}</span>}
-        <Segmented
-          size="sm"
-          aria-label="视图"
-          className="mx-auto"
-          value={sheet ? "drawing" : "3d"}
-          onValueChange={(v) => setSheet(v === "drawing")}
-          options={[
-            { value: "3d", label: "3D" },
-            { value: "drawing", label: "工程图" },
-          ]}
-        />
+        <span className="truncate text-body font-semibold">工作台</span>
+        {sheet ? (
+          <Button size="sm" variant="secondary" className="mx-auto" onClick={() => setSheet(false)}>
+            回到 3D
+          </Button>
+        ) : (
+          <span className="flex-1" />
+        )}
         <div className="flex items-center gap-1">
           <IconButton label="撤销上一步" disabled={!studio.canUndo || chat.busy} onClick={studio.undo}>
             <Undo2 />
           </IconButton>
-          <KeySettings status={status} />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <IconButton label="导出与导入">
+              <IconButton label="导出">
                 <Download />
               </IconButton>
             </DropdownMenuTrigger>
@@ -161,17 +182,29 @@ export function StudioPage() {
               <DropdownMenuItem onSelect={() => void download("stl")}>{partCount > 1 ? "导出 STL（zip，每个零件一个文件）" : "导出 STL"}</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void download("py")}>导出 build123d 代码</DropdownMenuItem>
               <DropdownMenuItem onSelect={() => void download("json")}>导出特征树（JSON）</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <IconButton label="分享" disabled={!studio.tree.features.length || chat.busy} onClick={() => setSharing(true)}>
+            <Share2 />
+          </IconButton>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconButton label="更多">
+                <Ellipsis />
+              </IconButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onSelect={() => setSheet(!sheet)}>{sheet ? "回到 3D" : "工程图"}</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setCodeOpen(true)}>代码</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem disabled={!ready || chat.busy} onSelect={() => fileInput.current?.click()}>
                 导入特征树（JSON）…
               </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setKeyOpen(true)}>使用自己的 key…</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-          <IconButton label="分享模型" disabled={!studio.tree.features.length || chat.busy} onClick={() => setSharing(true)}>
-            <Share2 />
-          </IconButton>
           <Button variant="secondary" size="sm" disabled={chat.busy} onClick={() => setConfirmNew(true)}>
-            新建模型
+            新建零件
           </Button>
         </div>
         <input
@@ -249,79 +282,94 @@ export function StudioPage() {
           <TabsList className="shrink-0 px-3">
             <TabsTrigger value="chat">对话</TabsTrigger>
             <TabsTrigger value="params">参数</TabsTrigger>
-            <TabsTrigger value="code">代码</TabsTrigger>
           </TabsList>
           <TabsContent value="chat" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden" forceMount>
             {status && !status.hostedKey && !hasOwnKey() && (
-              <div className="shrink-0 border-b px-4 py-2 text-small text-muted-foreground">服务器没有配置公共额度：点右上角钥匙图标，填自己的 DeepSeek key。</div>
+              <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2 text-small text-muted-foreground">
+                这里没有公共额度，要用自己的 DeepSeek key
+                <Button size="sm" variant="secondary" className="ml-auto" onClick={() => setKeyOpen(true)}>
+                  填 key
+                </Button>
+              </div>
             )}
+            {practice && <PracticeCard practice={practice} results={studio.report?.checks} rolledBack={Boolean(studio.rollback)} onExit={exitPractice} />}
             <ChatPanel
               chat={chat}
               annotations={annotations}
               ready={ready}
               onSelectFeature={studio.showFeature}
               onLoad={studio.load}
+              model={status?.model}
+              practicing={Boolean(practice)}
             />
           </TabsContent>
           <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
             <ParamsPanel studio={studio} onHover={setHover} annotations={annotations} />
           </TabsContent>
-          <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
-            <CodePanel studio={studio} />
-          </TabsContent>
         </Tabs>
       </div>
 
       <ShareDialog open={sharing} onOpenChange={setSharing} tree={studio.tree} messages={chat.messages} />
+      <KeyDialog open={keyOpen} onOpenChange={setKeyOpen} status={status} />
+      <Drawer open={codeOpen} onOpenChange={setCodeOpen}>
+        <DrawerContent size="lg">
+          <DrawerHeader title="代码" description="和特征树等价的 build123d 代码" />
+          <DrawerBody className="p-0">
+            <CodePanel studio={studio} />
+          </DrawerBody>
+        </DrawerContent>
+      </Drawer>
       <ConfirmDialog
         open={confirmNew}
         onOpenChange={setConfirmNew}
-        title="新建模型？"
+        title="新建零件？"
         description="会清空当前的特征树和对话。特征树可以用「撤销」找回，对话不能。"
         confirmLabel="清空并新建"
         tone="danger"
         onConfirm={() => {
+          exitPractice()
           chat.clear()
           annotations.reset()
           studio.reset()
         }}
       />
     </div>
+    </Tour>
   )
 }
 
+const PRACTICE_STORE = "arbor:practice"
+
 const hasOwnKey = () => Boolean(localStorage.getItem(KEY_STORE))
 
-function KeySettings({ status }: { status: Status | null }) {
+function KeyDialog({ open, onOpenChange, status }: { open: boolean; onOpenChange: (o: boolean) => void; status: Status | null }) {
   const [key, setKey] = React.useState(() => localStorage.getItem(KEY_STORE) ?? "")
   const save = () => {
     const k = key.trim()
     if (k) localStorage.setItem(KEY_STORE, k)
     else localStorage.removeItem(KEY_STORE)
     notify(k ? "已保存，之后的对话用你自己的 key" : "已清除，改用公共额度")
+    onOpenChange(false)
   }
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <IconButton label="模型与 key">
-          <KeyRound />
-        </IconButton>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80">
-        <div className="text-body font-medium">用自己的 DeepSeek key</div>
-        <p className="mt-1 text-small text-muted-foreground">
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="sm">
+        <DialogHeader title="使用自己的 DeepSeek key" />
+        <DialogBody>
+        <p className="text-small text-muted-foreground">
           {status?.hostedKey
             ? `不填就用本站的公共额度（${status.via === "openrouter" ? "经 OpenRouter 调用同一个模型，" : ""}每天有上限）。`
             : "本站没有配置公共额度，需要填自己的 key。"}
           key 只保存在这个浏览器里，随请求经本站服务器转发给 DeepSeek，服务器不保存。
         </p>
         <Input className="mt-3 font-mono" type="password" autoComplete="off" placeholder="sk-…" value={key} onChange={(e) => setKey(e.target.value)} aria-label="DeepSeek API key" />
-        <div className="mt-3 flex justify-end gap-2">
-          <Button size="sm" variant="primary" onClick={save}>
-            保存 key
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="primary" onClick={save}>
+            保存
           </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

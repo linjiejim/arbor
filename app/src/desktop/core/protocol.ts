@@ -70,7 +70,22 @@ export type DocState = {
 
 export type AgentActivity = { busy: boolean; tool: string | null; at: number | null }
 
-export type Snapshot = { parts: PartSummary[]; active: string | null; kernel: KernelPhase; agent: AgentActivity }
+/** A file of the project folder, for the sidebar: open ones carry their notes. */
+export type ProjectFile = {
+  path: string
+  name: string
+  /** Folder relative to the project ("" at the top). */
+  folder: string
+  kind: "part" | "assembly"
+  features: number | null
+  open: boolean
+  openNotes: number
+}
+
+/** The folder the open files belong to (see core/project.ts). */
+export type ProjectSummary = { root: string; name: string; files: ProjectFile[]; truncated: boolean }
+
+export type Snapshot = { parts: PartSummary[]; active: string | null; kernel: KernelPhase; agent: AgentActivity; project: ProjectSummary | null }
 
 /** The agent asks the person to click a face or an edge. */
 export type PickRequest = { id: string; path: string; prompt: string; kind: "face" | "edge" | "any" }
@@ -136,6 +151,12 @@ export interface ArborBridge {
   answerPick(id: string, answer: { info: PickInfo; text?: string } | null): Promise<void>
   openPart(): Promise<string | null>
   newPart(): Promise<string | null>
+  /** Save-style dialog for a new project folder, then open_project create. */
+  newProject(): Promise<string | null>
+  /** Folder dialog, then open_project. */
+  openProject(): Promise<string | null>
+  /** File dialog for something to put in an assembly: a part or assembly file, or a STEP. */
+  pickFile(kind: "part" | "step"): Promise<string | null>
   reveal(path: string): Promise<void>
   /** Save dialog, then export the current part. */
   exportPart(format: ExportFormat): Promise<void>
@@ -164,7 +185,7 @@ export type UpdateStatus =
 
 export type Notice = { tone: "info" | "success" | "error"; text: string }
 
-export type MenuAction = "undo" | "redo" | "agent-setup"
+export type MenuAction = "undo" | "redo" | "agent-setup" | "focus"
 
 export type ExportFormat = "step" | "stl" | "py" | "json"
 

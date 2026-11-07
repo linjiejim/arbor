@@ -14,7 +14,8 @@ const NAV = [
   { to: "/teardown", label: "案例拆解" },
   { to: "/atlas", label: "工具图鉴" },
   { to: "/glossary", label: "术语表" },
-  { to: "/studio", label: "AI 工作台" },
+  { to: "/studio", label: "工作台" },
+  { to: "/desktop", label: "桌面版" },
 ]
 
 /**

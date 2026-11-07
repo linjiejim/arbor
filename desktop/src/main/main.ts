@@ -1,7 +1,7 @@
 // Arbor's main process: the engine (kernel thread, parts, notes), the local
 // endpoint the MCP server and CLI talk to, and the window that shows it all.
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell, type MenuItemConstructorOptions } from "electron"
-import { existsSync } from "node:fs"
+import { existsSync, statSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -93,6 +93,8 @@ function createWindow(mode: "focus" | "inactive") {
   win = w
   rendererReady = new Promise((r) => (markReady = r))
   w.once("ready-to-show", () => (mode === "inactive" ? w.showInactive() : w.show()))
+  // Back from the editor or the terminal: files may have been added to the project.
+  w.on("focus", () => void engine.run("scan_project", {}, userCtx()))
   w.on("closed", () => {
     if (win === w) win = null
     for (const [id, l] of looks) {
@@ -145,7 +147,8 @@ function send(action: MenuAction) {
 }
 
 async function newPartDialog() {
-  const dir = path.join(app.getPath("documents"), PRODUCT)
+  const project = engine.snapshot().project
+  const dir = project ? path.join(project.root, "parts") : path.join(app.getPath("documents"), PRODUCT)
   const res = await dialog.showSaveDialog({
     title: "新建零件",
     defaultPath: path.join(dir, `零件${PART_EXT}`),
@@ -157,10 +160,56 @@ async function newPartDialog() {
   return (await openForUser(file, true)) ? file : null
 }
 
-async function openPartDialog() {
-  const res = await dialog.showOpenDialog({ title: "打开零件或装配", filters: [{ name: "Arbor 零件和装配", extensions: ["json"] }], properties: ["openFile"] })
+/** A new project folder: the name typed becomes the folder (and its assembly and parameter file). */
+async function newProjectDialog() {
+  const res = await dialog.showSaveDialog({
+    title: "新建项目",
+    message: "项目是一个文件夹：里面放装配、零件和共用的参数",
+    nameFieldLabel: "项目名",
+    defaultPath: path.join(app.getPath("documents"), PRODUCT, "新项目"),
+    properties: ["createDirectory", "showOverwriteConfirmation"],
+  })
+  if (res.canceled || !res.filePath) return null
+  const out = await engine.run("open_project", { path: res.filePath, create: true }, userCtx())
+  if (!out.ok) void dialog.showMessageBox({ type: "warning", message: "没能新建项目", detail: out.text.replace(/^✗ /, "") })
+  return out.ok ? res.filePath : null
+}
+
+async function openProjectDialog() {
+  const res = await dialog.showOpenDialog({ title: "打开项目文件夹", properties: ["openDirectory", "createDirectory"] })
   if (res.canceled || !res.filePaths[0]) return null
-  return (await openForUser(res.filePaths[0])) ? res.filePaths[0] : null
+  const out = await engine.run("open_project", { path: res.filePaths[0] }, userCtx())
+  if (!out.ok) void dialog.showMessageBox({ type: "warning", message: "没能打开项目", detail: out.text.replace(/^✗ /, "") })
+  return out.ok ? res.filePaths[0] : null
+}
+
+/** Something to put in the open assembly: a part or assembly file, or a STEP. */
+async function pickFileDialog(kind: "part" | "step") {
+  const doc = engine.docState()
+  const res = await dialog.showOpenDialog({
+    title: kind === "step" ? "选一个 STEP 文件" : "选一个零件或装配",
+    defaultPath: doc ? path.dirname(doc.path) : undefined,
+    filters: kind === "step" ? [{ name: "STEP", extensions: ["step", "stp"] }] : [{ name: "Arbor 零件和装配", extensions: ["json"] }],
+    properties: ["openFile"],
+  })
+  return res.canceled ? null : (res.filePaths[0] ?? null)
+}
+
+/** A part, an assembly, or a project folder. */
+async function openPartDialog() {
+  const res = await dialog.showOpenDialog({
+    title: "打开零件、装配或项目文件夹",
+    filters: [{ name: "Arbor 零件和装配", extensions: ["json"] }],
+    properties: ["openFile", "openDirectory"],
+  })
+  const picked = res.canceled ? null : res.filePaths[0]
+  if (!picked) return null
+  if (statSync(picked, { throwIfNoEntry: false })?.isDirectory()) {
+    const out = await engine.run("open_project", { path: picked }, userCtx())
+    if (!out.ok) void dialog.showMessageBox({ type: "warning", message: "没能打开项目", detail: out.text.replace(/^✗ /, "") })
+    return out.ok ? picked : null
+  }
+  return (await openForUser(picked)) ? picked : null
 }
 
 const EXPORT_NAMES: Record<ExportFormat, string> = { step: "STEP", stl: "STL", py: "build123d 代码", json: "特征树 JSON" }
@@ -225,8 +274,11 @@ function refreshMenu() {
     {
       label: "文件",
       submenu: [
+        { label: "新建项目…", accelerator: "CmdOrCtrl+Shift+N", click: () => void newProjectDialog() },
+        { label: "打开项目…", accelerator: "CmdOrCtrl+Shift+O", click: () => void openProjectDialog() },
+        { type: "separator" },
         { label: "新建零件…", accelerator: "CmdOrCtrl+N", click: () => void newPartDialog() },
-        { label: "打开零件…", accelerator: "CmdOrCtrl+O", click: () => void openPartDialog() },
+        { label: "打开…", accelerator: "CmdOrCtrl+O", click: () => void openPartDialog() },
         { label: "打开最近", enabled: recent.length > 0, submenu: recent },
         { type: "separator" },
         { label: "导出 STEP…", accelerator: "CmdOrCtrl+E", click: () => void exportDialog("step") },
@@ -272,6 +324,9 @@ function wireIpc() {
   ipcMain.handle("arbor:answer-pick", (_e, id: string, answer: { info: PickInfo; text?: string } | null) => engine.answerPick(id, answer))
   ipcMain.handle("arbor:open-part", () => openPartDialog())
   ipcMain.handle("arbor:new-part", () => newPartDialog())
+  ipcMain.handle("arbor:new-project", () => newProjectDialog())
+  ipcMain.handle("arbor:open-project", () => openProjectDialog())
+  ipcMain.handle("arbor:pick-file", (_e, kind: "part" | "step") => pickFileDialog(kind === "step" ? "step" : "part"))
   ipcMain.handle("arbor:reveal", (_e, p: string) => shell.showItemInFolder(p))
   ipcMain.handle("arbor:export", (_e, format: ExportFormat) => exportDialog(format))
   ipcMain.handle("arbor:agent-setup", () => agentSetup(arborBin()))

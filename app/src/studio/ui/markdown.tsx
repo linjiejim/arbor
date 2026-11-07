@@ -2,6 +2,8 @@ import * as React from "react"
 import { Link } from "react-router"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { ConceptText } from "@/components/concept-term"
+import { TERMS } from "@/content/terms"
 import { CIRCLED_RE, circledNumber } from "../annotations"
 import { closeOpen, splitBlocks } from "../md-blocks"
 
@@ -85,26 +87,87 @@ function remarkPins() {
   return (tree: MdNode) => walk(tree)
 }
 
+/** Glossary concepts, longest name first (so 「特征顺序」 wins over a shorter name inside it). */
+const TERM_NAMES = TERMS.map((t) => ({ id: t.id, name: t.name })).sort((a, b) => b.name.length - a.name.length)
+
+/** The first mention of each concept in `ids` becomes a `#term-<id>` link (not inside links or code). */
+function remarkTerms(ids: string[]) {
+  return () => (tree: MdNode) => {
+    const left = TERM_NAMES.filter((t) => ids.includes(t.id))
+    const walk = (node: MdNode) => {
+      if (!node.children || node.type === "link" || node.type === "inlineCode" || node.type === "code") return
+      node.children = node.children.flatMap((c): MdNode[] => {
+        if (c.type !== "text" || !c.value) {
+          walk(c)
+          return [c]
+        }
+        const out: MdNode[] = []
+        let rest = c.value
+        for (;;) {
+          let best: { at: number; t: (typeof left)[number] } | null = null
+          for (const t of left) {
+            const at = rest.indexOf(t.name)
+            if (at >= 0 && (!best || at < best.at)) best = { at, t }
+          }
+          if (!best) break
+          left.splice(left.indexOf(best.t), 1)
+          if (best.at > 0) out.push({ type: "text", value: rest.slice(0, best.at) })
+          out.push({ type: "link", url: `#term-${best.t.id}`, children: [{ type: "text", value: best.t.name }] })
+          rest = rest.slice(best.at + best.t.name.length)
+        }
+        if (rest) out.push({ type: "text", value: rest })
+        return out
+      })
+    }
+    walk(tree)
+  }
+}
+
+/** Plugin lists by what they do, so finished blocks keep the same props while a reply streams. */
+const PLUGINS = new Map<string, Plugins>()
+function pluginsFor(pins: boolean, ids: string[]): Plugins {
+  const key = `${pins ? 1 : 0}|${ids.join(",")}`
+  let p = PLUGINS.get(key)
+  if (!p) {
+    p = [remarkGfm, ...(pins ? [remarkPins] : []), ...(ids.length ? [remarkTerms(ids)] : [])]
+    PLUGINS.set(key, p)
+  }
+  return p
+}
+
 /**
  * The assistant's replies: Markdown (GFM) with the site's type and colours.
  * Raw HTML is not rendered. Bare lesson paths become links too; with `onPin`,
  * ①②… are buttons that show that annotation on the model. While `streaming`,
  * finished blocks stay put and only the last one re-renders.
  */
-export function Markdown({ text, onPin, streaming = false }: { text: string; onPin?: (n: number) => void; streaming?: boolean }) {
+export function Markdown({ text, onPin, streaming = false, terms = false }: { text: string; onPin?: (n: number) => void; streaming?: boolean; terms?: boolean }) {
   const blocks = React.useMemo(() => {
     const list = splitBlocks(text.replace(BARE_SITE_PATH, "$1[$2]($2)"))
     if (streaming && list.length) list[list.length - 1] = closeOpen(list[list.length - 1])
     return list
   }, [text, streaming])
+  // Which concepts each block marks: a concept only at its first mention in the reply.
+  const termIds = React.useMemo(() => {
+    if (!terms) return blocks.map(() => [] as string[])
+    const seen = new Set<string>()
+    return blocks.map((b) =>
+      TERM_NAMES.filter((t) => !seen.has(t.id) && b.includes(t.name)).map((t) => {
+        seen.add(t.id)
+        return t.id
+      }),
+    )
+  }, [blocks, terms])
   const components = React.useMemo<Components>(
     () =>
-      onPin
+      onPin || terms
         ? {
             ...base,
             a: (props) => {
-              const pin = props.href?.match(/^#pin-(\d+)$/)
-              if (!pin) return <Anchor href={props.href}>{props.children}</Anchor>
+              const term = props.href?.match(/^#term-(.+)$/)
+              if (term) return <ConceptText id={term[1]}>{props.children}</ConceptText>
+              const pin = onPin ? props.href?.match(/^#pin-(\d+)$/) : null
+              if (!pin || !onPin) return <Anchor href={props.href}>{props.children}</Anchor>
               return (
                 <button
                   type="button"
@@ -118,13 +181,12 @@ export function Markdown({ text, onPin, streaming = false }: { text: string; onP
             },
           }
         : base,
-    [onPin],
+    [onPin, terms],
   )
-  const plugins = React.useMemo(() => (onPin ? [remarkGfm, remarkPins] : [remarkGfm]), [onPin])
   return (
     <div className="text-reading break-words">
       {blocks.map((b, i) => (
-        <Block key={i} source={b} plugins={plugins} components={components} />
+        <Block key={i} source={b} plugins={pluginsFor(Boolean(onPin), termIds[i] ?? [])} components={components} />
       ))}
     </div>
   )

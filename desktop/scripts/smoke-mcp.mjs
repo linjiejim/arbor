@@ -134,5 +134,17 @@ if (withApp) {
   for (const [i, img] of close.images.entries()) await writeFile(path.join(work, `look-asm-${i}.png`), Buffer.from(img.data, "base64"))
 }
 
+// A project: a folder with an empty assembly and a parameter file; parts go under parts/ and into the assembly.
+const proj = await call("open_project", { path: "lamp", create: true })
+assert.match(proj.text, /新建了装配 lamp\.arbor-asm\.json/)
+assert.ok(!(await call("open_part", { path: "lamp/parts/base", create: true })).isError)
+await call("sketch", { id: "s", on: { plane: "XY" }, shapes: [{ type: "circle", d: 80 }] })
+await call("extrude", { id: "e", sketch: "s", distance: 12 })
+await call("open_part", { path: "lamp/lamp.arbor-asm.json" })
+assert.ok(!(await call("component", { id: "base", name: "底座", file: "parts/base.arbor.json" })).isError)
+const listed = await call("list_parts")
+assert.match(listed.text, /项目 lamp/)
+assert.match(listed.text, /parts\/base\.arbor\.json（零件）：2 个特征/)
+
 await client.close()
 console.log(`\nMCP smoke passed (${withApp ? "with the app" : "headless"}). Part: ${file}`)

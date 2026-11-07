@@ -57,4 +57,12 @@ test.describe("页面", () => {
     await expect(page).toHaveURL(/[?&]tab=concepts/)
     await expect(page.getByRole("tabpanel").getByText(TERMS[0].name, { exact: true })).toBeVisible()
   })
+
+  test("/desktop 桌面版介绍", async ({ page }) => {
+    await page.goto("/desktop")
+    await expect(page.getByRole("heading", { name: "Arbor 桌面版" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "下载 macOS 版" })).toHaveAttribute("href", "https://github.com/linjiejim/arbor/releases/latest")
+    await expect(page.getByText("claude mcp add --scope user arbor")).toBeVisible()
+    await expect(page).toHaveTitle(/桌面版 · Arbor/)
+  })
 })

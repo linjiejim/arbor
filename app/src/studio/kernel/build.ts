@@ -1508,6 +1508,10 @@ export class Kernel {
     if (!got) throw new InputError(this.componentsGiven ? `没有读到「${f.file}」` : "装配只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
     const built = buildComponent(got.source)
     const base = f.name ?? f.file.split(/[\\/]/).pop()!.replace(/\.(arbor-asm\.json|arbor\.json|json|step|stp)$/i, "")
+    if (!built.parts.length) {
+      warnings.push(`零件「${base}」还是空的：在装配里编辑它（open_part 加 context）`)
+      return { summary: `零件「${base}」← ${f.file} · 还是空的` }
+    }
     if (built.failed) warnings.push(`零件「${base}」有 ${built.failed} 个特征失败，用的是失败前的形状`)
     const placement: Placement = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: n(r.angle) })), at: (f.at ?? [0, 0, 0]).map(n) as V3 }
     const added: Part[] = built.parts.map((p) => ({
@@ -1722,6 +1726,8 @@ function buildComponent(src: ComponentSource): Built {
       sub.setComponents(src.components ?? [])
       const rep = sub.rebuild(src.tree ?? EMPTY_TREE)
       const last = sub.lastBuilt(Infinity)
+      // A part just added to the assembly, nothing in it yet: a place holder, not a failure.
+      if (!last?.body && !(src.tree?.features.length ?? 0)) return { parts: [], failed: 0 }
       if (!last?.body) {
         const err = rep.paramError ?? rep.features.find((x) => x.state === "error")?.message
         throw new InputError(`「${src.file}」一步都没有建成${err ? `：${err}` : ""}`)

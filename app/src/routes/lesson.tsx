@@ -7,7 +7,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { Viewport } from "@/components/viewport"
 import { OpTerm } from "@/components/op-term"
 import { Note, Quiz, StepBar, TaskCard } from "@/components/lesson-ui"
-import { markDone, markVisited, recordQuiz } from "@/lib/progress"
+import { markDone, markVisited, recordQuiz, useProgress } from "@/lib/progress"
+import { practiceFor } from "@/content/practice"
+import { practiceKey } from "@/studio/practice-state"
+import { Badge } from "@/components/ui/badge"
 import { LESSONS, lessonMeta } from "@/content/lessons"
 import type { LessonController, LessonDef } from "@/content/lessons/types"
 import type { Viewer } from "@/three/viewer"
@@ -159,6 +162,7 @@ function Player({ def }: { def: LessonDef<any, LessonController<any>> }) {
               <>
                 <p className="mt-3 text-reading">答完就完成本课。每题都有解释，答错也有收获。</p>
                 <Quiz items={def.quiz} onDone={finishQuiz} />
+                <PracticeLinks lesson={def.id} />
                 {quizDone && (
                   <div className="mt-6 rounded-lg border p-4">
                     <div className="text-heading font-semibold">本课要点</div>
@@ -226,6 +230,30 @@ function Player({ def }: { def: LessonDef<any, LessonController<any>> }) {
           {ctx && def.overlay?.(ctx)}
         </Viewport>
       </div>
+    </div>
+  )
+}
+
+/** 「去工作台练一练」: the lesson's practices, each opening the workbench with its task. */
+function PracticeLinks({ lesson }: { lesson: string }) {
+  const progress = useProgress()
+  const list = practiceFor(lesson)
+  if (!list.length) return null
+  return (
+    <div className="mt-6 space-y-2">
+      <div className="text-small text-faint-foreground">去工作台练一练</div>
+      {list.map((p) => {
+        const done = progress.done.includes(practiceKey(p.id))
+        return (
+          <Link key={p.id} to={`/studio?practice=${p.id}`} className="block rounded-lg border p-3 transition-colors duration-(--duration-fast) hover:bg-accent">
+            <div className="flex items-center gap-2">
+              <span className="text-body font-medium">{p.title}</span>
+              {done && <Badge tone="success">已完成</Badge>}
+            </div>
+            <p className="mt-1 text-small text-muted-foreground">{p.task}</p>
+          </Link>
+        )
+      })}
     </div>
   )
 }

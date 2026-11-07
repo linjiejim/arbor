@@ -33,6 +33,16 @@ export function memFiles() {
       const v = disk.get(p)
       return v === undefined ? null : { size: typeof v === "string" ? v.length : v.byteLength, mtimeMs: written.get(p) ?? 0 }
     },
+    list: async (raw) => {
+      const dir = norm(raw).replace(/\/+$/, "")
+      const out = new Map<string, boolean>()
+      for (const k of disk.keys()) {
+        if (!k.startsWith(`${dir}/`)) continue
+        const rest = k.slice(dir.length + 1).split("/")
+        out.set(rest[0], rest.length > 1 || out.get(rest[0]) === true)
+      }
+      return out.size ? [...out].map(([name, dir]) => ({ name, dir })) : null
+    },
     write: async (raw, d) => {
       const p = norm(raw)
       disk.set(p, d)

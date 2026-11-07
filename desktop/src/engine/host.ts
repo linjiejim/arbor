@@ -1,5 +1,6 @@
 // Starting an engine on this machine: the kernel thread, the file system,
 // recent parts. Used by the app (with a window) and by the CLI (headless).
+import os from "node:os"
 import { Engine, type Screen } from "../../../app/src/desktop/core/engine"
 import { nodeFiles } from "./files"
 import { readRecent, writeRecent } from "./home"
@@ -12,6 +13,6 @@ export function startEngine(opts: { distDir: URL; screen?: () => Screen | null; 
     opts.onKernel?.()
     engine?.kernelChanged()
   })
-  engine = new Engine({ kernel, files: nodeFiles, screen: opts.screen, recent: readRecent(), onRecent: writeRecent })
+  engine = new Engine({ kernel, files: nodeFiles, screen: opts.screen, recent: readRecent(), onRecent: writeRecent, home: os.homedir() })
   return { engine, kernel }
 }

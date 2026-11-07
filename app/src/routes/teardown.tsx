@@ -403,7 +403,7 @@ function PartTeardown({ manifest: m }: { manifest: PartManifest }) {
                 className="mt-3 flex items-center gap-2 rounded-md border p-3 text-small transition-colors duration-(--duration-fast) hover:bg-accent"
               >
                 <span className="flex-1">
-                  <span className="font-medium text-foreground">在 AI 工作台里打开</span>
+                  <span className="font-medium text-foreground">在工作台里打开</span>
                   <span className="block text-muted-foreground">同一棵特征树，参数可以取任意值，还能接着加特征。</span>
                 </span>
                 <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
