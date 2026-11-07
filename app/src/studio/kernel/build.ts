@@ -16,6 +16,7 @@ import {
   exportSTEP,
   getOC,
   makeCompound,
+  makeCylinder,
   makePlane,
   measureArea,
   measureShapeVolumeProperties,
@@ -28,7 +29,7 @@ import {
   type Shape3D,
 } from "replicad"
 import type { PickInfo } from "../annotations"
-import { displayName, EMPTY_TREE, OP_NAMES, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type SketchShape, type Tree } from "../dsl"
+import { displayName, EMPTY_TREE, OP_NAMES, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type Point, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
 import { MAX_COUNT } from "../limits"
 import { referencesOf } from "../apply"
@@ -38,7 +39,7 @@ import { measure, type MeasureResult, type MeasureSpec, type MeasureTarget } fro
 import { closest, relation, TOUCH } from "./proximity"
 import { compoundOf, countOf, edgesOf, facesOf, solidsOf } from "./topo"
 import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
-import { runChecks, type CheckBodies, type CheckResult } from "./check"
+import { cylinderAxis, runChecks, type CheckBodies, type CheckResult } from "./check"
 import { pathPoints, planeFace, ribTool, tapered, thinProfile, untilNext } from "./features2"
 import { stepAscii, zipStore } from "../zip"
 import { makeDrawing, type DrawingData } from "./drawing"
@@ -64,7 +65,7 @@ import {
 
 type V3 = [number, number, number]
 type PlaneName = "XY" | "XZ" | "YZ"
-type Tool = { tool: Shape3D; mode: "add" | "cut" }
+type Tool = { tool: Shape3D; mode: "add" | "cut" | "intersect" }
 
 const PLANES: Record<PlaneName, { normal: V3; x: V3; y: V3; axis: 0 | 1 | 2; label: string }> = {
   XY: { normal: [0, 0, 1], x: [1, 0, 0], y: [0, 1, 0], axis: 2, label: "上视基准面" },
@@ -1143,6 +1144,7 @@ export class Kernel {
           tool = mergeOverlaps(sketchOn(profile.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D)
           how = "贯穿"
         } else if (f.until) {
+          if (mode === "intersect") throw new InputError("求交不能和成形到（until）一起用")
           if (f.direction === "both") throw new InputError("两侧对称（both）不能和成形到（until）一起用")
           if (f.draft) throw new InputError("成形到不能带拔模角：先成形到，再用拔模特征")
           if (!body || !prev) throw new InputError("还没有实体，没有可以成形到的面")
@@ -1202,13 +1204,40 @@ export class Kernel {
           } else tool = mergeOverlaps(sketchOn(profile.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D)
           how = `${f.direction === "both" ? "两侧对称 " : f.direction === "reverse" ? "反向 " : ""}${fmt(d)} mm${f.draft ? ` · 拔模 ${fmt(n(f.draft))}°` : ""}`
         }
+        if (f.onto) {
+          if (f.through || f.until || f.draft) throw new InputError("onto（沿面等深）只和 distance 一起用，不能带 through、until、draft")
+          if (mode === "intersect") throw new InputError("onto 用于切除或加料")
+          if (!body || !prev) throw new InputError("还没有实体，没有面可以贴")
+          tool.delete()
+          const long = mergeOverlaps(sketchOn(profile.clone(), plane, add(plane.origin, mul(plane.normal, -this.bigLength(body)))).extrude(2 * this.bigLength(body), { extrusionDirection: plane.normal }) as Shape3D)
+          const band = this.band(body, prev.origins, f.onto, n(f.distance!), mode)
+          tool = long.intersect(band.shape)
+          long.delete()
+          band.shape.delete()
+          // Projected straight through, the sketch also lands on the far side of a cylinder: keep the side it faces.
+          if (band.axis) {
+            const side = dot(sub(plane.origin, band.axis.p), plane.normal)
+            if (Math.abs(side) > 1e-6) {
+              const near = solidsOf(tool).filter((x) => {
+                const [a, b] = x.boundingBox.bounds as [V3, V3]
+                return dot(sub(mul(add(a, b), 0.5), band.axis!.p), plane.normal) * side > 0
+              })
+              if (!near.length) throw new InputError("草图投影不到这个圆柱面上：把草图挪到面的正前方")
+              const kept = compoundOf(near)
+              tool.delete()
+              tool = kept
+            }
+          }
+          if (measureShapeVolumeProperties(tool).volume < 1e-9) throw new InputError("草图投影不到选中的面上：把草图挪到面的正前方")
+          how = `沿${band.what}等深 ${fmt(n(f.distance!))} mm`
+        }
         const next = applyTool(body, tool, mode, warnings)
         const box = profile.boundingBox.bounds as [[number, number], [number, number]]
         return {
           body: next,
           tools: [{ tool, mode }],
           geom: f.through ? undefined : { op: "extrude", plane: frameOf(plane), start: origin, dir, box: [box[0], box[1]] },
-          summary: `${f.thin ? `薄壁 ${fmt(n(f.thin.t))} · ` : ""}${mode === "cut" ? "切除" : "加料"} ${how}`,
+          summary: `${f.thin ? `薄壁 ${fmt(n(f.thin.t))} · ` : ""}${mode === "cut" ? "切除" : mode === "intersect" ? "求交" : "加料"} ${how}`,
         }
       }
       case "revolve": {
@@ -1227,9 +1256,18 @@ export class Kernel {
             throw new InputError("轮廓跨过了旋转轴：旋转体只画轴一侧的半截面")
         }
         const mode = f.mode ?? "add"
-        const tool = mergeOverlaps(sketchOn(drawing.clone(), plane).revolve(axis, { origin: [0, 0, 0], angle }) as Shape3D)
+        if (f.symmetric && f.start !== undefined) throw new InputError("start 和 symmetric 只写一个")
+        const start = f.symmetric ? -angle / 2 : f.start !== undefined ? n(f.start) : 0
+        let tool = mergeOverlaps(sketchOn(drawing.clone(), plane).revolve(axis, { origin: [0, 0, 0], angle }) as Shape3D)
+        if (start) tool = tool.rotate(start, [0, 0, 0], axis)
         const next = applyTool(body, tool, mode, warnings)
-        return { body: next, tools: [{ tool, mode }], geom: { op: "revolve", plane: frameOf(plane) }, summary: `${mode === "cut" ? "旋转切除" : "旋转"} ${fmt(angle)}° · 绕 ${f.axis} 轴` }
+        const from = f.symmetric ? " · 两侧对称" : start ? ` · 从 ${fmt(start)}° 起` : ""
+        return {
+          body: next,
+          tools: [{ tool, mode }],
+          geom: { op: "revolve", plane: frameOf(plane) },
+          summary: `${mode === "cut" ? "旋转切除" : mode === "intersect" ? "旋转求交" : "旋转"} ${fmt(angle)}°${from} · 绕 ${f.axis} 轴`,
+        }
       }
       case "fillet":
       case "chamfer": {
@@ -1326,7 +1364,7 @@ export class Kernel {
       }
       case "sweep": {
         const plane = this.plane(f.path.on, prev)
-        const pts = f.path.points.map((p) => (Array.isArray(p) ? { to: [n(p[0]), n(p[1])] as [number, number] } : { to: [n(p.to[0]), n(p.to[1])] as [number, number], via: [n(p.via[0]), n(p.via[1])] as [number, number] }))
+        const pts = evalPoints(f.path.points, n)
         const corner = f.path.corner !== undefined ? n(f.path.corner) : 0
         let pen = draw(pts[0].to)
         pts.slice(1).forEach((p, i) => {
@@ -1498,6 +1536,54 @@ export class Kernel {
   }
 
   /**
+   * The layer `depth` thick under (cut) or over (add) one planar or cylindrical face: cutting a projected
+   * sketch with it gives the same depth everywhere on the face (text on a cap, a groove round a shaft).
+   */
+  private band(body: Shape3D, origins: string[], sel: FaceSelector, depth: number, mode: "add" | "cut"): { shape: Shape3D; what: string; axis?: { p: V3; d: V3 } } {
+    if (!(depth > 0)) throw new InputError("深度（distance）必须大于 0")
+    const faces = faceInfos(body, origins)
+    try {
+      const got = selectFaces(sel, faces, this.scope)
+      if (got.length !== 1) throw new InputError(`onto 要正好选中一个面，现在选中了 ${got.length} 个`)
+      const f = got[0]
+      const big = 2 * this.bigLength(body)
+      if (f.kind === "plane" && f.normal) {
+        // Outward normal: a cut goes in against it, an addition out along it.
+        const dir = mode === "cut" ? mul(f.normal, -1) : f.normal
+        const x: V3 = Math.abs(f.normal[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0]
+        const xd = cross(f.normal, x)
+        const pl = new Plane(f.center, xd, dir)
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return { shape: (drawRectangle(2 * big, 2 * big).sketchOnPlane(pl) as any).extrude(depth) as Shape3D, what: "平面" }
+        } finally {
+          pl.delete()
+        }
+      }
+      if (f.kind === "cylinder" && f.radius !== undefined) {
+        const ax = cylinderAxis(f)
+        if (!ax) throw new InputError("读不出这个圆柱面的轴线")
+        // Convex (a shaft, a cap) or concave (a bore): which way is into the material.
+        const convex = isConvexCylinder(f, ax)
+        const r = f.radius
+        const [inner, outer] = (mode === "cut") === convex ? [r - depth, r] : [r, r + depth]
+        if (inner <= 1e-6) throw new InputError(`深度 ${fmt(depth)} 超过了圆柱面的半径 R${fmt(r)}`)
+        const base = add(ax.p, mul(ax.d, -big))
+        const cyl = (rad: number) => makeCylinder(rad, 2 * big, base, ax.d) as unknown as Shape3D
+        const o = cyl(outer)
+        const i = cyl(inner)
+        const shape = o.cut(i)
+        o.delete()
+        i.delete()
+        return { shape, what: `圆柱面（R${fmt(r)}）`, axis: { p: ax.p, d: ax.d } }
+      }
+      throw new InputError("onto 只支持平面和圆柱面")
+    } finally {
+      disposeInfos(faces)
+    }
+  }
+
+  /**
    * Material added under a part name that doesn't exist yet: the tool body alone becomes a new part,
    * not merged with anything. The body that was there becomes a part too (its first name, or 「主体」).
    */
@@ -1575,6 +1661,7 @@ export class Kernel {
     // A pattern of a pattern (or of a many-hole feature) multiplies: count the bodies this step makes.
     const made = sources.reduce((n, s) => n + countOf(s.tool, "solid"), 0) * moves.length
     if (made > MAX_COUNT) throw new InputError(`这一步要复制出 ${made} 个实体，最多 ${MAX_COUNT} 个`)
+    if (sources.some((s) => s.mode === "intersect")) throw new InputError("求交的特征不能阵列或镜像")
     let cur = body
     const tools: Tool[] = []
     for (const { tool, mode } of sources) {
@@ -1586,6 +1673,21 @@ export class Kernel {
       tools.push({ tool: comp, mode })
     }
     return { body: cur, tools, summary }
+  }
+}
+
+/** Does the cylinder face bulge outwards (a shaft) rather than inwards (a bore)? Its outward normal points away from the axis. */
+function isConvexCylinder(f: FaceInfo, ax: { p: V3; d: V3 }): boolean {
+  const pt = f.face.pointOnSurface(0.5, 0.5)
+  const nrm = f.face.normalAt(pt)
+  try {
+    const p: V3 = [pt.x, pt.y, pt.z]
+    const k = dot(sub(p, ax.p), ax.d)
+    const radial = sub(p, add(ax.p, mul(ax.d, k)))
+    return dot([nrm.x, nrm.y, nrm.z], radial) > 0
+  } finally {
+    pt.delete()
+    nrm.delete()
   }
 }
 
@@ -1770,7 +1872,17 @@ function centerOf(tools: Tool[]): V3 | null {
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]
 }
 
-function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut", warnings: string[]): Shape3D {
+function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut" | "intersect", warnings: string[]): Shape3D {
+  if (mode === "intersect") {
+    if (!body) throw new InputError("还没有实体，不能求交")
+    const next = body.intersect(tool)
+    const v = measureShapeVolumeProperties(next).volume
+    if (v < 1e-9) {
+      next.delete()
+      throw new InputError("求交后什么都没剩下：工具体和实体不重叠")
+    }
+    return next
+  }
   if (mode === "cut") {
     if (!body) throw new InputError("还没有实体，不能切除")
     const before = measureShapeVolumeProperties(body).volume
@@ -1853,6 +1965,21 @@ function shapeName(s: SketchShape) {
   }
 }
 
+type V2 = [number, number]
+/** Sketch points with numbers worked out: a corner (rounded by r), an arc through `via`, or a spline ending at `to`. */
+function evalPoints(points: Point[], n: (v: number | string) => number): { to: V2; via?: V2; r?: number; spline?: V2[] }[] {
+  const v2 = (p: (number | string)[]): V2 => [n(p[0]), n(p[1])]
+  return points.map((p) => {
+    if (Array.isArray(p)) return { to: v2(p) }
+    if ("spline" in p) {
+      const sp = p.spline.map(v2)
+      return { to: sp[sp.length - 1], spline: sp }
+    }
+    if ("via" in p) return { to: v2(p.to), via: v2(p.via) }
+    return { to: v2(p.to), r: n(p.r) }
+  })
+}
+
 /** `mirrorText`: the sketch is seen from behind its datum plane, so text is mirrored to read right from outside. */
 function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false): { drawing: Drawing | null; paths: [number, number][][] } {
   const n = (v: number | string) => num(v, scope)
@@ -1860,7 +1987,7 @@ function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false):
   const paths: [number, number][][] = []
   for (const s of shapes) {
     if (s.type === "path") {
-      paths.push(pathPoints(s.points.map((p) => (Array.isArray(p) ? { to: [n(p[0]), n(p[1])] as [number, number] } : { to: [n(p.to[0]), n(p.to[1])] as [number, number], via: [n(p.via[0]), n(p.via[1])] as [number, number] }))))
+      paths.push(pathPoints(evalPoints(s.points, n)))
       continue
     }
     const c = s.type !== "polyline" && s.center ? [n(s.center[0]), n(s.center[1])] : [0, 0]
@@ -1914,14 +2041,26 @@ function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false):
         break
       }
       case "polyline": {
-        const pts = s.points.map((p) => (Array.isArray(p) ? { to: [n(p[0]), n(p[1])] as [number, number] } : { to: [n(p.to[0]), n(p.to[1])] as [number, number], via: [n(p.via[0]), n(p.via[1])] as [number, number] }))
+        const pts = evalPoints(s.points, n)
         const first = pts[0].to
         const last = pts[pts.length - 1]
-        if (!last.via && Math.hypot(last.to[0] - first[0], last.to[1] - first[1]) < 1e-9) pts.pop()
-        if (pts.length < 3 && !pts.some((p) => p.via)) throw new InputError("轮廓至少要 3 个点才能围成面")
+        if (!last.via && !last.spline && Math.hypot(last.to[0] - first[0], last.to[1] - first[1]) < 1e-9) pts.pop()
+        if (pts.length < 3 && !pts.some((p) => p.via || p.spline)) throw new InputError("轮廓至少要 3 个点才能围成面")
         let pen = draw(first)
-        for (const p of pts.slice(1)) pen = p.via ? pen.threePointsArcTo(p.to, p.via) : pen.lineTo(p.to)
-        d = pen.close()
+        for (const p of pts.slice(1)) {
+          if (p.via) pen = pen.threePointsArcTo(p.to, p.via)
+          else if (p.spline) for (const q of p.spline) pen = pen.smoothSplineTo(q)
+          else pen = pen.lineTo(p.to)
+          if (p.r !== undefined) {
+            if (!(p.r > 0)) throw new InputError("拐角圆角半径必须大于 0")
+            pen = pen.customCorner(p.r)
+          }
+        }
+        try {
+          d = pen.close()
+        } catch {
+          throw new InputError("轮廓画不出来：拐角圆角太大（大于相邻的边），或者样条自己交叉了")
+        }
         break
       }
     }

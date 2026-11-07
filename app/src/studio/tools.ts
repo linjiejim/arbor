@@ -1,6 +1,6 @@
 import { tool, type ToolSet } from "ai"
 import { z } from "zod"
-import { Check, DESKTOP_CHECKS, EdgeSelector, FaceSelector, Feature, Num, type FeatureOp } from "./dsl"
+import { Check, DESKTOP_CHECKS, EdgeSelector, FaceSelector, Feature, Num, SketchShape, WebMode, WebPoint, type FeatureOp } from "./dsl"
 
 /**
  * The tools the model may call. Shared by the server (schemas + how results
@@ -50,28 +50,66 @@ const checkTool = (items: z.ZodType) =>
     toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
   })
 
+type FeatureSchema = (typeof Feature.options)[number]
+
+/** Sketch shapes as the site's assistant writes them: polyline and path points without splines or rounded corners. */
+const WebSketchShape = z.discriminatedUnion(
+  "type",
+  SketchShape.options.map((o) =>
+    o.shape.type.value === "polyline" || o.shape.type.value === "path" ? (o as z.ZodObject).extend({ points: z.array(WebPoint).min(2).describe((o.shape as { points: z.ZodType }).points.description ?? "") }) : o,
+  ) as unknown as [(typeof SketchShape.options)[number], ...(typeof SketchShape.options)[number][]],
+)
+
+/**
+ * A feature's input as the site's assistant sees it: without what only the desktop app's agents get so far
+ * (intersect, revolve start / symmetric, extrude onto, spline and rounded-corner points). Its evals cover
+ * the rest; these go to it once they're evaluated there.
+ */
+function webShape(schema: FeatureSchema): Record<string, z.ZodType> {
+  const { op: _op, ...shape } = schema.shape as Record<string, z.ZodType>
+  void _op
+  const out: Record<string, z.ZodType> = { ...shape }
+  if ("mode" in out && out.mode !== undefined && schema.shape.op.value !== "import") out.mode = WebMode
+  delete out.onto
+  delete out.start
+  delete out.symmetric
+  if (schema.shape.op.value === "sketch") out.shapes = z.array(WebSketchShape).min(1)
+  if (schema.shape.op.value === "sweep") {
+    const path = (schema.shape as { path: z.ZodObject }).path
+    out.path = path.extend({ points: z.array(WebPoint).min(2).describe("路径点（不闭合）；{to, via} 是三点圆弧") }).describe(path.description ?? "")
+  }
+  return out
+}
+
+const AFTER = z.string().optional().describe("插到这个特征后面；缺省加在最后")
+
+function featureTool(op: FeatureOp, shape: Record<string, z.ZodType>) {
+  return tool({
+    description: OP_DOCS[op],
+    inputSchema: z.object({ ...shape, after: AFTER }),
+    toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
+  })
+}
+
+/** Every feature with every field: the desktop app's agents. */
 const featureTools = Object.fromEntries(
   Feature.options.map((schema) => {
     const { op: opField, ...shape } = schema.shape
-    const op = opField.value as FeatureOp
-    const input = z.object({ ...shape, after: z.string().optional().describe("插到这个特征后面；缺省加在最后") })
-    return [
-      op,
-      tool({
-        description: OP_DOCS[op],
-        inputSchema: input,
-        toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
-      }),
-    ]
+    return [opField.value, featureTool(opField.value as FeatureOp, shape as Record<string, z.ZodType>)]
   }),
 ) as Record<FeatureOp, ReturnType<typeof tool>>
 
-const { import: importTool, component: componentTool, ...webFeatureTools } = featureTools
+/** The site's assistant: without the desktop-only ops and fields. */
+const webFeatureTools = Object.fromEntries(
+  Feature.options.flatMap((schema) => {
+    const op = schema.shape.op.value as FeatureOp
+    return DESKTOP_OPS.has(op) ? [] : [[op, featureTool(op, webShape(schema))]]
+  }),
+) as Record<Exclude<FeatureOp, "import" | "component">, ReturnType<typeof tool>>
 
 /** Tools of the desktop app's agents on top of STUDIO_TOOLS (see DESKTOP_OPS); `check` replaces the site's with every kind. */
 export const DESKTOP_TOOLS = {
-  import: importTool,
-  component: componentTool,
+  ...featureTools,
   set_params: tool({
     description:
       "新建、修改或删除命名参数。值可以是数字或引用其他参数的表达式（如 \"L-2*t\"）。关键尺寸都应该做成参数，特征里用参数名引用。零件用了共享参数文件（share_params）时，共享参数文件里已有的名字会写回那个文件；shared: true 把这次 set 的参数都写进共享文件。",

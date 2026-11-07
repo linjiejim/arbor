@@ -10,7 +10,7 @@
 // text goes through JSON.stringify, and comments lose their line breaks. What
 // can't be printed safely becomes None and is listed at the top of the file.
 import { standardHole } from "./holes"
-import type { EdgeSelector, FaceSelector, Feature, PlaneRef, SketchShape } from "./dsl"
+import type { EdgeSelector, FaceSelector, Feature, PlaneRef, Point, SketchShape } from "./dsl"
 import { displayName, Tree } from "./dsl"
 import { CONST_NAMES, FUNC_NAMES, namesIn, parse, type ExprNode } from "./expr"
 
@@ -162,32 +162,49 @@ function shape2d(s: SketchShape): string {
     case "path":
       return pathCurve(s.points)
     case "polyline": {
-      const pts = s.points.map((p) => (Array.isArray(p) ? { to: p } : p))
-      const xy = (p: [N, N]) => `(${py(p[0])}, ${py(p[1])})`
+      const pts = points(s.points)
       const segs: string[] = []
+      const rounded: string[] = []
       for (let i = 0; i < pts.length; i++) {
-        const a = pts[i].to as [N, N]
+        const a = pts[i].to
         const next = pts[(i + 1) % pts.length]
-        const b = next.to as [N, N]
-        if (i === pts.length - 1 && !("via" in next && next.via) && JSON.stringify(a) === JSON.stringify(pts[0].to)) break
-        segs.push("via" in next && next.via ? `ThreePointArc(${xy(a)}, ${xy(next.via as [N, N])}, ${xy(b)})` : `Line(${xy(a)}, ${xy(b)})`)
+        if (i === pts.length - 1 && !next.via && !next.spline && JSON.stringify(a) === JSON.stringify(pts[0].to)) break
+        segs.push(segment(a, next))
+        if (next.r !== undefined) rounded.push(`${xy(next.to)} R${py(next.r)}`)
       }
-      return `make_face([${segs.join(", ")}])`
+      const face = `make_face([${segs.join(", ")}])`
+      // build123d rounds face corners afterwards (fillet on vertices); left as a note.
+      return rounded.length ? `${face}  # 拐角圆角（导出时没有画出）：${rounded.join("，")}` : face
     }
   }
 }
 
-/** An open path as one curve: straight runs as a Polyline, arcs as ThreePointArc. */
-function pathCurve(points: (N[] | { to: N[]; via: N[] })[]): string {
-  const pts = points.map((p) => (Array.isArray(p) ? { to: p } : p))
-  const xy = (p: N[]) => `(${py(p[0])}, ${py(p[1])})`
-  const segs = pts.slice(1).map((p, i) => ("via" in p && p.via ? `ThreePointArc(${xy(pts[i].to)}, ${xy(p.via)}, ${xy(p.to)})` : `Line(${xy(pts[i].to)}, ${xy(p.to)})`))
+type Pt = { to: N[]; via?: N[]; r?: N; spline?: N[][] }
+/** Points in one shape: a corner, an arc through `via`, a rounded corner, or a spline ending at its last point. */
+function points(raw: Point[]): Pt[] {
+  return raw.map((p) => (Array.isArray(p) ? { to: p } : "spline" in p ? { to: p.spline[p.spline.length - 1], spline: p.spline } : p))
+}
+const xy = (p: N[]) => `(${py(p[0])}, ${py(p[1])})`
+/** The segment from `a` to the next point. */
+function segment(a: N[], p: Pt): string {
+  if (p.via) return `ThreePointArc(${xy(a)}, ${xy(p.via)}, ${xy(p.to)})`
+  if (p.spline) return `Spline(${[a, ...p.spline].map(xy).join(", ")})`
+  return `Line(${xy(a)}, ${xy(p.to)})`
+}
+
+/** An open path as one curve: straight runs, arcs as ThreePointArc, splines as Spline. */
+function pathCurve(raw: Point[]): string {
+  const pts = points(raw)
+  const segs = pts.slice(1).map((p, i) => segment(pts[i].to, p))
   return segs.length === 1 ? segs[0] : `Curve() + [${segs.join(", ")}]`
 }
 
 /** An open path's corner points, for the rib helper (arcs by their end points). */
-function pathPointsPy(points: (N[] | { to: N[]; via: N[] })[]): string {
-  return `[${points.map((p) => (Array.isArray(p) ? p : p.to)).map((p) => `(${py(p[0])}, ${py(p[1])})`).join(", ")}]`
+function pathPointsPy(raw: Point[]): string {
+  return `[${points(raw)
+    .map((p) => p.to)
+    .map((p) => `(${py(p[0])}, ${py(p[1])})`)
+    .join(", ")}]`
 }
 
 function faces(sel: FaceSelector, base = "part.faces()"): string {
@@ -227,7 +244,8 @@ function edgeFilter(sel: Omit<EdgeSelector, "not" | "expect">) {
   return e
 }
 
-function combine(id: string, mode: "add" | "cut" | undefined) {
+function combine(id: string, mode: "add" | "cut" | "intersect" | undefined) {
+  if (mode === "intersect") return `part = part & ${ref("tool", id)}`
   return mode === "cut" ? `part = part - ${ref("tool", id)}` : `part = ${ref("tool", id)} if part is None else part + ${ref("tool", id)}`
 }
 
@@ -303,8 +321,11 @@ function feature(f: Feature, tree: Tree): string[] {
       if (mode === "reference") return [...out, `# 参考体：只用来对齐和核对间隙，不并入零件`]
       return [...out, combine(f.id, mode)]
     }
-    case "revolve":
-      return [...head, `${ref("tool", f.id)} = revolve(${ref("sk", f.sketch)},axis=${AXIS[f.axis]}${f.angle !== undefined ? `, revolution_arc=${py(f.angle)}` : ""})`, combine(f.id, f.mode)]
+    case "revolve": {
+      const turn = f.symmetric ? `-(${py(f.angle ?? 360)}) / 2` : f.start !== undefined ? py(f.start) : null
+      const rot = turn ? [`${ref("tool", f.id)} = ${ref("tool", f.id)}.rotate(${AXIS[f.axis]}, ${turn})  # 起始角`] : []
+      return [...head, `${ref("tool", f.id)} = revolve(${ref("sk", f.sketch)},axis=${AXIS[f.axis]}${f.angle !== undefined ? `, revolution_arc=${py(f.angle)}` : ""})`, ...rot, combine(f.id, f.mode)]
+    }
     case "fillet":
       return [...head, `part = fillet(${edges(f.edges)}, radius=${py(f.r)})`]
     case "chamfer":
@@ -356,16 +377,15 @@ function feature(f: Feature, tree: Tree): string[] {
       return [...head, ...f.features.map((id) => `for a in [${step} * i for i in range(1, ${c})]:\n    part = part ${modeOf(tree, id) === "cut" ? "-" : "+"} ${rot} * ${ref("tool", id)}`)]
     }
     case "sweep": {
-      const pts = f.path.points.map((p) => (Array.isArray(p) ? { to: p as [N, N] } : { to: p.to as [N, N], via: p.via as [N, N] }))
-      const xy = (p: [N, N]) => `(${py(p[0])}, ${py(p[1])})`
+      const pts = points(f.path.points)
       const pl = sketchPlane(f.path.on)
-      const straight = pts.every((p) => !p.via)
+      const straight = pts.every((p) => !p.via && !p.spline)
       const wire =
         straight && f.path.corner !== undefined
           ? `FilletPolyline(${pts.map((p) => xy(p.to)).join(", ")}, radius=${py(f.path.corner)})`
           : `Wire([${pts
               .slice(1)
-              .map((p, i) => (p.via ? `ThreePointArc(${xy(pts[i].to)}, ${xy(p.via)}, ${xy(p.to)})` : `Line(${xy(pts[i].to)}, ${xy(p.to)})`))
+              .map((p, i) => segment(pts[i].to, p))
               .join(", ")}])`
       const prof = f.profile.type === "circle" ? `Circle(${py(f.profile.d)} / 2)` : `Rectangle(${py(f.profile.w)}, ${py(f.profile.h)})`
       return [

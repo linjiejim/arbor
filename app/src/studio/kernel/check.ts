@@ -325,7 +325,7 @@ function axesOf(cyls: FaceInfo[]): { p: V3; d: V3; r: number }[] {
   return out
 }
 
-function cylinderAxis(f: FaceInfo): { p: V3; d: V3; r: number } | null {
+export function cylinderAxis(f: FaceInfo): { p: V3; d: V3; r: number } | null {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const ad: any = (f.face as any)._geomAdaptor()
   try {
