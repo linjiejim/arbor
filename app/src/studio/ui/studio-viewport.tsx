@@ -369,7 +369,8 @@ export function StudioViewport({
     const onClick = async (e: PointerEvent) => {
       const { studio: s, busy: isBusy, busyText: whyBusy, display: d, open, cancel, measuring: isMeasuring, plane: cut, reselect: rsel } = latest.current
       if (current.current?.userData.partsMode) return notify("零件炸开或隐藏时不能点选：把爆炸拖回 0，并显示全部零件")
-      const mesh = current.current?.children.find((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh)
+      // The model's own mesh (not a see-through reference body, which can't be picked).
+      const mesh = current.current?.children.find((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh && !c.userData.reference)
       if (!d?.mesh || !mesh || s.kernel.phase !== "ready") return
       const { edge, face } = pickTargets(viewer, d, mesh, e, cut)
       if (rsel?.state) return void rsel.toggle({ edge: edge?.hash ?? null, face: face?.hash ?? null })

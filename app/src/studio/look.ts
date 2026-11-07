@@ -17,7 +17,7 @@ const H = 336
  * background so the pictures read the same in either site theme.
  */
 export function renderViews(d: DisplayData, views: string[], highlight?: string, extra: { pins?: Pin[]; dir?: THREE.Vector3 } = {}): string[] {
-  if (!d.mesh) return []
+  if (!d.mesh && !d.refs?.length) return []
   const snap = acquireSnapshotter()
   try {
     return views.map((v) => {

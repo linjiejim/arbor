@@ -229,7 +229,7 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
 ## 特征树格式
 
 - 参数：`{ "L": 80, "inner": "L - 2*t" }`，任何数值字段都可以写参数名或表达式。
-- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`rib`、`split`。
+- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`rib`、`split`；还有只在桌面版 Arbor 里用的 `import`（读 STEP 文件，`tools.ts` 的 `DESKTOP_OPS`，不给网页助教；网页内核遇到它会报错），见 `docs/specs/2026-11-07-arbor-desktop.md`。
 - 拉伸的几种写法（`kernel/features2.ts`）：
   - `distance`、`through`、`until` 三者正好写一个。`until: "next"`：拉得很长，加料时减去实体、切除时与实体求交，只留贴着草图平面的那几块，所以挡住它的面是斜的、弯的都行；`until: { face }`：平行的面就是算好的距离，斜面用 replicad 的 `extrudeUntil`。
   - `thin`：封闭轮廓用 `Drawing.offset` 偏出一圈（向外偏时凸角会变圆）；开放的线（草图图形 `path`，圆弧按 5 µm 离散）按折线偏移、端头平齐，`inside` 是线拐弯的那一侧。

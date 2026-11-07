@@ -1,6 +1,6 @@
 // Requirement checks (dsl.ts `Check`): the learner's numbers, measured on the
 // latest body by the kernel, not taken on the assistant's word.
-import { getOC, measureShapeVolumeProperties, type Shape3D } from "replicad"
+import { getOC, measureDistanceBetween, measureShapeVolumeProperties, type AnyShape, type Shape3D } from "replicad"
 import type { Check, EdgeSelector, FaceSelector } from "../dsl"
 import type { Scope } from "../expr"
 import { METRIC, type ScrewSize } from "../holes"
@@ -34,14 +34,15 @@ type OC = any
 /** At most this many faces or edges per item: a selector that wide isn't one requirement. */
 const MAX_ITEMS = 50
 
-export function runChecks(body: Shape3D, origins: string[], checks: Check[], scope: Scope): CheckResult[] {
+/** `refs`: reference bodies brought in with `import`, by feature id (for clearance and interference). */
+export function runChecks(body: Shape3D, origins: string[], checks: Check[], scope: Scope, refs: Map<string, AnyShape> = new Map()): CheckResult[] {
   const faces = faceInfos(body, origins)
   const edges = edgeInfos(body, faces)
   try {
     return checks.map((c) => {
       const base = { id: c.id, said: c.said, faces: [] as number[], edges: [] as number[] }
       try {
-        return { ...base, ...one(c, body, origins, faces, edges, scope) }
+        return { ...base, ...(c.kind === "clearance" || c.kind === "interference" ? fit(c, body, refs) : one(c, body, origins, faces, edges, scope)) }
       } catch (e) {
         const first = ((e as Error).message || "没找到要量的东西").split("\n")[0].replace(/。?候选：$/, "")
         return { ...base, pass: false, invalid: true, expected: expectedOf(c), actual: first }
@@ -64,12 +65,41 @@ function expectedOf(c: Check): string {
       return `${fmt(c.expect)}°`
     case "volume":
       return [c.min !== undefined && `≥ ${fmt(c.min / 1000)} cm³`, c.max !== undefined && `≤ ${fmt(c.max / 1000)} cm³`].filter(Boolean).join("，")
+    case "clearance":
+      return `和「${c.ref}」至少隔 ${fmt(c.min)} mm`
+    case "interference":
+      return `和「${c.ref}」不相交`
     default:
       return `${fmt(c.expect)} mm`
   }
 }
 
-function one(c: Check, body: Shape3D, origins: string[], faces: FaceInfo[], edges: ReturnType<typeof edgeInfos>, scope: Scope): Omit<CheckResult, "id" | "said"> {
+type FitCheck = Extract<Check, { kind: "clearance" | "interference" }>
+
+/** The part against a reference body: the gap between them, and whether they overlap. */
+function fit(c: FitCheck, body: Shape3D, refs: Map<string, AnyShape>): Omit<CheckResult, "id" | "said"> {
+  const expected = expectedOf(c)
+  const ref = refs.get(c.ref)
+  if (!ref) throw new Error(`没有参考体「${c.ref}」：要先用 import 导入，ref 写那个特征的 id`)
+  const gap = measureDistanceBetween(body, ref)
+  // Apart: no overlap, no boolean needed (they can take seconds on a board with many parts).
+  const overlap = gap > 1e-6 ? 0 : overlapVolume(body, ref)
+  const where = overlap > 1e-6 ? `相交 ${fmt(overlap)} mm³` : gap > 1e-6 ? `最小间隙 ${fmt(gap)} mm` : "贴在一起"
+  if (c.kind === "interference") return { pass: overlap <= 1e-6, expected, actual: where, faces: [], edges: [] }
+  return { pass: overlap <= 1e-6 && gap >= c.min - (c.tol ?? 0.01), expected, actual: where, faces: [], edges: [] }
+}
+
+function overlapVolume(body: Shape3D, ref: AnyShape): number {
+  if (!("intersect" in ref)) return 0
+  const common = body.intersect(ref as Shape3D)
+  try {
+    return measureShapeVolumeProperties(common).volume
+  } finally {
+    common.delete()
+  }
+}
+
+function one(c: Exclude<Check, FitCheck>, body: Shape3D, origins: string[], faces: FaceInfo[], edges: ReturnType<typeof edgeInfos>, scope: Scope): Omit<CheckResult, "id" | "said"> {
   const tol = c.tol ?? (c.kind === "angle" ? 0.05 : 0.01)
   const expected = expectedOf(c)
   const pickFaces = (sel: FaceSelector) => {

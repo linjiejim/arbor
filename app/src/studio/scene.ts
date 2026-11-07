@@ -67,6 +67,7 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
         root.add(lines)
       }
     })
+    addRefs(root, d, kit)
     root.userData.partsMode = true
     return root
   }
@@ -113,7 +114,27 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
     lines.renderOrder = 3
     root.add(lines)
   }
+  addRefs(root, d, kit)
   return root
+}
+
+/** Reference bodies (`import`, desktop app): see-through, faint edges, not pickable, never painted. */
+function addRefs(root: THREE.Group, d: DisplayData, kit: MaterialKit) {
+  for (const r of d.refs ?? []) {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute("position", new THREE.BufferAttribute(r.mesh.vertices, 3))
+    geo.setAttribute("normal", new THREE.BufferAttribute(r.mesh.normals, 3))
+    geo.setIndex(new THREE.BufferAttribute(r.mesh.triangles, 1))
+    const mesh = new THREE.Mesh(geo, kit.glass)
+    mesh.userData.reference = r.id
+    mesh.renderOrder = 2
+    root.add(mesh)
+    if (r.edges?.length) {
+      const eg = new THREE.BufferGeometry()
+      eg.setAttribute("position", new THREE.BufferAttribute(r.edges, 3))
+      root.add(new THREE.LineSegments(eg, kit.edgeGhost))
+    }
+  }
 }
 
 function materialIndex(g: DisplayData["groups"][number], paint: Paint) {
