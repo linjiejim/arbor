@@ -1261,7 +1261,7 @@ function bomText(doc: Doc, report: BuildReport) {
     "",
     "| 序号 | 名称 | 文件 | 数量 | 单件体积 (cm³) | 外形 (mm) |",
     "| --- | --- | --- | --- | --- | --- |",
-    ...[...rows.values()].map((r, i) => `| ${i + 1} | ${r.name} | ${r.file} | ${r.count} | ${r1(r.volume / 1000)} | ${r.size.map(r1).join(" × ")} |`),
+    ...[...rows.values()].map((r, i) => `| ${i + 1} | ${r.name} | ${r.file} | ${r.count} | ${Math.round(r.volume / 10) / 100} | ${r.size.map(r1).join(" × ")} |`),
     "",
     `共 ${[...rows.values()].reduce((n, r) => n + r.count, 0)} 件。`,
     "",

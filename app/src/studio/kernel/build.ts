@@ -951,7 +951,8 @@ export class Kernel {
       if (out.geom) step.geom = out.geom
       if (out.body) {
         this.commitBody(step, prev, out.body, f.id)
-        const sliver = f.op === "sketch" || f.op === "import" ? null : this.slivers(step)
+        // A component's faces are its part file's: its slivers are reported there, not in the assembly.
+        const sliver = f.op === "sketch" || f.op === "import" || f.op === "component" ? null : this.slivers(step)
         if (sliver) warnings.push(sliver)
       }
       // Each part's faces are a run of the compound's, in part order.
