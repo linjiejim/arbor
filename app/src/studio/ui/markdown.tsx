@@ -154,7 +154,8 @@ export function Markdown({ text, onPin, streaming = false, terms = false }: { te
     return blocks.map((b) => {
       // Only prose counts: a mention inside code or a link text isn't marked, so it mustn't use up the term.
       const prose = b
-        .replace(/```[\s\S]*?(```|$)/g, " ")
+        .replace(/(```|~~~)[\s\S]*?(\1|$)/g, " ")
+        .replace(/^(?: {4}|\t).*$/gm, " ")
         .replace(/`[^`\n]*`/g, " ")
         .replace(/\[[^\]]*\]\([^)]*\)/g, " ")
       return TERM_NAMES.filter((t) => !seen.has(t.id) && prose.includes(t.name)).map((t) => {

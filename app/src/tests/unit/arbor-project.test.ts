@@ -11,7 +11,7 @@ import type { Check, Tree } from "@/studio/dsl"
 import { initNodeKernel } from "@/studio/kernel/node"
 import { withPinned } from "@/studio/pinned"
 import { markTourSeen, nextStep, tourPosition, tourSeen } from "@/lib/tour"
-import { MOVE_PREFIX, mergeProgress, takeMoved } from "@/lib/moved"
+import { MOVE_PREFIX, mergeProgress, readEnvelope, takeMoved } from "@/lib/moved"
 import { memFiles } from "./mem-files"
 
 const AGENT: CallContext = { actor: "agent", session: "s1", cwd: "/home/jim/work" }
@@ -234,25 +234,42 @@ describe("moving from the old host", () => {
     const m = new Map(Object.entries(init))
     return { m, s: { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } }
   }
-  const hand = (data: Record<string, string>) => MOVE_PREFIX + encodeURIComponent(JSON.stringify(data))
+  const hand = (d: Record<string, string>, h?: string) => MOVE_PREFIX + encodeURIComponent(JSON.stringify({ d, h }))
 
-  it("merges progress from both hosts and takes the rest only where this host has nothing", () => {
-    const { m, s } = store({ "arbor:progress": JSON.stringify({ done: ["1.1.2"], quiz: { a: [{ score: 1 }] } }), "ft-studio-mode": "build" })
-    const old = { "featuretree:progress": JSON.stringify({ done: ["1.1.1", "1.1.2"], last: "1.1.1", quiz: { a: [{ score: 0 }], b: [{ score: 3 }] } }), "ft-studio-mode": "teach", "ft-studio-v1": '{"tree":{"params":{},"features":[]},"history":[]}' }
-    expect(takeMoved(hand(old), s)).toBe(true)
+  it("merges progress (attempts once each, oldest first), share links by id, and takes the rest only where this host has nothing", () => {
+    const { m, s } = store({
+      "arbor:progress": JSON.stringify({ done: ["1.1.2"], quiz: { a: [{ score: 3, total: 3, at: 1 }] } }),
+      "ft-studio-mode": "build",
+      "ft-studio-shares-v1": JSON.stringify({ x: "new-x" }),
+    })
+    const old = {
+      "featuretree:progress": JSON.stringify({ done: ["1.1.1", "1.1.2"], last: "1.1.1", quiz: { a: [{ score: 1, total: 3, at: 2 }], b: [{ score: 3, total: 3, at: 5 }] } }),
+      "ft-studio-mode": "teach",
+      "ft-studio-v1": '{"tree":{"params":{},"features":[]},"history":[]}',
+      "ft-studio-shares-v1": JSON.stringify({ x: "old-x", y: "old-y" }),
+      "evil-key": "x",
+    }
+    const e = readEnvelope(hand(old, "#tnp"))!
+    expect(e.h).toBe("#tnp")
+    expect(Object.keys(e.d), "only the keys a hand-over may carry").not.toContain("evil-key")
+    takeMoved(e, s)
+    takeMoved(e, s) // sent again on the next visit: nothing doubles
     const p = JSON.parse(m.get("arbor:progress")!)
     expect(p.done.sort()).toEqual(["1.1.1", "1.1.2"])
-    expect(p.quiz.a).toHaveLength(2)
+    expect(p.quiz.a.map((x: { at: number }) => x.at), "oldest first: the review list reads the last as the latest").toEqual([1, 2])
     expect(p.quiz.b).toHaveLength(1)
     expect(m.get("ft-studio-mode"), "this host's own setting wins").toBe("build")
+    expect(JSON.parse(m.get("ft-studio-shares-v1")!)).toEqual({ x: "new-x", y: "old-y" })
     expect(m.get("ft-studio-v1")).toContain('"features":[]')
   })
 
   it("ignores other fragments and survives a broken hand-over", () => {
     const { m, s } = store()
-    expect(takeMoved("#term-datum", s)).toBe(false)
-    expect(takeMoved(MOVE_PREFIX + "%7Bbroken", s)).toBe(true)
+    expect(readEnvelope("#term-datum")).toBeNull()
+    const broken = readEnvelope(MOVE_PREFIX + "%7Bbroken")!
+    takeMoved(broken, s)
     expect(m.size).toBe(0)
+    expect(readEnvelope(hand({}, MOVE_PREFIX + "loop"))!.h, "never restores a hand-over as the visitor's fragment").toBeUndefined()
     expect(mergeProgress(null, null)).toBeNull()
   })
 })

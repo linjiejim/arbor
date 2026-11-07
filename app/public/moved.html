@@ -12,45 +12,53 @@
     </style>
   </head>
   <body>
-    <!-- Served by the old host (featuretree.linjiejim.com) for every page: carries this browser's progress to the new host. See src/lib/moved.ts. -->
+    <!--
+      Served by the old host (featuretree.linjiejim.com) for every page. localStorage belongs to the
+      host, so this carries the browser's progress, model and settings to arbor.linjiejim.com in the
+      fragment (never sent to a server), together with the link's own fragment. The new host merges it
+      (safe to repeat: it is sent on every visit) and clears the address. See src/lib/moved.ts.
+    -->
     <p>FeatureTree 改名为 Arbor，正在带上你的学习进度去 <a id="to" href="https://arbor.linjiejim.com/">arbor.linjiejim.com</a>……</p>
     <script>
       ;(function () {
-        // Opened on the new host itself (someone typed the path): just go home, no loop.
-        if (location.host === "arbor.linjiejim.com") return location.replace("/")
-        var to = "https://arbor.linjiejim.com" + location.pathname + location.search
+        var NEW = "https://arbor.linjiejim.com"
+        var LIMIT = 1500000
+        // On the new host itself (someone typed the path): home, keeping any hand-over.
+        if (location.host === "arbor.linjiejim.com") return location.replace("/" + location.search + location.hash)
+        var path = location.pathname === "/moved.html" ? "/" : location.pathname
+        var to = NEW + path + location.search
         var keys = ["arbor:progress", "featuretree:progress", "ft-studio-v1", "ft-studio-mode", "ft-studio-panel-w", "ft-studio-shares-v1", "arbor:practice"]
-        var data = {}
+        var d = {}
         var n = 0
         try {
-          if (!localStorage.getItem("arbor:moved")) {
-            for (var i = 0; i < keys.length; i++) {
-              var v = localStorage.getItem(keys[i])
-              if (v === null) continue
-              // The workbench's model goes along; its undo history stays (it can be long).
-              if (keys[i] === "ft-studio-v1") {
-                try {
-                  v = JSON.stringify({ tree: JSON.parse(v).tree, history: [] })
-                } catch (e) {
-                  continue
-                }
+          for (var i = 0; i < keys.length; i++) {
+            var v = localStorage.getItem(keys[i])
+            if (v === null) continue
+            // The workbench's model goes along; its undo history stays (it can be long).
+            if (keys[i] === "ft-studio-v1") {
+              try {
+                v = JSON.stringify({ tree: JSON.parse(v).tree, history: [] })
+              } catch (e) {
+                continue
               }
-              data[keys[i]] = v
-              n++
             }
+            d[keys[i]] = v
+            n++
           }
         } catch (e) {}
         var hash = location.hash
         if (n) {
-          var moved = "#arbor-move=" + encodeURIComponent(JSON.stringify(data))
-          if (moved.length > 1500000) {
-            delete data["ft-studio-v1"]
-            moved = "#arbor-move=" + encodeURIComponent(JSON.stringify(data))
+          var pack = function () {
+            return "#arbor-move=" + encodeURIComponent(JSON.stringify({ d: d, h: location.hash || undefined }))
           }
-          hash = moved
-          try {
-            localStorage.setItem("arbor:moved", String(Date.now()))
-          } catch (e) {}
+          // Too long for an address: the biggest things stay behind first, progress last.
+          var drop = ["ft-studio-v1", "ft-studio-shares-v1", "arbor:practice", "ft-studio-panel-w", "ft-studio-mode"]
+          var moved = pack()
+          for (var j = 0; moved.length > LIMIT && j < drop.length; j++) {
+            delete d[drop[j]]
+            moved = pack()
+          }
+          if (moved.length <= LIMIT) hash = moved
         }
         document.getElementById("to").href = to
         location.replace(to + hash)

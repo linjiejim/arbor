@@ -65,4 +65,34 @@ test.describe("页面", () => {
     await expect(page.getByText("claude mcp add --scope user arbor")).toBeVisible()
     await expect(page).toHaveTitle(/桌面版 · Arbor/)
   })
+
+  test("旧域名交接页：带上进度去新域名，到了合并进来", async ({ page }) => {
+    // The old host: progress in its storage (set from a plain file, so no app code moves it first);
+    // moved.html opens the new host with it in the fragment.
+    await page.goto("/favicon.svg")
+    await page.evaluate(() => {
+      localStorage.setItem("featuretree:progress", JSON.stringify({ done: ["1.1.1"], last: "1.1.1" }))
+      localStorage.setItem("ft-studio-v1", JSON.stringify({ tree: { params: { L: 9 }, features: [] }, history: [{ params: {}, features: [] }] }))
+    })
+    await page.route("https://arbor.linjiejim.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<p>new host</p>" }))
+    await page.goto("/moved.html")
+    await expect(page.getByText("new host")).toBeVisible()
+    const url = new URL(page.url())
+    expect(url.origin).toBe("https://arbor.linjiejim.com")
+    expect(url.pathname, "/moved.html itself goes to the home page").toBe("/")
+    const handed = JSON.parse(decodeURIComponent(url.hash.slice("#arbor-move=".length))).d
+    expect(Object.keys(handed).sort()).toEqual(["featuretree:progress", "ft-studio-v1"])
+    expect(JSON.parse(handed["featuretree:progress"]).done).toEqual(["1.1.1"])
+    expect(JSON.parse(handed["ft-studio-v1"]).history, "the undo history stays behind").toEqual([])
+    await page.unroute("https://arbor.linjiejim.com/**")
+
+    // The new host (here: the same preview server, fresh storage): merged once, the fragment gone.
+    await page.goto("/")
+    await page.evaluate(() => localStorage.clear())
+    await page.goto(`/learn${url.hash}`)
+    await expect(page).toHaveURL(/\/learn$/)
+    const progress = await page.evaluate(() => JSON.parse(localStorage.getItem("arbor:progress") ?? "{}"))
+    expect(progress.done).toContain("1.1.1")
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("ft-studio-v1") ?? "{}").tree.params.L)).toBe(9)
+  })
 })
