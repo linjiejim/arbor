@@ -49,6 +49,9 @@ export class DirectKernel implements KernelHost {
   async drawing(withIso: boolean) {
     return this.k.drawing(withIso)
   }
+  async setAssets(list: { name: string; bytes: Uint8Array | null; error?: string }[]) {
+    this.k.setAssets(list)
+  }
   async exportBody(format: "step" | "stl", index?: number) {
     const blob = await this.k.exportBody(format, index)
     return blob ? new Uint8Array(await blob.arrayBuffer()) : null

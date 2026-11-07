@@ -10,12 +10,26 @@ import { describeTreeChange } from "@/desktop/core/tree-diff"
 function memFiles() {
   const disk = new Map<string, string | Uint8Array>()
   const watchers = new Map<string, () => void>()
+  /** Bumped on every write: the modification time of this disk. */
+  const written = new Map<string, number>()
+  let clock = 0
   const files: Files = {
     read: async (p) => {
       const v = disk.get(p)
       return v === undefined ? null : typeof v === "string" ? v : new TextDecoder().decode(v)
     },
-    write: async (p, d) => void disk.set(p, d),
+    readBytes: async (p) => {
+      const v = disk.get(p)
+      return v === undefined ? null : typeof v === "string" ? new TextEncoder().encode(v) : v
+    },
+    stat: async (p) => {
+      const v = disk.get(p)
+      return v === undefined ? null : { size: typeof v === "string" ? v.length : v.byteLength, mtimeMs: written.get(p) ?? 0 }
+    },
+    write: async (p, d) => {
+      disk.set(p, d)
+      written.set(p, ++clock)
+    },
     watch: (p, cb) => {
       watchers.set(p, cb)
       return () => watchers.delete(p)
@@ -30,11 +44,27 @@ function memFiles() {
       return out.join("/")
     },
   }
-  const touch = async (p: string, text: string) => {
-    disk.set(p, text)
+  const touch = async (p: string, data: string | Uint8Array) => {
+    disk.set(p, data)
+    written.set(p, ++clock)
     watchers.get(p)?.()
   }
   return { disk, files, touch }
+}
+
+/** A 60 × 40 × 10 block standing on XY, as a STEP file: the kernel's own export plays a vendor's board model. */
+async function boardStep(w = 60, d = 40, h = 10) {
+  const k = new DirectKernel()
+  await k.rebuild({
+    params: {},
+    features: [
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w, h: d }] },
+      { id: "e", op: "extrude", sketch: "s", distance: h },
+    ],
+  })
+  const bytes = (await k.exportBody("step"))!
+  k.dispose()
+  return bytes
 }
 
 const AGENT: CallContext = { actor: "agent", session: "s1", cwd: "/work" }
@@ -256,4 +286,95 @@ describe("arbor: the engine", () => {
     expect((await run("look", {})).text).toMatch(/先打开 Arbor App/)
     expect((await run("add_note", { pick: {}, text: "x" })).text).toMatch(/没有这个命令/)
   }, 30_000)
+})
+
+describe("arbor: importing STEP", () => {
+  const CASE = "/work/case.arbor.json"
+
+  /** An open-top case around the board: inside 61 × 41, floor at z = 0, walls t. The board sits 1 mm up. */
+  async function caseEngine() {
+    const mem = memFiles()
+    await mem.files.write("/work/vendor/board.step", await boardStep())
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files })
+    const run = (name: string, input: unknown) => engine.run(name, input, AGENT)
+    await run("open_part", { path: "case", create: true })
+    const imp = await run("import", { id: "board", name: "开发板", file: "vendor/board.step", at: [0, 0, 1] })
+    expect(imp.ok, imp.text).toBe(true)
+    expect(imp.text).toContain("参考体 vendor/board.step · 60 × 40 × 10")
+    await run("set_params", { set: { gap: 0.5, t: 2, W: "60 + 2*gap + 2*t", D: "40 + 2*gap + 2*t" } })
+    await run("sketch", { id: "s", on: { plane: "XY", offset: "-t" }, shapes: [{ type: "rect", w: "W", h: "D" }] })
+    await run("extrude", { id: "e", sketch: "s", distance: "14 + t" })
+    const shell = await run("shell", { id: "sh", open: { normal: "+Z", extreme: "+Z" }, t: "t" })
+    expect(shell.ok, shell.text).toBe(true)
+    return { engine, run, ...mem }
+  }
+
+  it("brings a board in as a reference body and checks the fit against it", async () => {
+    const { engine, run } = await caseEngine()
+    await run("check", {
+      items: [
+        { id: "gap", said: "四周留 0.5", kind: "clearance", ref: "board", min: 0.5 },
+        { id: "fit", said: "不能碰到板", kind: "interference", ref: "board" },
+      ],
+    })
+    const report = engine.docState(CASE)!.report!
+    expect(report.refs).toEqual([{ id: "board", name: "开发板", size: [60, 40, 10] }])
+    expect(report.checks!.map((c) => [c.id, c.pass, c.actual])).toEqual([
+      ["gap", true, "最小间隙 0.5 mm"],
+      ["fit", true, "最小间隙 0.5 mm"],
+    ])
+    // The board is shown, the case is what's exported.
+    const display = (await engine.kernelCall(CASE, { op: "display" })) as { refs?: unknown[]; mesh: unknown }
+    expect(display.refs).toHaveLength(1)
+    expect(display.mesh).toBeTruthy()
+    expect(engine.docState(CASE)!.report!.body!.size).toEqual([65, 45, 16])
+
+    // A cavity too small for the board: they overlap, and the checks say by how much.
+    await engine.run("set_params", { set: { gap: -1 } }, USER)
+    const after = engine.docState(CASE)!.report!.checks!
+    expect(after.every((c) => !c.pass)).toBe(true)
+    expect(after[1].actual).toMatch(/^相交 [\d.]+ mm³$/)
+  }, 60_000)
+
+  it("cuts a pocket with an imported shape, and rebuilds when the file changes", async () => {
+    const { engine, run, touch } = await caseEngine()
+    const before = engine.docState(CASE)!.report!.body!.volume
+    // A connector-sized block poking through the front wall, subtracted.
+    await touch("/work/vendor/usb.step", await boardStep(9, 8, 3.5))
+    const cut = await run("import", { id: "usb", file: "vendor/usb.step", mode: "cut", at: [0, -22, 4] })
+    expect(cut.ok, cut.text).toBe(true)
+    expect(engine.docState(CASE)!.report!.body!.volume).toBeLessThan(before)
+
+    // A new version of the board file: rebuilt without anyone touching the tree.
+    const rev = engine.docState(CASE)!.rev
+    await touch("/work/vendor/board.step", await boardStep(70, 40, 10))
+    await run("get_state", {})
+    const s = engine.docState(CASE)!
+    expect(s.rev).toBe(rev + 1)
+    expect(s.changes[0]).toMatchObject({ actor: "file", summary: "board.step 更新了，已重建" })
+    expect(s.report!.refs![0].size).toEqual([70, 40, 10])
+  }, 60_000)
+
+  it("lets the agent see a reference body before there is any part: where it is, and its own faces", async () => {
+    const mem = memFiles()
+    await mem.files.write("/work/board.step", await boardStep())
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files })
+    const run = (name: string, input: unknown) => engine.run(name, input, AGENT)
+    await run("open_part", { path: "case", create: true })
+    await run("import", { id: "board", file: "board.step", at: [0, 0, 3] })
+    const body = await run("inspect", { what: "body" })
+    expect(body.text).toContain("参考体 board（导入1）：包围盒 X -30…30，Y -20…20，Z 3…13")
+    const faces = await run("inspect", { what: "faces", faces: { of: "board", normal: "-Y" } })
+    expect(faces.text).toMatch(/法向 -Y 中心\(0, -20, 8\) 来自 board/)
+  }, 60_000)
+
+  it("tells what's wrong with a missing file, and that the site can't read files at all", async () => {
+    const { run } = await caseEngine()
+    const missing = await run("import", { id: "nope", file: "nope.step" })
+    expect(missing.text).toMatch(/找不到 \/work\/nope\.step/)
+    const web = new DirectKernel()
+    const r = await web.rebuild({ params: {}, features: [{ id: "i", op: "import", file: "board.step" }] })
+    expect(r.features[0].message).toMatch(/只能在桌面版 Arbor 里用/)
+    web.dispose()
+  }, 60_000)
 })

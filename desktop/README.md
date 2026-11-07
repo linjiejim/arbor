@@ -56,15 +56,16 @@ Claude Code / Codex ──MCP (stdio)──► arbor mcp ──HTTP 127.0.0.1─
 - **谁改的都算**：agent、窗口里的你、直接改文件（编辑器、git），每次改动都记在「动态」里、都能撤销。agent 下一次调用时，结果开头会写「自你上次调用以来，用户改了：W 40 → 45」，避免它把你的改动改回去。
 - **发现**：App 启动时把端口和随机 token 写进 `~/.arbor/engine.json`（权限 600），把怎么启动自己写进 `~/.arbor/app.json`；只监听 127.0.0.1，并检查 Host 头。
 
-## 给 agent 的工具（33 个）
+## 给 agent 的工具（36 个）
 
 | 类 | 工具 |
 | --- | --- |
 | 零件 | `guide`、`open_part`、`list_parts`、`get_state` |
-| 建模（和网页工作台同一套） | `set_params`、`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`edit_feature`、`delete_feature` |
+| 建模（和网页工作台同一套） | `set_params`、`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`split`、`rib`、`edit_feature`、`delete_feature` |
+| 导入（只有桌面版） | `import`：读一个 STEP 文件（开发板、元件的官方模型）。缺省作参考体：半透明显示，用来对齐和核对，不并入零件也不导出；`mode: "cut"` 从实体里减去（挖让位槽），`mode: "add"` 并入 |
 | 整体改 | `set_tree`（可带 `base_rev` 防止覆盖）、`move_feature`、`undo`、`redo` |
 | 观测 | `inspect`、`look`（窗口渲染的视图图片）、`measure` |
-| 核对与交付 | `check`（内核量出来，逐项 ✓ / ✗）、`export`（step / stl / py / json） |
+| 核对与交付 | `check`（和网页工作台同一张需求核对表：存进零件，每次重建自动重算；桌面版多两项：和参考体之间的 `clearance` 间隙、`interference` 不干涉）、`export`（step / stl / py / json） |
 | 和人协作 | `get_notes`、`resolve_note`、`request_pick`（请你在窗口里点一个面或边，等你点完）、`show`（在窗口里高亮给你看） |
 
 完整的说明在 MCP 的 instructions 里（`guide` 也能读到），坐标约定和选择器写法和网页工作台的提示词是同一份。
@@ -110,6 +111,8 @@ python3 -I scripts/make-icons.py                           # 从 resources/logo/
 ## 已知局限
 
 - 只打了 macOS（arm64）包，没有签名和自动更新。
-- 不能导入外部 STEP、没有「代码特征」：特征树表达不了的形状还做不了（规划见 `docs/specs/2026-11-07-arbor-desktop.md`）。
+- 没有「代码特征」：特征树表达不了的形状还做不了（规划见 `docs/specs/2026-11-07-arbor-desktop.md`）。
+- 导入的 STEP 是一个整体：选择器选不到它的面，核对只能对整个参考体量间隙和干涉；`mode: "cut"` 减去的是元件本身的外形，要留间隙得先在别处把它放大。
+- 工作台里的「让助教改」按钮在桌面版会打开「给 agent 留一条备注」，但按钮上的字还是「助教」（共用组件里的文字）。
 - 一个内核同一时间只装一个零件：agent 和窗口在不同零件之间来回切换时，每次切换要重建一次。
 - `request_pick` 一次最多等 280 秒；没等到就返回，agent 用同一句 prompt 再调用会接着等，期间你点的也不会丢。

@@ -12,7 +12,7 @@ import type { DrawingData } from "../../studio/kernel/drawing"
 import { InputError } from "../../studio/kernel/errors"
 import type { MeasureResult, MeasureTarget } from "../../studio/kernel/measure"
 import { STARTERS } from "../../studio/starters"
-import { STUDIO_TOOLS } from "../../studio/tools"
+import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
 import { AGENT_GUIDE, COMMAND } from "./catalog"
 import { newNote, notesText, parseNotes, pickLines, type NotesFile } from "./notes"
 import {
@@ -51,6 +51,8 @@ export interface KernelHost {
   dimensions(): Promise<Dim[]>
   drawing(withIso: boolean): Promise<DrawingData | null>
   exportBody(format: "step" | "stl", index?: number): Promise<Uint8Array | null>
+  /** Files `import` features read (absent: this host can't read files). */
+  setAssets?(list: { name: string; bytes: Uint8Array | null; error?: string }[]): Promise<void>
 }
 
 export interface Files {
@@ -60,6 +62,9 @@ export interface Files {
   watch(path: string, onChange: () => void): () => void
   /** The path with symlinks resolved (/tmp → /private/tmp), so one file is one part. */
   canonical?(path: string): string
+  /** For `import`: the bytes of a file, and its size and modification time (to tell when it changed). */
+  readBytes?(path: string): Promise<Uint8Array | null>
+  stat?(path: string): Promise<{ size: number; mtimeMs: number } | null>
 }
 
 /** The window, when there is one: renders views for `look`. */
@@ -94,6 +99,8 @@ type Doc = {
   /** The text last written or read: tells our own writes apart from someone else's. */
   written: string | null
   unwatch: () => void
+  /** Watchers on the STEP files the part imports, by absolute path. */
+  assetWatch: Map<string, () => void>
   /** Changes so far (the activity list is capped; this keeps counting). */
   seq: number
   /** What the agent has been told about: changes up to this one, notes up to this number. */
@@ -105,7 +112,7 @@ type PickAnswer = { info: PickInfo; text?: string }
 
 const MAX_UNDO = 100
 const MAX_CHANGES = 200
-const STUDIO_TOOL_NAMES = new Set(Object.keys(STUDIO_TOOLS).filter((n) => n !== "look"))
+const STUDIO_TOOL_NAMES = new Set([...Object.keys(STUDIO_TOOLS), ...Object.keys(DESKTOP_TOOLS)].filter((n) => n !== "look"))
 /** Agent-side commands the window may run too. */
 const WINDOW_OK = new Set(["undo", "redo"])
 
@@ -159,6 +166,8 @@ export class Engine {
   private chain: Promise<unknown> = Promise.resolve()
   private kernelDoc: Doc | null = null
   private kernelTree: Tree | null = null
+  /** Which part's files (and versions) the kernel holds for `import`. */
+  private assetsKey = ""
   private agent: AgentActivity = { busy: false, tool: null, at: null }
   private pending: { request: PickRequest; waiters: ((a: PickAnswer | null) => void)[] } | null = null
   /** A pick the person answered after the agent stopped waiting: handed over on the next identical request. */
@@ -434,6 +443,7 @@ export class Engine {
     const doc = this.docs.get(path)
     if (!doc) return { ok: true, text: "没有打开这个零件。" }
     doc.unwatch()
+    for (const stop of doc.assetWatch.values()) stop()
     this.docs.delete(path)
     if (this.kernelDoc === doc) this.kernelDoc = null
     for (const [s, p] of this.sessions) if (p === path) this.sessions.delete(s)
@@ -490,6 +500,7 @@ export class Engine {
       notes,
       written: text,
       unwatch: () => {},
+      assetWatch: new Map(),
       seq: 0,
       agentNoteN: 0,
       agentSeq: 0,
@@ -590,7 +601,8 @@ export class Engine {
 
   /** The kernel holds one tree at a time: make it this part's current one. */
   private async ensureKernel(doc: Doc, force = false) {
-    if (force || this.kernelDoc !== doc || this.kernelTree !== doc.tree) {
+    const assetsChanged = await this.syncAssets(doc, doc.tree)
+    if (force || assetsChanged || this.kernelDoc !== doc || this.kernelTree !== doc.tree) {
       const tree = doc.tree
       doc.report = await this.opts.kernel.rebuild(tree)
       this.kernelDoc = doc
@@ -599,10 +611,65 @@ export class Engine {
     return doc.report!
   }
 
+  /**
+   * The files `tree` imports (STEP), read next to the part and handed to the kernel when they change:
+   * by size and modification time, so an unchanged file isn't read again. Returns whether the set changed.
+   */
+  private async syncAssets(doc: Doc, tree: Tree) {
+    const files = this.opts.files
+    const dir = doc.path.replace(/[\\/][^\\/]*$/, "")
+    const names = [...new Set(tree.features.flatMap((f) => (f.op === "import" ? [f.file] : [])))]
+    const entries = await Promise.all(
+      names.map(async (name) => {
+        const abs = assetPath(dir, name)
+        const st = (await files.stat?.(abs)) ?? null
+        return { name, abs, sig: st ? `${st.size}:${st.mtimeMs}` : "missing" }
+      }),
+    )
+    this.watchAssets(doc, entries.map((e) => e.abs))
+    const key = JSON.stringify([doc.path, entries.map((e) => [e.name, e.sig])])
+    if (key === this.assetsKey) return false
+    const list = await Promise.all(
+      entries.map(async (e) => {
+        const bytes = e.sig === "missing" ? null : ((await files.readBytes?.(e.abs)) ?? null)
+        return { name: e.name, bytes, error: bytes ? undefined : `找不到 ${e.abs}（路径相对零件文件所在的文件夹）` }
+      }),
+    )
+    await this.opts.kernel.setAssets?.(list)
+    this.assetsKey = key
+    return true
+  }
+
+  /** A STEP file the part imports changed on disk: rebuild, as a change by 「文件」. */
+  private watchAssets(doc: Doc, paths: string[]) {
+    for (const [p, stop] of doc.assetWatch) {
+      if (paths.includes(p)) continue
+      stop()
+      doc.assetWatch.delete(p)
+    }
+    for (const p of paths) {
+      if (doc.assetWatch.has(p)) continue
+      doc.assetWatch.set(
+        p,
+        this.opts.files.watch(p, () =>
+          void this.exclusive(async () => {
+            if (this.docs.get(doc.path) !== doc) return
+            this.assetsKey = ""
+            doc.rev += 1
+            doc.changes = [{ rev: doc.rev, actor: "file" as const, at: Date.now(), summary: `${p.split(/[\\/]/).pop()} 更新了，已重建`, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
+            await this.ensureKernel(doc, true)
+            this.emitDoc(doc)
+          }),
+        ),
+      )
+    }
+  }
+
   private port(doc: Doc): KernelPort {
     return {
       rebuild: async (t) => {
         this.kernelTree = null
+        await this.syncAssets(doc, t)
         const r = await this.opts.kernel.rebuild(t)
         this.kernelDoc = doc
         this.kernelTree = t
@@ -676,7 +743,7 @@ export class Engine {
     const index = at ? doc.tree.features.findIndex((f) => f.id === at) : -1
     if (at && index < 0) return fail(`找不到特征「${at}」`)
     const display = await this.opts.kernel.display(index >= 0 ? index : undefined)
-    if (!display.mesh) return fail("还没有实体可以看。")
+    if (!display.mesh && !display.refs?.length) return fail("还没有实体可以看。")
     const views = (input.views as string[] | undefined)?.length ? (input.views as string[]) : ["iso", "front", "top", "right"]
     const pins = input.notes === false ? [] : doc.notes.notes.filter((n) => n.status === "open" && n.kind !== "part").map((n) => ({ n: n.n, point: n.point }))
     const images = await screen.look({ display, views, highlight: input.highlight as string | undefined, pins })
@@ -812,7 +879,10 @@ export class Engine {
   }
 
   dispose() {
-    for (const d of this.docs.values()) d.unwatch()
+    for (const d of this.docs.values()) {
+      d.unwatch()
+      for (const stop of d.assetWatch.values()) stop()
+    }
     this.settlePick(null)
   }
 }
@@ -827,4 +897,10 @@ export function measureText(res: MeasureResult) {
   const items = res.items.map((i, k) => `${res.items.length > 1 ? (k ? "B" : "A") + "：" : ""}${i.kind === "face" ? "面" : "边"} · ${i.what} · ${i.facts.join("，")}`)
   const between = res.between.map((b) => `${b.name}：${b.value}`)
   return [...items, ...between].join("\n")
+}
+
+/** A file an `import` names, relative to the part's folder (or absolute). */
+export function assetPath(dir: string, file: string) {
+  const f = file.trim().replace(/\\/g, "/")
+  return /^([A-Za-z]:)?\//.test(f) ? f : `${dir.replace(/[\\/]+$/, "")}/${f.replace(/^\.\//, "")}`
 }

@@ -5,7 +5,7 @@ import { z } from "zod"
 import { EdgeSelector, FaceSelector, Tree } from "../../studio/dsl"
 import { SYSTEM_PROMPT } from "../../studio/prompt"
 import { STARTERS } from "../../studio/starters"
-import { STUDIO_TOOLS } from "../../studio/tools"
+import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
 
 /** agent: MCP / CLI; user: only the window; both: either. */
 export type Audience = "agent" | "user" | "both"
@@ -18,7 +18,7 @@ const Target = z
 const VIEWS = ["iso", "front", "top", "right", "back", "bottom", "left"] as const
 
 /** Modelling tools of the web studio, as they are (look is replaced below: here it renders in the window). */
-const studioTools: CommandSpec[] = Object.entries(STUDIO_TOOLS)
+const studioTools: CommandSpec[] = Object.entries({ ...STUDIO_TOOLS, ...DESKTOP_TOOLS })
   .filter(([name]) => name !== "look")
   .map(([name, t]) => ({ name, description: typeof t.description === "string" ? t.description : "", input: t.inputSchema as z.ZodObject, audience: "both" as const }))
 
@@ -207,5 +207,12 @@ export const AGENT_GUIDE = `# Arbor：用工具建参数化零件
 
 ${promptSections(["数值", "坐标与基准面", "扫掠、放样、拔模", "建模习惯", "文字", "选择器"])}
 
+## 导入 STEP（开发板、元件的官方模型）
+- import 读一个 STEP 文件，路径相对零件文件所在的文件夹（可以是子文件夹，如 "vendor/board.step"）。先用 import 把它放进来（缺省是参考体），再用 inspect body 或 get_state 看它的尺寸，用 rotate、at 摆到要的位置（先旋转后平移，单位 mm）。
+- 参考体半透明显示，不并入零件、不导出，选择器也选不到它的面。围着它建外壳：用它的包围盒定尺寸，再把间隙做成参数。
+- 核对配合用 check：clearance（ref 写 import 的 id，min 写最小间隙）和 interference（不能相交）。改了参数或外壳以后，它们每次重建都会重算。
+- mode=cut 从实体里减去整个导入体（给元件挖让位槽，通常先把元件的外形放大一点更合适）；mode=add 并入实体。
+- 文件换了新版本，窗口会自动重建。
+
 ## 做不到的
-目前不支持真实的螺纹几何（螺纹孔只标装饰螺纹）、钣金、装配约束，也不能导入外部 STEP。做不到就直说，并给出最接近的做法。不要编造工具没有的参数。`
+目前不支持真实的螺纹几何（螺纹孔只标装饰螺纹）、钣金、装配约束。做不到就直说，并给出最接近的做法。不要编造工具没有的参数。`

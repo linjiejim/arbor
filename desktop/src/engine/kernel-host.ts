@@ -92,7 +92,7 @@ export class ThreadKernel implements KernelHost {
     })
   }
 
-  /** A fresh thread holding the same tree as the old one. */
+  /** A fresh thread holding the same files and tree as the old one. */
   private async restart() {
     const old = this.worker
     this.stale = false
@@ -103,13 +103,22 @@ export class ThreadKernel implements KernelHost {
       void old.terminate()
     }
     await this.start()
-    if (this.lastTree) {
-      const id = ++this.seq
-      await new Promise((resolve, reject) => {
+    const send = (op: KernelRequest["op"], args: unknown[]) =>
+      new Promise((resolve, reject) => {
+        const id = ++this.seq
         this.pending.set(id, { resolve, reject })
-        this.worker!.postMessage({ id, op: "rebuild", args: [this.lastTree] } satisfies KernelRequest)
+        this.worker!.postMessage({ id, op, args } satisfies KernelRequest)
       })
-    }
+    if (this.assets.length) await send("setAssets", [this.assets])
+    if (this.lastTree) await send("rebuild", [this.lastTree])
+  }
+
+  /** The files `import` reads; kept here so a replacement thread gets them too. */
+  private assets: { name: string; bytes: Uint8Array | null; error?: string }[] = []
+
+  async setAssets(list: { name: string; bytes: Uint8Array | null; error?: string }[]) {
+    this.assets = list
+    await this.call<void>("setAssets", [list])
   }
 
   async rebuild(tree: Tree) {
