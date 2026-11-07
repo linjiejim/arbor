@@ -1,9 +1,9 @@
 # Arbor：让本地 coding agent 建模的桌面工作台
 
-- 状态：v0.1.0 已实现，含导入 STEP（分支 `feat/arbor-desktop`，已 rebase 到 2026-11-07 的 main），待合并。
+- 状态：v0.1.0 已上线（导入 STEP 一起，见 PR 22）；v0.2.0 加上自动更新，在 GitHub Releases 发布。
 - 日期：2026-11-07
 - 范围：一个 Electron 桌面应用。本机的 coding agent（Claude Code、Codex 等）通过 MCP 或命令行调用建模和观测工具；人在窗口里看、拖参数、改特征、在面或边上留备注。模型和 agent 的能力都来自本地 agent，Arbor 不调用任何模型。
-- 不在范围：签名和自动更新、Windows / Linux 安装包、代码特征、装配约束。
+- 不在范围：Apple 签名和公证、Windows / Linux 安装包、代码特征、装配约束。
 - 相关：`desktop/README.md`（怎么跑、怎么接、开发说明）、`docs/specs/2026-11-05-ai-modeling.md`（特征树和内核的总体方案）、`docs/dev/studio.md`
 
 ## 为什么
@@ -40,6 +40,24 @@
 | 网页 | `import` 不开放给网页助教（`DESKTOP_OPS`）；网页内核遇到它报「只能在桌面版 Arbor 里用」 | 网页读不到本机文件 |
 | 核对配合 | 网页核对表加两项：`clearance`（和参考体的最小间隙）、`interference`（不相交） | 和其他要求一样存进零件、自动重算；先量最短距离，大于 0 就不做布尔，板子元件多时也快 |
 | 看参考体 | `inspect body` 列出参考体的包围盒；`inspect faces / edges` 加 `of: "<import 的 id>"` 列出它自己的面和边；只有参考体时也能 `look` | 真实 agent 第一次用时看不到板子，只能临时把它并入实体再查面（见下） |
+
+## 自动更新（v0.2.0）
+
+做法参照 Excalidesk（Tauri 的 updater 插件）：从 GitHub Releases 更新，更新包用我们自己的钥匙签名，App 内置公钥。
+
+| 问题 | 决定 | 理由 |
+| --- | --- | --- |
+| 用不用 electron-updater | 不用，自己写（`desktop/src/update/`、`desktop/src/main/updater.ts`） | macOS 上 electron-updater 走 Squirrel.Mac，要求新旧两个版本由同一个 Apple 开发者证书签名。Arbor 没有证书，临时签名每次构建都不一样，Squirrel 会拒绝 |
+| 怎么证明更新包可信 | ed25519 签名，签的内容是「版本、平台、SHA-256、大小」；公钥内置在 App 里，私钥是仓库 secret | 和 Tauri 的 minisign 一样，版本号也在签名里：旧版本的更新包不能被冒充成新版本 |
+| 清单放哪 | 每个 release 带一个 `arbor-update.json`，App 读 `releases/latest/download/arbor-update.json` | 不调用 GitHub API，也就没有每小时 60 次的限流；代价是这个仓库的 latest release 只能给 Arbor 用（网站不发 release） |
+| 什么时候换 | 下载、校验、解压都在 App 旁边的 `.arbor-update/` 里做，退出时用两次 rename 把新旧 App 对换；「重启以更新」就是退出后重新启动 | 运行中的 App 还会从自己的包里加载东西（renderer 进程、内核线程、wasm），中途换掉可能出现新旧文件混用。放在同一个文件夹里，保证 rename 不跨卷 |
+| 换失败了怎么办 | 第二次 rename 失败就把旧 App 放回原处，照样重新启动（启动的还是旧版本） | 用户至少还有一个能用的 App |
+| 下载 | Electron 的 `net.fetch`（Chromium 网络栈）；边下载边算哈希，超过清单里的大小就停；60 秒没有新数据就放弃 | 跟随系统代理（国内网络环境需要）；不会被异常大的响应塞满磁盘 |
+| 不能更新的情况 | 开发模式、从 dmg 里运行、App Translocation、所在文件夹不可写：手动检查时说明原因，自动检查时只写日志 | Tauri 和 Sparkle 也是这样 |
+| 签名 | 没有 Apple 证书；打包后整个 App 签临时签名（`codesign --deep -s -`） | 浏览器下载的 App 不签名会被 macOS 报「已损坏」，签了临时签名就只是「无法验证开发者」，可以在系统设置里放行。App 自己下载的更新包没有隔离属性，不会被拦 |
+| 发布 | 推 `arbor-v*` tag → 工作流核对版本号，构建 arm64 和 x64，生成清单并用内置公钥验一遍，建草稿 release → 人工发布并设为 latest | 和 Excalidesk 一样，发布草稿才算推送更新 |
+
+验证：`desktop/src/update/update.test.ts`（13 项：版本比较；签名换版本、换平台、换钥匙都会被拒；下载时大小和哈希校验；解压后核对 bundle id 和版本；对换失败时回滚）。端到端用一个 0.1.9 的包测过：它从本机服务器读到 0.2.0 的清单，下载、校验、解压，标题栏出现「重启以更新到 0.2.0」，点击后重新启动，跑的是 0.2.0，`.arbor-update/` 也清理掉了。
 
 ## 实现中发现并处理的
 
@@ -87,4 +105,4 @@
 3. **代码特征**：特征树表达不了的形状，用一段脚本产出实体，作为树里的一个节点。
 4. Claude Code 的 UserPromptSubmit hook：每次发消息时自动带上未读备注。
 5. 共用组件里「助教」的字样在桌面版换成「agent」。
-6. 签名、自动更新，Windows / Linux 包。
+6. Apple 签名和公证；Windows / Linux 包。
