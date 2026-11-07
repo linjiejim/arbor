@@ -77,6 +77,19 @@ FeatureTree 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和�
 | `@openrouter/ai-sdk-provider` | 3.1.0 | Apache-2.0 | <https://github.com/OpenRouterTeam/ai-sdk-provider> |
 | AI SDK（`ai`）、Zod | 同上 | Apache-2.0 / MIT | 同上 |
 
+### 桌面版 Arbor（`desktop/`，随安装包分发）
+
+Arbor 的窗口和网站共用上面「随网站发布」的前端组件（React、three.js、Radix、Lucide、字体……），另外带上：
+
+| 组件 | 版本 | 许可证 | 用途 | 链接 |
+| --- | --- | --- | --- | --- |
+| Electron（含 Chromium、Node.js） | 45.2.3 | MIT；Chromium 各组件的许可见安装包里的 `LICENSES.chromium.html` | 桌面应用外壳 | <https://github.com/electron/electron> |
+| `@modelcontextprotocol/sdk` | 1.32.2 | MIT | `arbor mcp` 的 MCP 服务 | <https://github.com/modelcontextprotocol/typescript-sdk> |
+| replicad-opencascadejs | 1.1.0 | LGPL-2.1-only | 几何内核，见上一节 | 同上 |
+
+- **OpenCascade 的 wasm 怎么分发**：和网站一样是单独的文件，在 `Arbor.app/Contents/Resources/app/dist/vendor/opencascade/`（`replicad_single.js` + `replicad_single.wasm`，旁边附 `LICENSE`）。安装包不打 asar，替换这两个文件就能换成自己编译的版本。
+- 只在构建时用、不进安装包：electron-builder（MIT）、esbuild（MIT）。
+
 ### jim-uiux 组件（待确认）
 
 `app/src/components/ui/` 下的组件、`app/src/lib/utils.ts`、`app/src/lib/strings.ts` 和设计令牌，来自作者自己的设计系统 [jim-uiux](https://design.linjiejim.com)（通过 shadcn 注册表安装）。

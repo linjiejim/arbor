@@ -266,6 +266,21 @@ export const Feature = z.discriminatedUnion("op", [
   }),
   z.object({
     ...Base,
+    op: z.literal("import"),
+    file: z.string().min(1).max(200).describe("STEP 文件，相对零件文件所在的文件夹，例如 \"board.step\"。只在桌面版 Arbor 里能读文件"),
+    mode: z
+      .enum(["reference", "add", "cut"])
+      .optional()
+      .describe("reference = 参考体（缺省）：只显示、用来对齐和核对间隙、干涉，不并入零件也不导出；add = 并入实体；cut = 从实体里减去（按元件挖让位槽）"),
+    rotate: z
+      .array(z.object({ axis: Axis, angle: Num }))
+      .max(3)
+      .optional()
+      .describe("依次绕过原点的坐标轴旋转，角度用度；先旋转、后平移"),
+    at: Vec3.optional().describe("平移 [x, y, z]"),
+  }),
+  z.object({
+    ...Base,
     op: z.literal("rib"),
     sketch: z.string().describe("只含一条开放的线（path）的草图，画在筋所在的平面上；线的两端可以不碰到实体，会自动延长到墙"),
     t: Num.describe("筋厚，在草图平面两侧各一半"),
@@ -307,6 +322,9 @@ export const Check = z.discriminatedUnion("kind", [
   z.object({ ...CheckBase, kind: z.literal("pcd"), faces: FaceSelector.describe("各个孔的圆柱面"), count: z.number().int().positive(), expect: z.number().describe("节圆直径"), axis: z.enum(["X", "Y", "Z"]).optional() }),
   z.object({ ...CheckBase, kind: z.literal("angle"), a: FaceSelector, b: FaceSelector, expect: z.number() }),
   z.object({ ...CheckBase, kind: z.literal("volume"), min: z.number().optional(), max: z.number().optional() }),
+  // Against a reference body brought in with `import` (desktop app): fit around a board, a part to mate with.
+  z.object({ ...CheckBase, kind: z.literal("clearance"), ref: z.string().describe("参考体的特征 id（import）"), min: z.number().describe("零件和参考体之间最小的间隙，mm") }),
+  z.object({ ...CheckBase, kind: z.literal("interference"), ref: z.string().describe("参考体的特征 id（import）：零件不能和它相交") }),
 ])
 export type Check = z.infer<typeof Check>
 
@@ -339,6 +357,7 @@ export const OP_NAMES: Record<FeatureOp, string> = {
   draft: "拔模",
   rib: "筋",
   split: "拆件",
+  import: "导入",
 }
 
 /** Display name: the model's own name, else 「拉伸2」 style numbering. */

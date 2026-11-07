@@ -24,6 +24,7 @@ import {
   sketchRectangle,
   type Blueprint,
   type CompoundBlueprint,
+  type AnyShape,
   type Shape3D,
 } from "replicad"
 import type { PickInfo } from "../annotations"
@@ -143,6 +144,8 @@ export type BuildReport = {
   checks?: CheckResult[]
   /** After a split: each part's name, volume and size. */
   parts?: { name: string; volume: number; size: V3 }[]
+  /** Reference bodies brought in with `import`. */
+  refs?: { id: string; name: string; size: V3 }[]
   ms: number
 }
 
@@ -156,6 +159,8 @@ export type DisplayData = {
   edgeGroups: { start: number; count: number; hash: number; part?: number }[]
   /** After a split: the parts, with where each moves at full explode. */
   parts?: { name: string; explode: V3; center: V3 }[]
+  /** Reference bodies (`import`, desktop app): drawn see-through, not part of the model. */
+  refs?: { id: string; name: string; mesh: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array }; edges: Float32Array | null }[]
   /** Outline of the sketch, when the shown step is a sketch. */
   sketch: Float32Array | null
   /** Cosmetic threads: a ring at the nominal diameter at each end of a tapped hole. */
@@ -184,7 +189,15 @@ type Step = {
   /** After a split: the parts (`body` is their compound), and each part's face origins. */
   parts?: Part[]
   partOrigins?: string[][]
+  /** Reference bodies so far (`import` with mode reference): carried along, never merged. */
+  refs?: Ref[]
 }
+
+/** A reference body: shown and measured against, not part of the model. `owned`: made by this step. */
+type Ref = { id: string; name: string; shape: AnyShape; mesh: Mesh; edges: EdgeMesh; owned: boolean }
+
+/** A file `import` reads, as the host handed it over: parsed once per content. */
+type Asset = { hash: string; shape: AnyShape | null; error?: string }
 
 type Thread = { r: number; major: number }
 
@@ -203,6 +216,46 @@ export class Kernel {
   private paramsKey = ""
   private scope: Scope = {}
   private tree: Tree = EMPTY_TREE
+  /** Files the tree imports, by the name written in the feature. Empty on the site (no files to read). */
+  private assets = new Map<string, Asset>()
+  private assetsGiven = false
+  /** Parsed files by content, so switching parts doesn't parse them again. */
+  private parsed = new Map<string, AnyShape>()
+
+  /**
+   * The host (the desktop app) hands over the files `import` features read: the bytes, or why it
+   * couldn't read them. Call before `rebuild`; a changed file rebuilds from its import on.
+   */
+  setAssets(list: { name: string; bytes: Uint8Array | null; error?: string }[]) {
+    this.assetsGiven = true
+    const next = new Map<string, Asset>()
+    for (const a of list) {
+      if (!a.bytes) {
+        next.set(a.name, { hash: `missing:${a.error ?? ""}`, shape: null, error: a.error ?? "读不到这个文件" })
+        continue
+      }
+      const hash = contentHash(a.bytes)
+      let shape = this.parsed.get(hash) ?? null
+      let error: string | undefined
+      if (!shape) {
+        try {
+          shape = readStep(a.bytes)
+          this.parsed.set(hash, shape)
+        } catch (e) {
+          error = (e as Error).message
+        }
+      }
+      next.set(a.name, { hash, shape, error })
+    }
+    // Keep a few parsed files beyond the ones in use (another open part may need them back).
+    const used = new Set([...next.values()].map((a) => a.hash))
+    for (const [hash, shape] of [...this.parsed]) {
+      if (used.has(hash) || this.parsed.size <= used.size + 4) continue
+      shape.delete()
+      this.parsed.delete(hash)
+    }
+    this.assets = next
+  }
 
   rebuild(tree: Tree): BuildReport {
     const t0 = performance.now()
@@ -234,7 +287,7 @@ export class Kernel {
     let failed = paramError !== undefined
     for (let i = 0; i < tree.features.length; i++) {
       const f = tree.features[i]
-      key += "\n" + JSON.stringify(f) + (off.has(f.id) ? "\noff" : "")
+      key += "\n" + JSON.stringify(f) + (off.has(f.id) ? "\noff" : "") + (f.op === "import" ? `\n${this.assets.get(f.file)?.hash ?? "-"}` : "")
       const cached = this.steps[i]
       if (cached && cached.key === key) {
         if (cached.result.state === "error" || cached.result.state === "skipped") failed = true
@@ -265,7 +318,8 @@ export class Kernel {
       features,
       lastOk,
       body: last?.body ? stats(last.body) : null,
-      checks: tree.checks?.length && last?.body ? runChecks(last.body, last.origins, tree.checks, this.scope) : undefined,
+      checks: tree.checks?.length && last?.body ? runChecks(last.body, last.origins, tree.checks, this.scope, new Map((last.refs ?? []).map((r) => [r.id, r.shape]))) : undefined,
+      refs: last?.refs?.length ? last.refs.map((r) => ({ id: r.id, name: r.name, size: sizeOf(r.shape) })) : undefined,
       parts: last?.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, volume: r2(measureShapeVolumeProperties(p.body).volume), size: stats(p.body).size })) : undefined,
       ms: performance.now() - t0,
     }
@@ -316,6 +370,20 @@ export class Kernel {
         })
         out.groups = out.groups.map((g) => ({ ...g, part: faceToPart.get(g.hash) }))
         out.edgeGroups = out.edgeGroups.map((g) => ({ ...g, part: edgeToPart.get(g.hash) }))
+      }
+    }
+    const refs = (body ?? step).refs
+    if (refs?.length) {
+      out.refs = refs.map((r) => ({
+        id: r.id,
+        name: r.name,
+        mesh: { vertices: r.mesh.vertices.slice(), normals: r.mesh.normals.slice(), triangles: r.mesh.triangles.slice() },
+        edges: r.edges.lines.slice(),
+      }))
+      // Only a reference so far: frame the view on it.
+      if (!out.bbox) {
+        const boxes = refs.map((r) => r.shape.boundingBox.bounds as [V3, V3])
+        out.bbox = [[0, 1, 2].map((k) => Math.min(...boxes.map((b) => b[0][k]))) as V3, [0, 1, 2].map((k) => Math.max(...boxes.map((b) => b[1][k]))) as V3]
       }
     }
     return out
@@ -375,7 +443,38 @@ export class Kernel {
   /** Text the model (or a curious learner) can read: faces, edges, or the body. */
   inspect(what: "body" | "faces" | "edges", index?: number, selector?: unknown): string {
     const step = this.lastBuilt(index === undefined ? this.steps.length : index + 1)
-    if (!step?.body) return "还没有实体。"
+    // Reference bodies (`import`): where they are, and — with `of` naming one — their own faces and edges.
+    const refs = step?.refs ?? []
+    const ref = refs.find((r) => r.id === (selector as { of?: unknown } | undefined)?.of)
+    if (ref && what !== "body") {
+      const shape = ref.shape as Shape3D
+      const faces = faceInfos(shape, new Array(countOf(shape, "face")).fill(ref.id))
+      try {
+        if (what === "faces") {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const list = selectFaces(selector as any, faces, this.scope)
+          return list.slice(0, 40).map(describeFace).join("\n") + (list.length > 40 ? `\n…共 ${list.length} 个面` : "")
+        }
+        const edges = edgeInfos(shape, faces)
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const list = selectEdges(selector as any, edges, faces, this.scope)
+          return list.slice(0, 40).map(describeEdge).join("\n") + (list.length > 40 ? `\n…共 ${list.length} 条边` : "")
+        } finally {
+          disposeInfos([], edges)
+        }
+      } catch (e) {
+        return describeError(e).message
+      } finally {
+        disposeInfos(faces)
+      }
+    }
+    const refLines = refs.map((r) => {
+      const [a, b] = r.shape.boundingBox.bounds as [V3, V3]
+      const size = sizeOf(r.shape)
+      return `参考体 ${r.id}（${r.name}）：包围盒 X ${fmt(a[0])}…${fmt(b[0])}，Y ${fmt(a[1])}…${fmt(b[1])}，Z ${fmt(a[2])}…${fmt(b[2])}，尺寸 ${size.map(fmt).join(" × ")} mm。它自己的面和边：inspect faces / edges 加 of: "${r.id}"`
+    })
+    if (!step?.body) return what === "body" && refLines.length ? ["还没有实体。", ...refLines].join("\n") : "还没有实体。"
     if (what === "body") {
       const s = stats(step.body)
       return [
@@ -392,6 +491,7 @@ export class Kernel {
                 .join("；")}`,
             ]
           : []),
+        ...refLines,
       ].join("\n")
     }
     const faces = faceInfos(step.body, step.origins)
@@ -629,6 +729,8 @@ export class Kernel {
 
   dispose() {
     this.disposeFrom(0)
+    for (const shape of this.parsed.values()) shape.delete()
+    this.parsed.clear()
   }
 
   // ---------------------------------------------------------------- internals
@@ -643,6 +745,7 @@ export class Kernel {
     for (const s of this.steps.slice(i)) {
       if (s.ownsBody) s.body?.delete()
       s.parts?.forEach((p) => p.owned && p.body.delete())
+      s.refs?.forEach((r) => r.owned && r.shape.delete())
       s.tools?.forEach((t) => t.tool.delete())
     }
     this.steps.length = Math.min(this.steps.length, i)
@@ -662,6 +765,7 @@ export class Kernel {
       edges: prev?.edges ?? null,
       parts: prev?.parts?.map((p) => ({ ...p, owned: false })),
       partOrigins: prev?.partOrigins,
+      refs: prev?.refs?.map((r) => ({ ...r, owned: false })),
     }
   }
 
@@ -677,8 +781,13 @@ export class Kernel {
       const dup = tree.features.findIndex((x) => x.id === f.id)
       if (tree.features[dup] !== f) throw new InputError(`特征 id「${f.id}」重复了`)
       const out =
-        f.op === "split" ? this.split(f, prev) : prev?.parts && prev.parts.length > 1 && BODY_OPS.has(f.op) ? this.onParts(f, prev, prev.parts, warnings) : this.apply(f, prev, warnings)
+        f.op === "split"
+          ? this.split(f, prev)
+          : prev?.parts && prev.parts.length > 1 && (BODY_OPS.has(f.op) || (f.op === "import" && (f.mode ?? "reference") !== "reference"))
+            ? this.onParts(f, prev, prev.parts, warnings)
+            : this.apply(f, prev, warnings)
       if (out.parts) step.parts = out.parts
+      if (out.ref) step.refs = [...(step.refs ?? []), { id: f.id, name: displayName(tree, f), shape: out.ref, mesh: meshShape(out.ref as Shape3D), edges: meshEdges(out.ref as Shape3D), owned: true }]
       Object.assign(step.result, { summary: out.summary, selected: out.selected })
       if (out.sketch) step.sketch = out.sketch
       if (out.tools) step.tools = out.tools
@@ -819,6 +928,25 @@ export class Kernel {
         const at = (p: [number, number]) => add(plane.origin, add(mul(plane.x, p[0]), mul(plane.y, p[1])))
         const pathLines = paths.flatMap((pts) => pts.slice(1).flatMap((p, i) => [...at(pts[i]), ...at(p)]))
         return { sketch: { drawing, paths, plane, lines: Float32Array.from([...lines, ...pathLines]) }, geom: { op: "sketch", plane: frameOf(plane) }, summary: `${plane.label} · ${f.shapes.map(shapeName).join("、")}` }
+      }
+      case "import": {
+        const asset = this.assets.get(f.file)
+        if (!asset) throw new InputError(this.assetsGiven ? `没有读到「${f.file}」` : "导入 STEP 只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
+        if (!asset.shape) throw new InputError(`「${f.file}」读不了：${asset.error ?? "不是能读的 STEP 文件"}`)
+        let shape = asset.shape.clone() as AnyShape
+        for (const r of f.rotate ?? []) shape = shape.rotate(n(r.angle), [0, 0, 0], AXIS[r.axis])
+        if (f.at) shape = shape.translate(f.at.map(n) as V3)
+        const mode = f.mode ?? "reference"
+        const summary = `${mode === "reference" ? "参考体" : mode === "add" ? "并入" : "减去"} ${f.file} · ${sizeOf(shape).map(fmt).join(" × ")}`
+        if (mode === "reference") return { ref: shape, summary }
+        if (!body) {
+          if (mode === "add") return { body: shape as Shape3D, summary }
+          shape.delete()
+          throw new InputError("还没有实体，没有东西可以减")
+        }
+        const out = mode === "add" ? body.fuse(shape as Shape3D) : body.cut(shape as Shape3D)
+        shape.delete()
+        return { body: out, summary }
       }
       case "extrude": {
         const sk = this.sketchOf(f.sketch)
@@ -1184,7 +1312,7 @@ export class Kernel {
     if (!runs.length) throw firstError
     const vol = (x: Shape3D) => measureShapeVolumeProperties(x).volume
     const changed = runs.filter((r) => r.out.body && Math.abs(vol(r.out.body) - vol(r.p.body)) > 1e-6 * Math.max(1, vol(r.p.body)))
-    const adds = f.op === "rib" || runs.some((r) => r.out.tools?.some((t) => t.mode === "add"))
+    const adds = f.op === "rib" || (f.op === "import" && f.mode === "add") || runs.some((r) => r.out.tools?.some((t) => t.mode === "add"))
     let used = changed
     if (adds && !f.part) {
       used = changed.filter((r) => countOf(r.out.body!, "solid") === countOf(r.p.body, "solid"))
@@ -1250,7 +1378,7 @@ function slopeSketch(center: V3, n: V3, p: V3): PickInfo["sketch"] {
   return { plane: "XY", offset: 0, uv: [r2(dot(d, fr.x)), r2(dot(d, fr.y))], face: { origin: r(fr.origin), x: r(fr.x), y: r(fr.y), normal: r(fr.normal) } }
 }
 
-type ApplyOut = { body?: Shape3D; summary: string; selected?: number; sketch?: Step["sketch"]; tools?: Tool[]; threads?: Thread[]; geom?: StepGeom; parts?: Part[] }
+type ApplyOut = { body?: Shape3D; ref?: AnyShape; summary: string; selected?: number; sketch?: Step["sketch"]; tools?: Tool[]; threads?: Thread[]; geom?: StepGeom; parts?: Part[] }
 
 const frameOf = (p: ResolvedPlane): Frame => ({ origin: p.origin, x: p.x, y: p.y, normal: p.normal })
 
@@ -1530,4 +1658,40 @@ function orient(shape: Shape3D, dir: V3, at: V3): Shape3D {
     if (cosA < 0) out = out.rotate(180, [0, 0, 0], [1, 0, 0])
   } else out = out.rotate((Math.atan2(s, cosA) * 180) / Math.PI, [0, 0, 0], mul(c, 1 / s))
   return out.translate(at)
+}
+
+function sizeOf(shape: AnyShape): V3 {
+  const [a, b] = shape.boundingBox.bounds as [V3, V3]
+  return [r2(b[0] - a[0]), r2(b[1] - a[1]), r2(b[2] - a[2])]
+}
+
+/** FNV-1a over the bytes, and their length: tells one version of a file from another. */
+function contentHash(bytes: Uint8Array) {
+  let h = 0x811c9dc5
+  for (let i = 0; i < bytes.length; i++) {
+    h ^= bytes[i]
+    h = Math.imul(h, 0x01000193)
+  }
+  return `${bytes.length}:${(h >>> 0).toString(16)}`
+}
+
+/** A STEP file as a shape, read synchronously through the wasm file system (replicad's importSTEP is async). */
+function readStep(bytes: Uint8Array): AnyShape {
+  const oc = getOC()
+  const name = `/arbor-import-${Math.random().toString(36).slice(2)}.step`
+  oc.FS.writeFile(name, bytes)
+  const reader = new oc.STEPControl_Reader()
+  try {
+    if (!reader.ReadFile(name)) throw new InputError("不是能读的 STEP 文件")
+    reader.TransferRoots()
+    const raw = reader.OneShape()
+    if (raw.IsNull()) {
+      raw.delete()
+      throw new InputError("STEP 文件里没有形体")
+    }
+    return cast(raw)
+  } finally {
+    reader.delete()
+    oc.FS.unlink(name)
+  }
 }

@@ -17,6 +17,7 @@ FeatureTree 是一个中文、讲概念、不绑定软件的 3D 工业建模学�
 | 工具图鉴 `/atlas` | 18 个建模命令：悬停回放生成过程，抽屉里调参数，8 个软件的官方中文叫法。 |
 | 术语表 `/glossary` | 命令对照表和 28 张概念卡。 |
 | AI 建模工作台 `/studio`（Beta） | 用中文描述零件，AI 助教（默认 DeepSeek `deepseek-flash`）调用 13 种建模特征和查询工具，一步步建出参数化特征树，并讲清每一步的设计意图。几何在浏览器里由 OpenCascade（replicad）算出：每一步可以回滚，面按「新生成 / 被修改」着色并能看出来自哪个特征，参数直接改，导出 STEP、STL 和等价的 build123d 代码。可以附参考图，也有「边做边学」模式（关键步骤先让你预测）。不用 AI 也能从现成的特征树开始。 |
+| 桌面版 **Arbor**（`desktop/`） | 让本机的 coding agent（Claude Code、Codex……）通过 MCP 或命令行建模：36 个建模、观测、核对和协作工具，同一套特征树和内核；能导入开发板、元件的 STEP 模型，围着它建外壳并核对间隙和干涉。你在窗口里实时看每一步、拖参数、改特征，在面或边上留备注给 agent；agent 也能请你在模型上点一下。零件是可以进 git 的 `.arbor.json` 文件。见 [`desktop/README.md`](desktop/README.md)。 |
 
 当前进度、验证结果、已知局限和开源前清单见 [`docs/report.md`](docs/report.md)。
 
@@ -27,9 +28,11 @@ app/                 网站：React 19 + Vite 8 + TypeScript + Tailwind v4 + thr
   src/three/         轻量 CAD 视口引擎：按需渲染、主题配色、视图方块、剖切、烘焙模型加载
   src/content/       课程（lessons/）、命令与术语、课程大纲
   src/studio/        AI 建模工作台：特征树格式、浏览器内核（Worker）、工具、提示词
+  src/desktop/       桌面版 Arbor 的引擎核心（core/）和窗口
   server/            工作台的对话 API（Hono + AI SDK，只转发对话）
   e2e/               Playwright 冒烟测试
   public/models/     烘焙好的模型（manifest.json + 每组参数一个 GLB）
+desktop/             桌面版 Arbor：Electron 主进程、MCP 服务和 arbor 命令行、打包
 models/              build123d 模型源码和烘焙器 ftbake
 docs/
   report.md          完成报告：做了什么、怎么验证、局限、下一步
@@ -82,6 +85,7 @@ cd app && npm run bake
 
 - **代码**用 MIT，见 [`LICENSE`](LICENSE)：
   - 网站 `app/`
+  - 桌面版 `desktop/`（含图标）
   - 模型与烘焙器 `models/`
   - 烘焙出的 GLB
   - `spikes/`

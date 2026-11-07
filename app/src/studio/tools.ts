@@ -24,7 +24,12 @@ const OP_DOCS: Record<FeatureOp, string> = {
   draft: "拔模：给侧壁加脱模斜度（注塑件常用 1–3°），中性面上的尺寸不变。先拔模、后倒圆角。",
   split: "拆件：用一个平面把实体切成两个有名字的零件（例如外壳拆成底壳和上盖、太长的杆切成两段打印）。之后的特征可以写 part 只改一个零件；切除和孔不写 part 时作用在碰到的所有零件上（螺丝孔穿过两件）。",
   rib: "筋（加强筋）：草图里画一条开放的线（path），在线所在的平面上长出厚 t 的筋，线的两端会自动延长到墙，材料长在被实体围住的那一侧（例如 L 形支架的三角筋）。",
+  import:
+    "导入一个 STEP 文件（例如开发板、元件的官方模型）。缺省作参考体：半透明显示，用来对齐尺寸、核对间隙（check 的 clearance）和干涉（interference），不并入零件也不导出；mode=add 并入实体，mode=cut 从实体里减去（按元件挖让位槽）。用 rotate、at 摆到位置上。",
 }
+
+/** Ops only the desktop app (Arbor) runs: they read files next to the part. Not offered to the site's assistant. */
+export const DESKTOP_OPS = new Set<FeatureOp>(["import"])
 
 const featureTools = Object.fromEntries(
   Feature.options.map((schema) => {
@@ -42,6 +47,11 @@ const featureTools = Object.fromEntries(
   }),
 ) as Record<FeatureOp, ReturnType<typeof tool>>
 
+const { import: importTool, ...webFeatureTools } = featureTools
+
+/** Tools of the desktop app's agents on top of STUDIO_TOOLS (see DESKTOP_OPS). */
+export const DESKTOP_TOOLS = { import: importTool } satisfies ToolSet
+
 export const STUDIO_TOOLS = {
   set_params: tool({
     description:
@@ -56,7 +66,7 @@ export const STUDIO_TOOLS = {
     }),
     toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
   }),
-  ...featureTools,
+  ...webFeatureTools,
   edit_feature: tool({
     description: "修改已有特征的字段（只写要改的字段，嵌套对象整体替换）。修复失败的特征时优先用它，不要再加一个新特征。",
     inputSchema: z.object({

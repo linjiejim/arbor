@@ -292,6 +292,15 @@ function feature(f: Feature, tree: Tree): string[] {
     }
     case "rib":
       return [...head, `${ref("tool", f.id)} = rib(part, ${ref("plane", f.sketch)}, ${ref("pts", f.sketch)}, ${py(f.t)}${f.flip ? ", flip=True" : ""})`, combine(f.id, "add")]
+    case "import": {
+      const v = ref("tool", f.id)
+      const out = [...head, `${v} = import_step(${JSON.stringify(f.file)})  # 相对零件文件所在的文件夹`]
+      for (const r of f.rotate ?? []) out.push(`${v} = ${v}.rotate(Axis.${r.axis}, ${py(r.angle)})`)
+      if (f.at) out.push(`${v} = ${v}.translate((${f.at.map(py).join(", ")}))`)
+      const mode = f.mode ?? "reference"
+      if (mode === "reference") return [...out, `# 参考体：只用来对齐和核对间隙，不并入零件`]
+      return [...out, combine(f.id, mode)]
+    }
     case "revolve":
       return [...head, `${ref("tool", f.id)} = revolve(${ref("sk", f.sketch)},axis=${AXIS[f.axis]}${f.angle !== undefined ? `, revolution_arc=${py(f.angle)}` : ""})`, combine(f.id, f.mode)]
     case "fillet":
