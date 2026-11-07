@@ -7,12 +7,13 @@ import { executeTool, moveFeature, treeText, type KernelPort } from "../../studi
 import { toBuild123d } from "../../studio/codegen"
 import { EMPTY_TREE, Tree, displayName } from "../../studio/dsl"
 import type { BuildReport, DisplayData } from "../../studio/kernel/build"
+import type { Dim } from "../../studio/kernel/dims"
+import type { DrawingData } from "../../studio/kernel/drawing"
 import { InputError } from "../../studio/kernel/errors"
 import type { MeasureResult, MeasureTarget } from "../../studio/kernel/measure"
 import { STARTERS } from "../../studio/starters"
 import { STUDIO_TOOLS } from "../../studio/tools"
 import { AGENT_GUIDE, COMMAND } from "./catalog"
-import { checkText, runChecks, type CheckInput, type Target } from "./check"
 import { newNote, notesText, parseNotes, pickLines, type NotesFile } from "./notes"
 import {
   NOTES_EXT,
@@ -33,6 +34,8 @@ import {
 import { describeTreeChange } from "./tree-diff"
 
 type V3 = [number, number, number]
+/** One face or one edge, by selector (measure). */
+type Target = { face?: Record<string, unknown>; edge?: Record<string, unknown> }
 
 export interface KernelHost {
   readonly phase: KernelPhase
@@ -40,8 +43,13 @@ export interface KernelHost {
   inspect(what: "body" | "faces" | "edges", selector?: unknown): Promise<string>
   display(index?: number): Promise<DisplayData>
   pick(kind: "face" | "edge", hash: number, point: V3): Promise<PickInfo | null>
-  locate(kind: "face" | "edge", selector: unknown): Promise<number[] | null>
+  /** `before`: on the body a step starts from (re-picking a feature's faces or edges). */
+  locate(kind: "face" | "edge", selector: unknown, before?: number): Promise<number[] | null>
+  selectorFor(kind: "face" | "edge", hashes: number[], before: number): Promise<{ selector: Record<string, unknown>; count: number } | null>
+  faceEdges(hash: number, before: number): Promise<number[]>
   measure(targets: MeasureTarget[]): Promise<MeasureResult | null>
+  dimensions(): Promise<Dim[]>
+  drawing(withIso: boolean): Promise<DrawingData | null>
   exportBody(format: "step" | "stl", index?: number): Promise<Uint8Array | null>
 }
 
@@ -339,15 +347,6 @@ export class Engine {
         if (!res) return fail("量不了：还没有实体。")
         return { ok: true, text: measureText(res) }
       }
-      case "check": {
-        await this.ensureKernel(doc)
-        const lines = await runChecks(input as CheckInput, {
-          report: doc.report!,
-          locate: (kind, selector) => this.opts.kernel.locate(kind, selector),
-          measure: (a, b) => this.opts.kernel.measure(b ? [{ ...a, point: [0, 0, 0] }, { ...b, point: [0, 0, 0] }] : [{ ...a, point: [0, 0, 0] }]),
-        })
-        return { ok: lines.every((l) => l.pass), text: checkText(lines) }
-      }
       case "export":
         return this.exportPart(doc, input as { path: string; format?: "step" | "stl" | "py" | "json" }, ctx)
       case "get_notes": {
@@ -374,7 +373,7 @@ export class Engine {
       case "show":
         return this.show(doc, input)
       case "add_note": {
-        const note = newNote(doc.notes, input.pick as unknown as PickInfo, String(input.text ?? ""))
+        const note = newNote(doc.notes, (input.pick as unknown as PickInfo | undefined) ?? null, String(input.text ?? ""))
         doc.notes = { next: note.n + 1, notes: [...doc.notes.notes, note] }
         this.logNote(doc, ctx.actor, `记下备注 ${note.id}「${clip(note.text) || "只点了位置"}」`, "added")
         await this.saveNotes(doc)
@@ -626,9 +625,17 @@ export class Engine {
         case "pick":
           return k.pick(call.kind, call.hash, call.point)
         case "locate":
-          return k.locate(call.kind, call.selector)
+          return k.locate(call.kind, call.selector, call.before)
+        case "selectorFor":
+          return k.selectorFor(call.kind, call.hashes, call.before)
+        case "faceEdges":
+          return k.faceEdges(call.hash, call.before)
         case "measure":
           return k.measure(call.targets)
+        case "dims":
+          return k.dimensions()
+        case "drawing":
+          return k.drawing(call.iso)
         case "export":
           return k.exportBody(call.format, call.index)
       }
@@ -671,7 +678,7 @@ export class Engine {
     const display = await this.opts.kernel.display(index >= 0 ? index : undefined)
     if (!display.mesh) return fail("还没有实体可以看。")
     const views = (input.views as string[] | undefined)?.length ? (input.views as string[]) : ["iso", "front", "top", "right"]
-    const pins = input.notes === false ? [] : doc.notes.notes.filter((n) => n.status === "open").map((n) => ({ n: n.n, point: n.point }))
+    const pins = input.notes === false ? [] : doc.notes.notes.filter((n) => n.status === "open" && n.kind !== "part").map((n) => ({ n: n.n, point: n.point }))
     const images = await screen.look({ display, views, highlight: input.highlight as string | undefined, pins })
     const step = at ? `（回滚到「${displayName(doc.tree, doc.tree.features[index])}」这一步）` : ""
     const legend = input.highlight ? "蓝色 = 高亮的特征，灰色 = 其余" : "蓝色 = 最后一步新生成的面，橙色 = 被它修改的面"

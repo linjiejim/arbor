@@ -20,7 +20,8 @@ export type PartNote = {
   id: string
   /** The number on the pin: 3. Never reused within a part. */
   n: number
-  kind: "face" | "edge"
+  /** part: about the part or a feature, not a spot on it (no pin, no selector). */
+  kind: "face" | "edge" | "part"
   text: string
   what: string
   where: string
@@ -89,8 +90,12 @@ export type CallContext = { actor: Actor; part?: string; session?: string; cwd?:
 export type KernelCall =
   | { op: "display"; index?: number }
   | { op: "pick"; kind: "face" | "edge"; hash: number; point: V3 }
-  | { op: "locate"; kind: "face" | "edge"; selector: unknown }
+  | { op: "locate"; kind: "face" | "edge"; selector: unknown; before?: number }
+  | { op: "selectorFor"; kind: "face" | "edge"; hashes: number[]; before: number }
+  | { op: "faceEdges"; hash: number; before: number }
   | { op: "measure"; targets: MeasureTarget[] }
+  | { op: "dims" }
+  | { op: "drawing"; iso: boolean }
   | { op: "export"; format: "step" | "stl"; index?: number }
 
 export type AgentSetup = {

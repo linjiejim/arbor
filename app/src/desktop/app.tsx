@@ -4,18 +4,23 @@ import { Button, IconButton } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { notify } from "@/components/ui/toast"
 import { renderViews } from "@/studio/look"
-import type { Hover } from "@/studio/scene"
+import { NO_PARTS_VIEW, type Hover, type PartsView } from "@/studio/scene"
 import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
+import { useReselect } from "@/studio/use-reselect"
 import { arbor } from "./bridge"
-import type { PickRequest, ShowRequest } from "./core/protocol"
+import type { PartNote, PickRequest, ShowRequest } from "./core/protocol"
 import { asNote, useDesktopNotes, useDesktopStudio, useEngine } from "./use-desktop"
 import { AgentSetupDialog } from "./ui/agent-setup"
+import { NoteComposer } from "./ui/note-composer"
 import { PartsSidebar } from "./ui/parts-sidebar"
 import { ActivityPanel, NotesPanel } from "./ui/side-panels"
 import { TitleBar } from "./ui/title-bar"
 import { Welcome } from "./ui/welcome"
+
+/** A note pinned on a face or an edge (not one about the whole part). */
+const onSpot = (n: PartNote): n is PartNote & { kind: "face" | "edge" } => n.kind !== "part"
 
 const editing = () => {
   const el = document.activeElement as HTMLElement | null
@@ -26,6 +31,8 @@ export function DesktopApp() {
   const { snapshot, doc, pick, show, setShow } = useEngine()
   const studio = useDesktopStudio(doc, snapshot)
   const notes = useDesktopNotes(studio, doc, pick)
+  const reselect = useReselect(studio)
+  const [partsView, setPartsView] = React.useState<PartsView>(NO_PARTS_VIEW)
   const [treeHover, setTreeHover] = React.useState<Hover | null>(null)
   const [setupOpen, setSetupOpen] = React.useState(false)
   const [tab, setTab] = React.useState("notes")
@@ -77,8 +84,11 @@ export function DesktopApp() {
                 annotations={notes}
                 busy={false}
                 copy={{ hint: pick ? null : "单击模型上的面或边，给 agent 留一条备注", add: pickHere ? "就是这里" : "记下备注", next: notes.nextPin }}
+                reselect={reselect}
+                parts={partsView}
+                onParts={setPartsView}
               />
-              <TreeOverlay studio={studio} onHover={setTreeHover} />
+              <TreeOverlay studio={studio} onHover={setTreeHover} reselect={reselect} annotations={notes} parts={partsView} onParts={setPartsView} />
               <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex flex-col items-center gap-2 px-56">
                 {pick && <PickBanner request={pick} elsewhere={pick.path !== path} />}
                 {show && show.path === path && !pick && <ShowBanner request={show} onClose={clearShow} />}
@@ -104,14 +114,14 @@ export function DesktopApp() {
               <TabsTrigger value="code">代码</TabsTrigger>
             </TabsList>
             <TabsContent value="notes" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-              <NotesPanel doc={doc} onLocate={(n) => void notes.show(asNote(n))} />
+              <NotesPanel doc={doc} onLocate={(n) => onSpot(n) && void notes.show(asNote(n))} onWrite={() => notes.setCompose("")} />
             </TabsContent>
             <TabsContent value="activity" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
               <ActivityPanel doc={doc} snapshot={snapshot} />
             </TabsContent>
             <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
-              {Object.keys(doc.tree.params).length ? (
-                <ParamsPanel studio={studio} onHover={setTreeHover} />
+              {Object.keys(doc.tree.params).length || doc.tree.checks?.length ? (
+                <ParamsPanel studio={studio} onHover={setTreeHover} annotations={notes} />
               ) : (
                 <p className="px-4 py-4 text-body text-muted-foreground">还没有参数。Agent 会把关键尺寸定成参数，之后可以在这里直接改。</p>
               )}
@@ -123,6 +133,15 @@ export function DesktopApp() {
         )}
       </div>
       <AgentSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
+      <NoteComposer
+        text={notes.compose}
+        onClose={() => notes.setCompose(null)}
+        onSave={async (text) => {
+          await notes.addPartNote(text)
+          notes.setCompose(null)
+          setTab("notes")
+        }}
+      />
     </div>
   )
 }

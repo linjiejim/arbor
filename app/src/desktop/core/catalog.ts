@@ -12,7 +12,6 @@ export type Audience = "agent" | "user" | "both"
 
 export type CommandSpec = { name: string; description: string; input: z.ZodObject; audience: Audience }
 
-const V3 = z.array(z.number()).length(3)
 const Target = z
   .object({ face: FaceSelector.optional(), edge: EdgeSelector.optional() })
   .describe("一个面（face）或一条边（edge）：选择器要正好选中一个")
@@ -102,44 +101,6 @@ const own: CommandSpec[] = [
     input: z.object({ a: Target, b: Target.optional() }),
   },
   {
-    name: "check",
-    audience: "both",
-    description:
-      "核对需求：内核实际量出来，逐项打 ✓ / ✗。建完、改完都调用一次，把用户给的每个数字都写进来（只写用户给的数，不要写参数名）。全部通过时 ok=true。",
-    input: z.object({
-      all_ok: z.boolean().optional().describe("所有特征都要重建成功，缺省 true"),
-      solids: z.number().int().optional().describe("实体个数，通常是 1"),
-      size: V3.optional().describe("包围盒尺寸 [X, Y, Z]，mm"),
-      min: V3.optional().describe("包围盒最小角 [x, y, z]"),
-      max: V3.optional().describe("包围盒最大角 [x, y, z]"),
-      volume: z.number().optional().describe("体积，mm³"),
-      count: z
-        .array(
-          z.object({
-            label: z.string().optional().describe("这一项写什么，例如「四角 M4 孔」"),
-            faces: FaceSelector.optional(),
-            edges: EdgeSelector.optional(),
-            expect: z.number().int(),
-          }),
-        )
-        .optional()
-        .describe("选择器选中的个数，例如孔壁有 4 个圆柱面"),
-      measure: z
-        .array(
-          z.object({
-            label: z.string().optional(),
-            a: Target,
-            b: Target.optional(),
-            name: z.string().describe("量的名字，同 measure 的输出：直径、面积、长、最短距离、平行面间距、两面夹角、圆心距、轴线间距、圆心到平面"),
-            value: z.number(),
-          }),
-        )
-        .optional(),
-      tol: z.number().optional().describe("长度和角度的容差，缺省 0.01"),
-      volume_tol: z.number().optional().describe("体积的相对容差，缺省 0.005（0.5%）"),
-    }),
-  },
-  {
     name: "export",
     audience: "both",
     description: "导出当前零件：step / stl（实体）、py（等价的 build123d 代码）、json（特征树）。",
@@ -192,8 +153,8 @@ const own: CommandSpec[] = [
   {
     name: "add_note",
     audience: "user",
-    description: "在点选的面或边上记一条备注。",
-    input: z.object({ pick: z.record(z.string(), z.unknown()), text: z.string().max(600) }),
+    description: "记一条备注：在点选的面或边上（pick），或者关于整个零件、某个特征（不带 pick）。",
+    input: z.object({ pick: z.record(z.string(), z.unknown()).optional(), text: z.string().max(600) }),
   },
   {
     name: "update_note",
@@ -239,7 +200,7 @@ export const AGENT_GUIDE = `# Arbor：用工具建参数化零件
 2. set_params 把关键尺寸定成参数（短英文名），特征里用参数名或表达式引用；notes 给每个参数写一句说明。每个特征写 name（中文短名）和 intent（设计意图）。
 3. 每次调用后读结果：✓ 继续；✗ 按提示用 edit_feature 修好，不要叠一个新特征绕开；⚠ 要处理。
 4. 不确定选择器会选中什么时，先用 inspect（faces 或 edges，带同样的选择器）看一眼。
-5. 建完用 check 把需求里的每个数字核对一遍（尺寸、体积、孔数、孔径、间距），再用 look 看外形和方向。不要只凭自己推算就说做好了。
+5. 需求里有具体数字时，建完调用 check：每个数值要求一项（外形 size、壁厚 thickness、孔 holes、距离 distance、节圆 pcd、角度 angle、体积 volume），said 写用户的原话，期望值写用户给的数字（不写参数名）。这些要求存进零件，之后每次重建都自动重算，窗口里也看得到。size 只量整个零件的外形；局部尺寸用 distance 或 thickness，让选择器正好选中要量的面。✗ 时先确认量的位置对不对；确实没做到再改模型，不要为了通过去改期望值。然后用 look 看外形和方向。不要只凭自己推算就说做好了。
 6. 用户在窗口里留的备注用 get_notes 读，处理完用 resolve_note 写一句回复。说不清用户指的是哪个面时，用 request_pick 请用户在窗口里点一下；要指给用户看时用 show。
 7. 结果开头写着「自你上次调用以来……」时，说明用户或文件改过模型：以最新状态为准，不要把用户的改动改回去。
 8. 交付用 export（step / stl / py / json）。特征树文件也可以直接读写，保存后窗口会自动重建；改完文件用 get_state 看重建结果。

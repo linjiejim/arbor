@@ -31,14 +31,26 @@ export class DirectKernel implements KernelHost {
   async pick(kind: "face" | "edge", hash: number, point: V3) {
     return this.k.pick({ kind, hash, point })
   }
-  async locate(kind: "face" | "edge", selector: unknown) {
-    return this.k.locate(kind, selector)
+  async locate(kind: "face" | "edge", selector: unknown, before?: number) {
+    return this.k.locate(kind, selector, before)
+  }
+  async selectorFor(kind: "face" | "edge", hashes: number[], before: number) {
+    return this.k.selectorFor(kind, hashes, before)
+  }
+  async faceEdges(hash: number, before: number) {
+    return this.k.faceEdges(hash, before)
   }
   async measure(targets: MeasureTarget[]) {
     return this.k.measure(targets)
   }
+  async dimensions() {
+    return this.k.dimensions()
+  }
+  async drawing(withIso: boolean) {
+    return this.k.drawing(withIso)
+  }
   async exportBody(format: "step" | "stl", index?: number) {
-    const blob = this.k.exportBody(format, index)
+    const blob = await this.k.exportBody(format, index)
     return blob ? new Uint8Array(await blob.arrayBuffer()) : null
   }
   dispose() {

@@ -1,7 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { initNodeKernel } from "@/studio/kernel/node"
 import { agentCommands, COMMANDS, inputJsonSchema } from "@/desktop/core/catalog"
-import { valueOf } from "@/desktop/core/check"
 import { DirectKernel } from "@/desktop/core/direct-kernel"
 import { Engine, normalizePartPath, notesPath, partName, type Files, type Screen } from "@/desktop/core/engine"
 import type { CallContext, EngineEvent, PickInfo } from "@/desktop/core/protocol"
@@ -98,23 +97,22 @@ describe("arbor: the engine", () => {
     expect(state.text).toContain("第 4 版")
   }, 30_000)
 
-  it("checks requirements with the kernel's own measurements", async () => {
-    const { run } = await boxEngine()
-    const hole = { face: { kind: "cylinder" } }
-    const good = await run("check", {
-      size: [80, 50, 30],
-      volume: 80 * 50 * 30 - Math.PI * 16 * 30,
-      count: [{ label: "一个通孔", faces: { kind: "cylinder" }, expect: 1 }],
-      measure: [{ a: hole, name: "直径", value: 8 }],
+  it("keeps requirements on the part (the site's checklist), measured by the kernel on every rebuild", async () => {
+    const { engine, run, disk } = await boxEngine()
+    await run("check", {
+      items: [
+        { id: "size", said: "80×50×30", kind: "size", expect: [80, 50, 30] },
+        { id: "hole", said: "⌀8 通孔", kind: "holes", faces: { kind: "cylinder" }, count: 1, d: 8 },
+      ],
     })
-    expect(good.text).toContain("全部通过")
-    expect(good.ok).toBe(true)
-    const bad = await run("check", { size: [80, 50, 31], measure: [{ a: hole, name: "直径", value: 6 }] })
-    expect(bad.ok).toBe(false)
-    expect(bad.text).toMatch(/✗ 尺寸 80 × 50 × 31：现在 80 × 50 × 30/)
-    expect(bad.text).toMatch(/✗ 直径 6：现在 8/)
+    expect(JSON.parse(disk.get(PART) as string).checks).toHaveLength(2)
+    expect(engine.docState(PART)!.report!.checks!.every((c) => c.pass)).toBe(true)
+    // The person makes the box taller: the requirement is re-measured and no longer holds.
+    await engine.run("set_params", { set: { H: 31 } }, USER)
+    const size = engine.docState(PART)!.report!.checks!.find((c) => c.id === "size")!
+    expect(size).toMatchObject({ pass: false, actual: "80 × 50 × 31" })
     const m = await run("measure", { a: { face: { normal: "+Z", extreme: "+Z" } }, b: { face: { normal: "-Z" } } })
-    expect(m.text).toContain("平行面间距：30 mm")
+    expect(m.text).toContain("平行面间距：31 mm")
   }, 30_000)
 
   it("tells the agent what the person and the file changed since its last call", async () => {
@@ -258,16 +256,4 @@ describe("arbor: the engine", () => {
     expect((await run("look", {})).text).toMatch(/先打开 Arbor App/)
     expect((await run("add_note", { pick: {}, text: "x" })).text).toMatch(/没有这个命令/)
   }, 30_000)
-})
-
-describe("arbor: check values", () => {
-  it("reads the number under a measurement's name", () => {
-    const res = { items: [{ kind: "face" as const, hash: 1, what: "圆柱面", facts: ["直径 ⌀8（R4）", "面积 754 mm²"] }], between: [{ name: "最短距离", value: "12.5 mm" }], segment: null }
-    expect(valueOf(res, "直径", false)).toBe(8)
-    expect(valueOf(res, "面积", false)).toBe(754)
-    expect(valueOf(res, "最短距离", true)).toBe(12.5)
-    expect(valueOf(res, "夹角", true)).toBeNull()
-    expect(valueOf(res, "diameter", false)).toBe(8)
-    expect(valueOf(res, "distance", true)).toBe(12.5)
-  })
 })

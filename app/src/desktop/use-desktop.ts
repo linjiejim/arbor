@@ -9,6 +9,8 @@ import type { PickInfo } from "@/studio/annotations"
 import { treeText, type ToolRun } from "@/studio/apply"
 import { EMPTY_TREE, type Tree } from "@/studio/dsl"
 import type { DisplayData } from "@/studio/kernel/build"
+import type { Dim } from "@/studio/kernel/dims"
+import type { DrawingData } from "@/studio/kernel/drawing"
 import type { MeasureResult, MeasureTarget } from "@/studio/kernel/measure"
 import type { Pin } from "@/studio/look"
 import type { Annotations, Focus, Note } from "@/studio/use-annotations"
@@ -94,7 +96,32 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
     }
   }, [path, rev, atIndex, ready])
 
+  // Dimensions of every feature that built: drawn on the model, listed on the feature card.
+  const [dims, setDims] = React.useState<Dim[]>([])
+  React.useEffect(() => {
+    if (!path || !ready) return
+    const life = { alive: true }
+    arbor
+      .kernel(path, { op: "dims" })
+      .then((d) => life.alive && setDims(d as Dim[]))
+      .catch(() => {})
+    return () => {
+      life.alive = false
+    }
+  }, [path, rev, ready])
+
+  // Which requirements held after the agent's (or the file's) last change: one the person's own edit
+  // then moved shows as 「已偏离」, not as the agent's error — the site's rule for its assistant.
+  const [checkBaseline, setCheckBaseline] = React.useState<Record<string, boolean>>({})
+  const [baselineAt, setBaselineAt] = React.useState<string | null>(null)
+  const versionKey = `${path}#${rev}`
+  if (baselineAt !== versionKey) {
+    setBaselineAt(versionKey)
+    if (doc?.changes.find((c) => !c.note)?.actor !== "user") setCheckBaseline(Object.fromEntries((report?.checks ?? []).map((c) => [c.id, c.pass])))
+  }
+
   const call = React.useCallback((name: string, input: Record<string, unknown>) => arbor.call(name, input, path ?? undefined), [path])
+  const kernel = React.useCallback(async <T,>(c: Parameters<typeof arbor.kernel>[1]) => (path ? ((await arbor.kernel(path, c)) as T) : null), [path])
   // A refused edit starts with ✗; an applied one may still leave a failing feature, shown in the tree as on the site.
   const errorOf = (r: { text: string }) => (r.text.startsWith("✗") ? r.text.replace(/^✗ /, "") : null)
 
@@ -104,6 +131,8 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
     report,
     summary: report ? treeText(tree, report) : "",
     display,
+    dims,
+    checkBaseline,
     kernel: kernelState(snapshot),
     rollback: at,
     canUndo: Boolean(doc?.canUndo),
@@ -111,7 +140,13 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
     checkpoint: React.useCallback(() => {}, []),
     undo: React.useCallback(() => void call("undo", {}), [call]),
     reset: React.useCallback(() => void call("set_tree", { tree: EMPTY_TREE }), [call]),
-    load: React.useCallback((t: Tree) => void call("set_tree", { tree: t }), [call]),
+    load: React.useCallback(
+      async (t: Tree) => {
+        await call("set_tree", { tree: t })
+        return null
+      },
+      [call],
+    ),
     runTool: React.useCallback(
       async (name: string, input: Record<string, unknown>): Promise<ToolRun> => {
         const output = await call(name, input)
@@ -148,7 +183,20 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
         path && !at ? ((await arbor.kernel(path, { op: "pick", kind, hash, point })) as PickInfo | null) : null,
       [path, at],
     ),
-    locate: React.useCallback(async (kind: "face" | "edge", selector: unknown) => (path ? ((await arbor.kernel(path, { op: "locate", kind, selector })) as number[] | null) : null), [path]),
+    locate: React.useCallback(async (kind: "face" | "edge", selector: unknown) => kernel<number[] | null>({ op: "locate", kind, selector }), [kernel]),
+    // 「在模型上重选」: a feature's faces or edges are picked on the body it starts from.
+    stepInput: React.useCallback(async (index: number) => kernel<DisplayData>({ op: "display", index: index - 1 }), [kernel]),
+    locateBefore: React.useCallback(
+      async (kind: "face" | "edge", selector: unknown, before: number) => kernel<number[] | null>({ op: "locate", kind, selector, before }),
+      [kernel],
+    ),
+    selectorFor: React.useCallback(
+      async (kind: "face" | "edge", hashes: number[], before: number) =>
+        kernel<{ selector: Record<string, unknown>; count: number } | null>({ op: "selectorFor", kind, hashes, before }),
+      [kernel],
+    ),
+    faceEdges: React.useCallback(async (hash: number, before: number) => (await kernel<number[]>({ op: "faceEdges", hash, before })) ?? [], [kernel]),
+    drawing: React.useCallback(async (iso: boolean) => kernel<DrawingData | null>({ op: "drawing", iso }), [kernel]),
     measure: React.useCallback(
       async (targets: MeasureTarget[]) => (path && !at ? ((await arbor.kernel(path, { op: "measure", targets })) as MeasureResult | null) : null),
       [path, at],
@@ -159,7 +207,8 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
   }
 }
 
-export const asNote = (n: PartNote): Note => ({
+/** A note on a face or an edge, as the viewport's annotations. */
+export const asNote = (n: PartNote & { kind: "face" | "edge" }): Note => ({
   n: n.n,
   note: n.text,
   kind: n.kind,
@@ -179,8 +228,14 @@ export const asNote = (n: PartNote): Note => ({
  * to the part at once (no message to send). While the agent waits for a pick,
  * the same click answers it instead.
  */
-export function useDesktopNotes(studio: Studio, doc: DocState | null, pick: PickRequest | null): Annotations & { nextPin: number } {
+export function useDesktopNotes(
+  studio: Studio,
+  doc: DocState | null,
+  pick: PickRequest | null,
+): Annotations & { nextPin: number; compose: string | null; setCompose: (text: string | null) => void; addPartNote: (text: string) => Promise<void> } {
   const [draft, setDraft] = React.useState<PickInfo | null>(null)
+  /** A note about the part or a feature being written (the site's 「让助教改」 becomes one). */
+  const [compose, setCompose] = React.useState<string | null>(null)
   const [focus, setFocus] = React.useState<Focus | null>(null)
   const viewDir = React.useRef(new THREE.Vector3(1, -1.1, 0.85).normalize())
   const path = doc?.path
@@ -193,7 +248,8 @@ export function useDesktopNotes(studio: Studio, doc: DocState | null, pick: Pick
   }
   const request = pick && pick.path === path ? pick : null
   const notes = doc?.notes
-  const open = React.useMemo(() => (notes ?? []).filter((n) => n.status === "open"), [notes])
+  // Only notes on a face or an edge have a pin on the model.
+  const open = React.useMemo(() => (notes ?? []).filter((n): n is PartNote & { kind: "face" | "edge" } => n.status === "open" && n.kind !== "part"), [notes])
   const pins: Pin[] = React.useMemo(() => open.map((n) => ({ n: n.n, point: n.point })), [open])
   const pending = React.useMemo(() => open.map(asNote), [open])
   const { setPins, locate } = studio
@@ -254,8 +310,22 @@ export function useDesktopNotes(studio: Studio, doc: DocState | null, pick: Pick
     [locate],
   )
 
+  const addPartNote = React.useCallback(
+    async (text: string) => {
+      const r = await arbor.call("add_note", { text }, path)
+      if (!r.ok) notify.error(r.text)
+      else notify.success("已记下，agent 用 get_notes 会读到")
+    },
+    [path],
+  )
+
   const none = React.useCallback(() => {}, [])
   return {
+    prefill: null,
+    startMessage: setCompose,
+    compose,
+    setCompose,
+    addPartNote,
     draft,
     pending,
     sent: [],

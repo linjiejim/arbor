@@ -60,16 +60,17 @@ const bad = await call("fillet", { id: "f1", edges: { kind: "circle", extreme: "
 assert.ok(bad.isError, "an impossible fillet is reported as an error")
 assert.ok(!(await call("edit_feature", { id: "f1", changes: { r: 1 } })).isError)
 
+// The requirements go onto the part (the site's checklist) and are measured by the kernel.
 const check = await call("check", {
-  size: [90, 90, 10],
-  solids: 1,
-  count: [{ label: "6 个螺栓孔 + 中心孔 + 外圆", faces: { kind: "cylinder" }, expect: 8 }],
-  measure: [
-    { label: "中心孔直径", a: { face: { kind: "cylinder", radius: 10 } }, name: "直径", value: 20 },
-    { label: "螺栓孔分布圆", a: { face: { kind: "cylinder", radius: 4, near: [35, 0, 5] } }, b: { face: { kind: "cylinder", radius: 4, near: [-35, 0, 5] } }, name: "轴线间距", value: 70 },
+  items: [
+    { id: "size", said: "⌀90 × 10", kind: "size", expect: [90, 90, 10] },
+    { id: "bore", said: "中心孔 ⌀20", kind: "holes", faces: { kind: "cylinder", radius: 10 }, count: 1, d: 20 },
+    { id: "bolts", said: "6 个 ⌀8 螺栓孔", kind: "holes", faces: { kind: "cylinder", radius: 4 }, count: 6, d: 8 },
+    { id: "pcd", said: "均布在 ⌀70 上", kind: "pcd", faces: { kind: "cylinder", radius: 4 }, count: 6, expect: 70 },
   ],
 })
 assert.ok(!check.isError, check.text)
+assert.ok(!check.text.includes("✗"), check.text)
 
 const state = await call("get_state")
 assert.match(state.text, /第 \d+ 版/)

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Check, Crosshair, RotateCcw, Trash2 } from "lucide-react"
+import { Check, Crosshair, PenLine, RotateCcw, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,7 @@ import { AgentStatus } from "./title-bar"
 import { ACTOR_LABEL, ago, useNow } from "./words"
 
 /** The person's notes on the part: what the agent reads with get_notes, and what it answered. */
-export function NotesPanel({ doc, onLocate }: { doc: DocState; onLocate: (n: PartNote) => void }) {
+export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate: (n: PartNote) => void; onWrite: () => void }) {
   const [filter, setFilter] = React.useState<"open" | "all">("open")
   const open = doc.notes.filter((n) => n.status === "open")
   const list = (filter === "open" ? open : [...doc.notes].sort((a, b) => Number(a.status === "resolved") - Number(b.status === "resolved") || b.n - a.n)).slice()
@@ -29,6 +29,10 @@ export function NotesPanel({ doc, onLocate }: { doc: DocState; onLocate: (n: Par
             { value: "all", label: `全部 ${doc.notes.length}` },
           ]}
         />
+        <Button size="sm" variant="ghost" onClick={onWrite}>
+          <PenLine />
+          写一条
+        </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {list.length === 0 ? (
@@ -36,7 +40,7 @@ export function NotesPanel({ doc, onLocate }: { doc: DocState; onLocate: (n: Par
             size="sm"
             kind="empty"
             title={filter === "open" && doc.notes.length ? "备注都处理完了" : "还没有备注"}
-            description="在模型上单击一个面或一条边，写下要改什么。Agent 用 get_notes 读到它们，每条都带着只选中那个面或边的选择器。"
+            description="在模型上单击一个面或一条边，写下要改什么；关于整个零件的，点「写一条」。Agent 用 get_notes 读到它们，点在模型上的那些还带着只选中那个面或边的选择器。"
           />
         ) : (
           <ul className="divide-y">
@@ -57,7 +61,7 @@ export function NotesPanel({ doc, onLocate }: { doc: DocState; onLocate: (n: Par
                       <Badge tone={n.status === "open" ? "warning" : "success"}>{n.status === "open" ? "未处理" : "已处理"}</Badge>
                     </div>
                     <p className="mt-0.5 text-caption text-muted-foreground">
-                      {n.kind === "face" ? "面" : "边"} · {n.what} · {n.where} · {n.id}
+                      {n.kind === "part" ? `整个零件 · ${n.id}` : `${n.kind === "face" ? "面" : "边"} · ${n.what} · ${n.where} · ${n.id}`}
                     </p>
                     {n.reply && (
                       <p className="mt-2 rounded-md bg-muted px-2.5 py-1.5 text-small">
@@ -66,10 +70,12 @@ export function NotesPanel({ doc, onLocate }: { doc: DocState; onLocate: (n: Par
                       </p>
                     )}
                     <div className="mt-1.5 -ml-2 flex flex-wrap gap-0.5">
-                      <Button size="sm" variant="ghost" onClick={() => onLocate(n)}>
-                        <Crosshair />
-                        定位
-                      </Button>
+                      {n.kind !== "part" && (
+                        <Button size="sm" variant="ghost" onClick={() => onLocate(n)}>
+                          <Crosshair />
+                          定位
+                        </Button>
+                      )}
                       {n.status === "open" ? (
                         <Button size="sm" variant="ghost" onClick={() => update(n, { status: "resolved" })}>
                           <Check />

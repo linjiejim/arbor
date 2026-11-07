@@ -6,6 +6,8 @@ import type { KernelHost } from "../../../app/src/desktop/core/engine"
 import type { KernelPhase, V3 } from "../../../app/src/desktop/core/protocol"
 import type { Tree } from "../../../app/src/studio/dsl"
 import type { BuildReport, DisplayData } from "../../../app/src/studio/kernel/build"
+import type { Dim } from "../../../app/src/studio/kernel/dims"
+import type { DrawingData } from "../../../app/src/studio/kernel/drawing"
 import type { MeasureResult, MeasureTarget } from "../../../app/src/studio/kernel/measure"
 import type { PickInfo } from "../../../app/src/studio/annotations"
 import type { KernelReply, KernelRequest } from "./kernel-thread"
@@ -124,11 +126,23 @@ export class ThreadKernel implements KernelHost {
   pick(kind: "face" | "edge", hash: number, point: V3) {
     return this.call<PickInfo | null>("pick", [kind, hash, point])
   }
-  locate(kind: "face" | "edge", selector: unknown) {
-    return this.call<number[] | null>("locate", [kind, selector])
+  locate(kind: "face" | "edge", selector: unknown, before?: number) {
+    return this.call<number[] | null>("locate", [kind, selector, before])
+  }
+  selectorFor(kind: "face" | "edge", hashes: number[], before: number) {
+    return this.call<{ selector: Record<string, unknown>; count: number } | null>("selectorFor", [kind, hashes, before])
+  }
+  faceEdges(hash: number, before: number) {
+    return this.call<number[]>("faceEdges", [hash, before])
   }
   measure(targets: MeasureTarget[]) {
     return this.call<MeasureResult | null>("measure", [targets])
+  }
+  dimensions() {
+    return this.call<Dim[]>("dimensions", [])
+  }
+  drawing(withIso: boolean) {
+    return this.call<DrawingData | null>("drawing", [withIso])
   }
   exportBody(format: "step" | "stl", index?: number) {
     return this.call<Uint8Array | null>("exportBody", [format, index])

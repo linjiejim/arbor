@@ -23,13 +23,14 @@ export function parseNotes(text: string | null): NotesFile {
   }
 }
 
-export function newNote(file: NotesFile, pick: PickInfo, text: string): PartNote {
+/** A note on a clicked face or edge, or (no pick) about the part as a whole. */
+export function newNote(file: NotesFile, pick: PickInfo | null, text: string): PartNote {
   const n = file.next
+  const base = { id: `n${n}`, n, text: text.trim(), status: "open" as const, createdAt: Date.now() }
+  if (!pick) return { ...base, kind: "part", what: "", where: "", facts: "", origins: [], point: [0, 0, 0], selector: null, sketch: null }
   return {
-    id: `n${n}`,
-    n,
+    ...base,
     kind: pick.kind,
-    text: text.trim(),
     what: pick.what,
     where: pick.where,
     facts: pick.facts,
@@ -38,13 +39,12 @@ export function newNote(file: NotesFile, pick: PickInfo, text: string): PartNote
     selector: pick.selector,
     sketch: pick.sketch,
     smooth: pick.smooth || undefined,
-    status: "open",
-    createdAt: Date.now(),
   }
 }
 
 /** What the agent reads about a pick: the same facts an annotation carries. */
 export function pickLines(p: Pick<PartNote, "kind" | "what" | "where" | "origins" | "facts" | "point" | "selector" | "sketch" | "smooth">): string[] {
+  if (p.kind === "part") return ["- 关于整个零件（没有点在某个面或边上）"]
   const what = p.kind === "face" ? "面" : "边"
   const ids = p.origins.length ? `（特征 id：${p.origins.join("、")}）` : ""
   const lines = [`- 选中：${what} · ${p.what} · ${p.where}${ids} · ${p.facts}`, `- 点击位置：${xyz(p.point)}`]

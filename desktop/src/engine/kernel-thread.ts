@@ -5,7 +5,11 @@ import { parentPort } from "node:worker_threads"
 import { DirectKernel, wasmHeapMB } from "../../../app/src/desktop/core/direct-kernel"
 import { initNodeKernel } from "../../../app/src/studio/kernel/node"
 
-export type KernelRequest = { id: number; op: "rebuild" | "inspect" | "display" | "pick" | "locate" | "measure" | "exportBody"; args: unknown[] }
+export type KernelRequest = {
+  id: number
+  op: "rebuild" | "inspect" | "display" | "pick" | "locate" | "selectorFor" | "faceEdges" | "measure" | "dimensions" | "drawing" | "exportBody"
+  args: unknown[]
+}
 export type KernelReply =
   | { id: number; ok: true; result: unknown; heapMB: number }
   | { id: number; ok: false; error: string }
