@@ -3,7 +3,7 @@ import { CircleAlert, MousePointerClick, Sparkles, X } from "lucide-react"
 import { Button, IconButton } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { notify } from "@/components/ui/toast"
-import { renderViews } from "@/studio/look"
+import { renderShots, renderViews } from "@/studio/look"
 import { NO_PARTS_VIEW, type Hover, type PartsView } from "@/studio/scene"
 import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
@@ -38,7 +38,13 @@ export function DesktopApp() {
   const [tab, setTab] = React.useState("notes")
 
   // The agent's `look`: render the views it asked for, from the mesh the engine sent.
-  React.useEffect(() => arbor.onLook(async (req) => renderViews(req.display, req.views, req.highlight, { pins: req.pins })), [])
+  React.useEffect(
+    () =>
+      arbor.onLook(async (req) =>
+        req.shots ? renderShots(req.display, req.shots, { highlight: req.highlight, pins: req.pins, section: req.section, hide: req.hide, size: req.size }) : renderViews(req.display, req.views, req.highlight, { pins: req.pins }),
+      ),
+    [],
+  )
   // What 检查更新… found.
   React.useEffect(() => arbor.onNotice((n) => void (n.tone === "error" ? notify.error(n.text) : notify[n.tone](n.text))), [])
 

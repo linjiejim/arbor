@@ -304,6 +304,14 @@ export type SketchShape = z.infer<typeof SketchShape>
 
 const Said = z.string().describe("学习者的原话片段，如「壁厚 2」")
 const Pick = z.object({ face: FaceSelector.optional(), edge: EdgeSelector.optional() }).describe("量哪里：一个面（face）或一条边（edge），选择器要正好选中一个")
+const Where = z
+  .object({
+    face: FaceSelector.optional(),
+    edge: EdgeSelector.optional(),
+    feature: z.string().optional().describe("这个特征生成和修改的、现在仍存在的所有面（特征 id）"),
+    part: z.string().optional().describe("零件名，或参考体（import 的 id 或名字）"),
+  })
+  .describe("一处：face 或 edge（选择器正好选中一个）、feature 或 part，写一个")
 const CheckBase = { id: z.string().describe("短英文 id，如 size、wall、holes；同 id 会覆盖原来那一项"), said: Said, tol: z.number().positive().optional().describe("容差，缺省长度 0.01 mm、角度 0.05°") }
 
 /** A requirement the learner stated, measured by the kernel on every rebuild (expected values are plain numbers). */
@@ -323,9 +331,28 @@ export const Check = z.discriminatedUnion("kind", [
   z.object({ ...CheckBase, kind: z.literal("angle"), a: FaceSelector, b: FaceSelector, expect: z.number() }),
   z.object({ ...CheckBase, kind: z.literal("volume"), min: z.number().optional(), max: z.number().optional() }),
   // Against a reference body brought in with `import` (desktop app): fit around a board, a part to mate with.
-  z.object({ ...CheckBase, kind: z.literal("clearance"), ref: z.string().describe("参考体的特征 id（import）"), min: z.number().describe("零件和参考体之间最小的间隙，mm") }),
-  z.object({ ...CheckBase, kind: z.literal("interference"), ref: z.string().describe("参考体的特征 id（import）：零件不能和它相交") }),
+  z.object({ ...CheckBase, kind: z.literal("clearance"), ref: z.string().describe("参考体的特征 id（import），或一个零件的名字"), min: z.number().describe("和它之间最小的间隙，mm") }),
+  z.object({ ...CheckBase, kind: z.literal("interference"), ref: z.string().describe("参考体的特征 id（import），或一个零件的名字：其余部分不能和它相交") }),
+  // Desktop (Arbor) only for now: left out of the site assistant's `check` (tools.ts).
+  z.object({
+    ...CheckBase,
+    kind: z.literal("position"),
+    at: Pick,
+    axis: z.enum(["X", "Y", "Z"]).optional().describe("只核对这一个坐标；不写时核对 [x, y, z]"),
+    expect: z.union([z.number(), z.array(z.number()).length(3)]).describe("写了 axis 时是一个数，没写时是 [x, y, z]"),
+  }),
+  z.object({
+    ...CheckBase,
+    kind: z.literal("gap"),
+    a: Where,
+    b: Where,
+    min: z.number().optional().describe("至少隔这么远（相交就不过）"),
+    max: z.number().optional().describe("最多隔这么远；0 = 必须贴上"),
+  }),
 ])
+
+/** Check kinds only the desktop app's agents get (the site's assistant keeps its tested set). */
+export const DESKTOP_CHECKS = new Set(["position", "gap"])
 export type Check = z.infer<typeof Check>
 
 export const Tree = z.object({

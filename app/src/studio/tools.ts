@@ -1,6 +1,6 @@
 import { tool, type ToolSet } from "ai"
 import { z } from "zod"
-import { Check, EdgeSelector, FaceSelector, Feature, Num, type FeatureOp } from "./dsl"
+import { Check, DESKTOP_CHECKS, EdgeSelector, FaceSelector, Feature, Num, type FeatureOp } from "./dsl"
 
 /**
  * The tools the model may call. Shared by the server (schemas + how results
@@ -31,6 +31,23 @@ const OP_DOCS: Record<FeatureOp, string> = {
 /** Ops only the desktop app (Arbor) runs: they read files next to the part. Not offered to the site's assistant. */
 export const DESKTOP_OPS = new Set<FeatureOp>(["import"])
 
+/** The site assistant's check items: without the desktop-only kinds. */
+const WebCheck = z.discriminatedUnion(
+  "kind",
+  Check.options.filter((o) => !DESKTOP_CHECKS.has(o.shape.kind.value)) as unknown as [(typeof Check.options)[number], ...(typeof Check.options)[number][]],
+)
+
+const checkTool = (items: z.ZodType) =>
+  tool({
+    description:
+      "核对学习者提出的数值要求：每项由内核实际量出来，返回 ✓ / ✗，之后每次重建都会自动重算。学习者的话里有具体数值时，建模结束前必须调用一次。size 只量整个零件的外形（包围盒）；某一部分的尺寸（筋的高度、立板的厚度、孔距）用 distance 选两个面，或 thickness 选壁的一侧，选择器加 of、normal，正好选中要量的那个面。",
+    inputSchema: z.object({
+      items: z.array(items).max(20).optional().describe("要核对的项；期望值只写学习者给的数字，不写参数名"),
+      remove: z.array(z.string()).optional().describe("学习者不再要求的项的 id"),
+    }),
+    toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
+  })
+
 const featureTools = Object.fromEntries(
   Feature.options.map((schema) => {
     const { op: opField, ...shape } = schema.shape
@@ -49,8 +66,11 @@ const featureTools = Object.fromEntries(
 
 const { import: importTool, ...webFeatureTools } = featureTools
 
-/** Tools of the desktop app's agents on top of STUDIO_TOOLS (see DESKTOP_OPS). */
-export const DESKTOP_TOOLS = { import: importTool } satisfies ToolSet
+/** Tools of the desktop app's agents on top of STUDIO_TOOLS (see DESKTOP_OPS); `check` replaces the site's with every kind. */
+export const DESKTOP_TOOLS = {
+  import: importTool,
+  check: checkTool(Check),
+} satisfies ToolSet
 
 export const STUDIO_TOOLS = {
   set_params: tool({
@@ -80,15 +100,7 @@ export const STUDIO_TOOLS = {
     inputSchema: z.object({ id: z.string(), cascade: z.boolean().optional() }),
     toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
   }),
-  check: tool({
-    description:
-      "核对学习者提出的数值要求：每项由内核实际量出来，返回 ✓ / ✗，之后每次重建都会自动重算。学习者的话里有具体数值时，建模结束前必须调用一次。size 只量整个零件的外形（包围盒）；某一部分的尺寸（筋的高度、立板的厚度、孔距）用 distance 选两个面，或 thickness 选壁的一侧，选择器加 of、normal，正好选中要量的那个面。",
-    inputSchema: z.object({
-      items: z.array(Check).max(20).optional().describe("要核对的项；期望值只写学习者给的数字，不写参数名"),
-      remove: z.array(z.string()).optional().describe("学习者不再要求的项的 id"),
-    }),
-    toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
-  }),
+  check: checkTool(WebCheck),
   inspect: tool({
     description:
       "查看当前模型：tree = 特征树和每步结果；body = 包围盒、体积、质心；faces / edges = 列出面或边（可用选择器过滤），用来确认选择器会选中什么。",

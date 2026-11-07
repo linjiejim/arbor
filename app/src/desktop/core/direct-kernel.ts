@@ -4,7 +4,7 @@
 import { getOC } from "replicad"
 import type { Tree } from "../../studio/dsl"
 import { Kernel } from "../../studio/kernel/build"
-import type { MeasureTarget } from "../../studio/kernel/measure"
+import type { MeasureSpec } from "../../studio/kernel/measure"
 import type { KernelHost } from "./engine"
 import type { KernelPhase, V3 } from "./protocol"
 
@@ -40,7 +40,7 @@ export class DirectKernel implements KernelHost {
   async faceEdges(hash: number, before: number) {
     return this.k.faceEdges(hash, before)
   }
-  async measure(targets: MeasureTarget[]) {
+  async measure(targets: MeasureSpec[]) {
     return this.k.measure(targets)
   }
   async dimensions() {

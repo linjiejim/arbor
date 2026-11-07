@@ -2,7 +2,7 @@
 // input. The MCP server lists the agent's ones as tools, the CLI exposes them
 // as `arbor call <name>`, and the window uses the user's ones over IPC.
 import { z } from "zod"
-import { EdgeSelector, FaceSelector, Tree } from "../../studio/dsl"
+import { EdgeSelector, FaceSelector, Num, Tree } from "../../studio/dsl"
 import { SYSTEM_PROMPT } from "../../studio/prompt"
 import { STARTERS } from "../../studio/starters"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
@@ -13,8 +13,13 @@ export type Audience = "agent" | "user" | "both"
 export type CommandSpec = { name: string; description: string; input: z.ZodObject; audience: Audience }
 
 const Target = z
-  .object({ face: FaceSelector.optional(), edge: EdgeSelector.optional() })
-  .describe("一个面（face）或一条边（edge）：选择器要正好选中一个")
+  .object({
+    face: FaceSelector.optional(),
+    edge: EdgeSelector.optional(),
+    feature: z.string().optional().describe("这个特征生成和修改的、现在仍存在的所有面（特征 id）"),
+    part: z.string().optional().describe("一个零件、参考体，或在装配里改零件时上下文里的零件（名字）"),
+  })
+  .describe("量哪里：一个面（face）或一条边（edge，选择器要正好选中一个），一个特征的面（feature），或一个零件（part）")
 const VIEWS = ["iso", "front", "top", "right", "back", "bottom", "left"] as const
 
 /** Modelling tools of the web studio, as they are (look is replaced below: here it renders in the window). */
@@ -86,18 +91,33 @@ const own: CommandSpec[] = [
     name: "look",
     audience: "agent",
     description:
-      "在 Arbor 窗口里渲染当前模型的视图图片给你看，检查形状、位置和方向。窗口里未处理的备注会画成编号圆点。建完一个零件、改完备注指的地方，都要看一次。",
+      "在 Arbor 窗口里渲染当前模型的视图图片给你看，检查形状、位置和方向。窗口里未处理的备注会画成编号圆点。建完一个零件、改完备注指的地方，都要看一次。小的细节用 focus 放大，里面的结构用 section 剖开看；最后一步改动很小时会自动加一张特写。结果里写着每张图 1 px 多少 mm。",
     input: z.object({
-      views: z.array(z.enum(VIEWS)).optional().describe("缺省 iso、front、top、right"),
+      views: z.array(z.enum(VIEWS)).optional().describe("缺省 iso、front、top、right；写了 section 时缺省是正对截面的那一张加 iso；写了 focus 时缺省 iso、front"),
       highlight: z.string().optional().describe("高亮这个特征生成的面"),
       at: z.string().optional().describe("回滚到这个特征那一步看（缺省最新一步）"),
       notes: z.boolean().optional().describe("画出未处理备注的编号，缺省 true"),
+      focus: z
+        .union([z.string().describe("特征 id：框住它生成和修改的面"), z.object({ part: z.string().describe("零件名或参考体的名字") }), z.object({ faces: FaceSelector })])
+        .optional()
+        .describe("特写：每张图只框住这里（特征 id、{ part } 或 { faces }），看小细节时用"),
+      section: z
+        .object({
+          plane: z.enum(["XY", "XZ", "YZ"]).describe("剖切的基准面：XY 去掉上面（+Z）一侧，XZ 去掉前面（-Y）一侧，YZ 去掉右面（+X）一侧"),
+          offset: Num.optional().describe("基准面的偏移（XY 是 Z 值，XZ 是 Y 值，YZ 是 X 值），缺省过整件中心"),
+        })
+        .optional()
+        .describe("剖视：切开看里面，例如零件之间的间隙、壁厚、内腔"),
+      dir: z.array(z.number()).length(3).optional().describe("再加一张从这个方向看的图，例如 [1, 1, 0.3]"),
+      size: z.enum(["normal", "large"]).optional().describe("large = 896×672（缺省 448×336）"),
+      hide: z.array(z.string()).optional().describe("不画这些零件或参考体（按名字），例如藏起笔帽看里面"),
     }),
   },
   {
     name: "measure",
     audience: "both",
-    description: "测量：一个面或边的尺寸（直径、面积、长度），两个之间的最短距离、夹角、平行面间距、圆心距、轴线间距。由内核算，不要自己推算。",
+    description:
+      "测量：一个面或边的尺寸（直径、面积、长度）和坐标（平面的中心、圆心、轴线、直线的端点），两个之间的最短距离、夹角、平行面间距、圆心距、轴线间距。也能量两个特征（feature）或两个零件（part）之间的最短距离，0 = 接触，零件相交时给出重叠体积。由内核算，不要自己推算。",
     input: z.object({ a: Target, b: Target.optional() }),
   },
   {

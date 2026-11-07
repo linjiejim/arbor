@@ -8,7 +8,7 @@ import type { Tree } from "../../../app/src/studio/dsl"
 import type { BuildReport, DisplayData } from "../../../app/src/studio/kernel/build"
 import type { Dim } from "../../../app/src/studio/kernel/dims"
 import type { DrawingData } from "../../../app/src/studio/kernel/drawing"
-import type { MeasureResult, MeasureTarget } from "../../../app/src/studio/kernel/measure"
+import type { MeasureResult, MeasureSpec } from "../../../app/src/studio/kernel/measure"
 import type { PickInfo } from "../../../app/src/studio/annotations"
 import type { KernelReply, KernelRequest } from "./kernel-thread"
 
@@ -144,7 +144,7 @@ export class ThreadKernel implements KernelHost {
   faceEdges(hash: number, before: number) {
     return this.call<number[]>("faceEdges", [hash, before])
   }
-  measure(targets: MeasureTarget[]) {
+  measure(targets: MeasureSpec[]) {
     return this.call<MeasureResult | null>("measure", [targets])
   }
   dimensions() {

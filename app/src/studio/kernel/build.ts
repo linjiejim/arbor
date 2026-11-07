@@ -34,10 +34,11 @@ import { MAX_COUNT } from "../limits"
 import { referencesOf } from "../apply"
 import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
-import { measure, type MeasureResult, type MeasureTarget } from "./measure"
+import { measure, type MeasureResult, type MeasureSpec, type MeasureTarget } from "./measure"
+import { closest, relation, TOUCH } from "./proximity"
 import { compoundOf, countOf, edgesOf, facesOf, solidsOf } from "./topo"
 import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
-import { runChecks, type CheckResult } from "./check"
+import { runChecks, type CheckBodies, type CheckResult } from "./check"
 import { pathPoints, planeFace, ribTool, tapered, thinProfile, untilNext } from "./features2"
 import { stepAscii, zipStore } from "../zip"
 import { makeDrawing, type DrawingData } from "./drawing"
@@ -208,6 +209,9 @@ type Thread = { r: number; major: number }
  */
 type Part = { name: string; body: Shape3D; explode: V3; owned: boolean }
 
+/** New faces smaller than this (mm²) are reported as slivers. */
+const SLIVER_AREA = 0.01
+
 /** Features that change the body; after a split they run on each part (see `onParts`). */
 const BODY_OPS = new Set<FeatureOp>(["extrude", "revolve", "fillet", "chamfer", "shell", "hole", "linear_pattern", "circular_pattern", "mirror", "sweep", "loft", "draft", "rib"])
 
@@ -221,6 +225,8 @@ export class Kernel {
   private assetsGiven = false
   /** Parsed files by content, so switching parts doesn't parse them again. */
   private parsed = new Map<string, AnyShape>()
+  /** Editing a part inside an assembly: the other parts, placed in this part's frame, drawn see-through (read-only). */
+  private context: Ref[] = []
 
   /**
    * The host (the desktop app) hands over the files `import` features read: the bytes, or why it
@@ -318,11 +324,21 @@ export class Kernel {
       features,
       lastOk,
       body: last?.body ? stats(last.body) : null,
-      checks: tree.checks?.length && last?.body ? runChecks(last.body, last.origins, tree.checks, this.scope, new Map((last.refs ?? []).map((r) => [r.id, r.shape]))) : undefined,
+      checks: tree.checks?.length && last?.body ? runChecks(last.body, last.origins, tree.checks, this.scope, this.checkBodies(last)) : undefined,
       refs: last?.refs?.length ? last.refs.map((r) => ({ id: r.id, name: r.name, size: sizeOf(r.shape) })) : undefined,
       parts: last?.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, volume: r2(measureShapeVolumeProperties(p.body).volume), size: stats(p.body).size })) : undefined,
       ms: performance.now() - t0,
     }
+  }
+
+  /** What checks can name: reference bodies (and the assembly context) by id and name, parts by name. */
+  private checkBodies(step: Step): CheckBodies {
+    const refs = new Map<string, AnyShape>()
+    for (const r of [...(step.refs ?? []), ...this.context]) {
+      refs.set(r.id, r.shape)
+      refs.set(r.name, r.shape)
+    }
+    return { refs, parts: step.parts && step.parts.length > 1 ? step.parts : [] }
   }
 
   /** Mesh + per-face status of one step (default: the last that built). */
@@ -705,10 +721,59 @@ export class Kernel {
   }
 
   /** Sizes of one or two clicked faces / edges of the latest body, and how they relate. */
-  measure(targets: MeasureTarget[]): MeasureResult | null {
+  measure(targets: MeasureSpec[]): MeasureResult | null {
     const step = this.lastBuilt(this.steps.length)
     if (!step?.body || !targets.length) return null
-    return measure(step.body, step.origins, targets.slice(0, 2))
+    const two = targets.slice(0, 2)
+    if (two.every((t) => t.kind === "face" || t.kind === "edge")) return measure(step.body, step.origins, two as MeasureTarget[])
+    const owned: AnyShape[] = []
+    try {
+      const items = two.map((t) => this.targetShape(step, t, owned))
+      if (items.length < 2) return { items: [items[0].item], between: [], segment: null }
+      const r = relation(items[0].shape, items[1].shape, items[0].solid && items[1].solid)
+      const between = [{ name: "最短距离", value: r.d <= TOUCH ? "0（接触）" : `${fmt(r.d)} mm` }]
+      if (r.overlap > 1e-6) between.push({ name: "重叠体积", value: `${fmt(r.overlap)} mm³（相交）` })
+      return { items: items.map((x) => x.item), between, segment: r.segment }
+    } finally {
+      owned.forEach((x) => x.delete())
+    }
+  }
+
+  /** The shape a measure target stands for; shapes made here go into `owned` to be freed. */
+  private targetShape(step: Step, t: MeasureSpec, owned: AnyShape[]): { shape: AnyShape; solid: boolean; item: MeasureResult["items"][number] } {
+    const body = step.body!
+    if (t.kind === "part") {
+      const part = step.parts?.find((p) => p.name === t.name)
+      if (part) {
+        const st = stats(part.body)
+        return { shape: part.body, solid: true, item: { kind: "part", hash: -1, what: `零件「${t.name}」`, facts: [`体积 ${fmt(st.volume)} mm³`, `外形 ${st.size.map(fmt).join("×")}`] } }
+      }
+      const ref = [...(step.refs ?? []), ...this.context].find((r) => r.name === t.name || r.id === t.name)
+      if (ref) return { shape: ref.shape, solid: true, item: { kind: "part", hash: -1, what: `参考体「${ref.name}」`, facts: [`外形 ${sizeOf(ref.shape).map(fmt).join("×")}`] } }
+      const names = [...(step.parts ?? []).map((p) => p.name), ...(step.refs ?? []).map((r) => r.name), ...this.context.map((r) => r.name)]
+      throw new InputError(`没有叫「${t.name}」的零件或参考体${names.length ? `：现在有 ${names.join("、")}` : "（还没有拆件，整个模型只有一个实体）"}`)
+    }
+    const faces = faceInfos(body, step.origins)
+    const edges = t.kind === "edge" ? edgeInfos(body, faces) : []
+    try {
+      if (t.kind === "feature") {
+        const mine = faces.filter((f) => f.origin === t.id)
+        const f = this.tree.features.find((x) => x.id === t.id)
+        if (!f) throw new InputError(`找不到特征「${t.id}」`)
+        if (!mine.length) throw new InputError(`「${displayName(this.tree, f)}」生成的面现在都不在了（被后面的特征盖掉或切掉了）`)
+        const shape = makeCompound(mine.map((x) => x.face.clone())) as unknown as AnyShape
+        owned.push(shape)
+        return { shape, solid: false, item: { kind: "feature", hash: -1, what: `「${displayName(this.tree, f)}」的面`, facts: [`${mine.length} 个面`] } }
+      }
+      const x = t.kind === "face" ? faces.find((f) => f.face.hashCode === t.hash) : edges.find((e) => e.edge.hashCode === t.hash)
+      if (!x) throw new InputError("要量的面或边找不到了")
+      const shape = ("face" in x ? x.face : x.edge).clone() as AnyShape
+      owned.push(shape)
+      const res = measure(body, step.origins, [t])
+      return { shape, solid: false, item: res?.items[0] ?? { kind: t.kind, hash: t.hash, what: t.kind === "face" ? "面" : "边", facts: [] } }
+    } finally {
+      disposeInfos(faces, edges)
+    }
   }
 
   /** STEP or STL of the body; after a split, one STEP with a named solid per part, or a zip of one STL per part. */
@@ -793,7 +858,11 @@ export class Kernel {
       if (out.tools) step.tools = out.tools
       if (out.threads) step.threads = out.threads
       if (out.geom) step.geom = out.geom
-      if (out.body) this.commitBody(step, prev, out.body, f.id)
+      if (out.body) {
+        this.commitBody(step, prev, out.body, f.id)
+        const sliver = f.op === "sketch" || f.op === "import" ? null : this.slivers(step)
+        if (sliver) warnings.push(sliver)
+      }
       // Each part's faces are a run of the compound's, in part order.
       if (out.body && step.parts) {
         let at = 0
@@ -832,6 +901,21 @@ export class Kernel {
     step.result.faces = {
       new: step.status.filter((s) => s === "new").length,
       modified: step.status.filter((s) => s === "modified").length,
+    }
+  }
+
+  /** New faces too small to be meant: two faces nearly coinciding, or a cut grazing a face. */
+  private slivers(step: Step): string | null {
+    if (!step.body || !step.status.some((s) => s === "new")) return null
+    const faces = facesOf(step.body)
+    try {
+      const areas = faces.map((f) => measureArea(f))
+      const total = areas.reduce((a, b) => a + b, 0)
+      const tiny = areas.filter((a, i) => step.status[i] === "new" && a < SLIVER_AREA && a < 1e-5 * total)
+      if (!tiny.length) return null
+      return `生成了 ${tiny.length} 个极小的面（最小 ${Math.min(...tiny).toPrecision(2)} mm²）：多半是两个面几乎重合，或者切除擦着面切过去`
+    } finally {
+      faces.forEach((f) => f.delete())
     }
   }
 
@@ -1430,6 +1514,7 @@ function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut", war
   }
   // Booleans already unify same-domain faces; the first solid needs it too,
   // or an extruded circle keeps two half-cylinders and two half-arcs per rim.
+  const solidsBefore = body ? countOf(body, "solid") : 0
   const next = body ? body.fuse(tool) : unified(tool)
   if (body) {
     const before = measureShapeVolumeProperties(body).volume
@@ -1437,7 +1522,15 @@ function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut", war
     if (Math.abs(after - before) < 1e-6 * Math.max(1, before)) warnings.push("加的料完全在原实体里面，模型没有变化")
   }
   const solids = countOf(next, "solid")
-  if (solids > 1) warnings.push(`现在是 ${solids} 个不相连的实体：新加的料没有和原来的实体接上`)
+  if (body && solids > solidsBefore) {
+    // Apart, or touching only along an edge or at a point (sharing a face would have merged them).
+    const c = closest(tool, body)
+    warnings.push(
+      c && c.d > TOUCH
+        ? `新加的料离已有实体 ${fmt(c.d)} mm，没接上：现在是 ${solids} 个不相连的实体`
+        : `新加的料只碰到已有实体的边或点，没有共用的面：合并后还是 ${solids} 个不相连的实体`,
+    )
+  } else if (solids > 1) warnings.push(`现在是 ${solids} 个不相连的实体`)
   return next
 }
 

@@ -7,10 +7,27 @@ import { executeTool, moveFeature, treeText, type KernelPort } from "../../studi
 import { toBuild123d } from "../../studio/codegen"
 import { EMPTY_TREE, Tree, displayName } from "../../studio/dsl"
 import type { BuildReport, DisplayData } from "../../studio/kernel/build"
+import { num as evalNum } from "../../studio/expr"
+import {
+  FOCUS_PADDING,
+  LOOK_PADDING,
+  LOOK_SIZE,
+  VIEW_DIR,
+  VIEW_LABEL,
+  autoFocus,
+  boxOfGroups,
+  mmPerPixel,
+  modelBox,
+  scaleText,
+  sizeText,
+  type Box,
+  type LookSection,
+  type LookShot,
+} from "../../studio/look-plan"
 import type { Dim } from "../../studio/kernel/dims"
 import type { DrawingData } from "../../studio/kernel/drawing"
 import { InputError } from "../../studio/kernel/errors"
-import type { MeasureResult, MeasureTarget } from "../../studio/kernel/measure"
+import type { MeasureResult, MeasureSpec } from "../../studio/kernel/measure"
 import { STARTERS } from "../../studio/starters"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
 import { AGENT_GUIDE, COMMAND } from "./catalog"
@@ -35,7 +52,7 @@ import { describeTreeChange } from "./tree-diff"
 
 type V3 = [number, number, number]
 /** One face or one edge, by selector (measure). */
-type Target = { face?: Record<string, unknown>; edge?: Record<string, unknown> }
+type Target = { face?: Record<string, unknown>; edge?: Record<string, unknown>; feature?: string; part?: string }
 
 export interface KernelHost {
   readonly phase: KernelPhase
@@ -47,7 +64,7 @@ export interface KernelHost {
   locate(kind: "face" | "edge", selector: unknown, before?: number): Promise<number[] | null>
   selectorFor(kind: "face" | "edge", hashes: number[], before: number): Promise<{ selector: Record<string, unknown>; count: number } | null>
   faceEdges(hash: number, before: number): Promise<number[]>
-  measure(targets: MeasureTarget[]): Promise<MeasureResult | null>
+  measure(targets: MeasureSpec[]): Promise<MeasureResult | null>
   dimensions(): Promise<Dim[]>
   drawing(withIso: boolean): Promise<DrawingData | null>
   exportBody(format: "step" | "stl", index?: number): Promise<Uint8Array | null>
@@ -709,10 +726,12 @@ export class Engine {
     })
   }
 
-  private async one(t: Target): Promise<MeasureTarget> {
+  private async one(t: Target): Promise<MeasureSpec> {
+    if (t.feature) return { kind: "feature", id: t.feature }
+    if (t.part) return { kind: "part", name: t.part }
     const kind = t.face ? "face" : "edge"
     const selector = t.face ?? t.edge
-    if (!selector) throw new InputError("要写 face 或 edge 选择器")
+    if (!selector) throw new InputError("要写 face、edge、feature 或 part 之一")
     const hashes = await this.opts.kernel.locate(kind, selector)
     if (!hashes?.length) throw new InputError(`选择器什么都没选中：${JSON.stringify(selector)}`)
     if (hashes.length > 1) throw new InputError(`选择器选中了 ${hashes.length} 个，要正好一个（加 near 或更多条件）：${JSON.stringify(selector)}`)
@@ -738,18 +757,99 @@ export class Engine {
   private async look(doc: Doc, input: Record<string, unknown>): Promise<CommandResult> {
     const screen = this.opts.screen?.()
     if (!screen) return fail("看图要在 Arbor 窗口里渲染：先打开 Arbor App（命令行 arbor open <零件>），再调用 look。其余命令不需要窗口。")
-    await this.ensureKernel(doc)
+    const report = await this.ensureKernel(doc)
     const at = input.at as string | undefined
     const index = at ? doc.tree.features.findIndex((f) => f.id === at) : -1
     if (at && index < 0) return fail(`找不到特征「${at}」`)
     const display = await this.opts.kernel.display(index >= 0 ? index : undefined)
     if (!display.mesh && !display.refs?.length) return fail("还没有实体可以看。")
-    const views = (input.views as string[] | undefined)?.length ? (input.views as string[]) : ["iso", "front", "top", "right"]
+    const size = (input.size as "normal" | "large" | undefined) ?? "normal"
+    const H = LOOK_SIZE[size][1]
+    const whole = modelBox(display) ?? refsBox(display)
+
+    // A cut: which side goes, and the view that looks straight at the cut.
+    const sec = input.section as { plane: "XY" | "XZ" | "YZ"; offset?: number | string } | undefined
+    let section: LookSection | undefined
+    if (sec) {
+      const axis = ({ XY: "Z", XZ: "Y", YZ: "X" } as const)[sec.plane]
+      const i = { X: 0, Y: 1, Z: 2 }[axis]
+      const atValue = sec.offset !== undefined ? evalNum(sec.offset, report.params) : whole ? (whole[0][i] + whole[1][i]) / 2 : 0
+      section = { axis, at: atValue }
+    }
+    const hide = (input.hide as string[] | undefined) ?? []
+    const known = new Set([...(display.parts ?? []).map((p) => p.name), ...(display.refs ?? []).flatMap((r) => [r.name, r.id])])
+    const unknown = hide.filter((n) => !known.has(n))
+    if (unknown.length) return fail(`hide 里的「${unknown.join("、")}」不是零件或参考体的名字${known.size ? `：现在有 ${[...known].join("、")}` : "：现在只有一个没名字的实体"}`)
+
+    // Framing: an explicit focus frames every view on it; otherwise a small last change gets a close-up of its own.
+    const focusIn = input.focus as string | { part: string } | { faces: Record<string, unknown> } | undefined
+    let focus: { box: Box; name: string } | null = null
+    if (focusIn !== undefined) {
+      const res = await this.focusBox(doc, display, focusIn)
+      if ("error" in res) return fail(res.error)
+      focus = res
+    }
+    const sectionView = section ? ({ Z: "top", Y: "front", X: "right" } as const)[section.axis] : null
+    const views = (input.views as string[] | undefined)?.length
+      ? (input.views as string[])
+      : sectionView
+        ? [sectionView, "iso"]
+        : focus
+          ? ["iso", "front"]
+          : ["iso", "front", "top", "right"]
+    const shots: LookShot[] = views.map((v) =>
+      focus
+        ? { label: `特写：${focus.name} · ${VIEW_LABEL[v] ?? v}`, dir: VIEW_DIR[v] ?? VIEW_DIR.iso, box: focus.box, padding: FOCUS_PADDING }
+        : { label: VIEW_LABEL[v] ?? v, dir: VIEW_DIR[v] ?? VIEW_DIR.iso },
+    )
+    const dir = input.dir as number[] | undefined
+    if (dir) {
+      const l = Math.hypot(...dir)
+      if (!l) return fail("dir 不能是 [0, 0, 0]")
+      shots.push({ label: `从 (${dir.join(", ")}) 方向看${focus ? `（特写：${focus.name}）` : ""}`, dir: [dir[0] / l, dir[1] / l, dir[2] / l], box: focus?.box, padding: focus ? FOCUS_PADDING : undefined })
+    }
+    let auto: Box | null = null
+    if (!focus) {
+      auto = autoFocus(display)
+      const f = doc.tree.features[display.index]
+      if (auto) shots.push({ label: `特写：${f ? displayName(doc.tree, f) : "最后一步"}（自动）`, dir: VIEW_DIR.iso, box: auto, padding: FOCUS_PADDING })
+    }
+
     const pins = input.notes === false ? [] : doc.notes.notes.filter((n) => n.status === "open" && n.kind !== "part").map((n) => ({ n: n.n, point: n.point }))
-    const images = await screen.look({ display, views, highlight: input.highlight as string | undefined, pins })
+    const images = await screen.look({ display, views, highlight: input.highlight as string | undefined, pins, shots, section, hide: hide.length ? hide : undefined, size })
     const step = at ? `（回滚到「${displayName(doc.tree, doc.tree.features[index])}」这一步）` : ""
-    const legend = input.highlight ? "蓝色 = 高亮的特征，灰色 = 其余" : "蓝色 = 最后一步新生成的面，橙色 = 被它修改的面"
-    return { ok: true, text: `视图：${views.join("、")}${step}。${legend}${pins.length ? "；圆圈数字 = 备注编号" : ""}。`, images }
+    const legend = input.highlight ? "蓝色 = 高亮的特征，灰色 = 其余" : "蓝色 = 这一步新生成的面，橙色 = 被它修改的面"
+    const lines = [`视图：${shots.map((s) => s.label).join("、")}${step}。${legend}${pins.length ? "；圆圈数字 = 备注编号" : ""}。`]
+    if (section) lines.push(`剖视：在 ${section.axis} = ${round2(section.at)} 处剖开，去掉了${{ Z: "上面（+Z）", Y: "前面（-Y）", X: "右面（+X）" }[section.axis]}那一侧。`)
+    if (whole) {
+      const scales = [...new Set(shots.map((s) => s.box ?? null))].map((b) => `${b ? `特写（${sizeText(b)} mm）` : "整件"} 1 px ≈ ${scaleText(mmPerPixel(b ?? whole, H, b ? FOCUS_PADDING : LOOK_PADDING))} mm`)
+      lines.push(`整件 ${sizeText(whole)} mm；${scales.join("；")}。小于 3 px 的细节看不清：用 focus（特征 id、{ part } 或 { faces }）放大，用 section 剖开看里面。`)
+    }
+    if (auto) lines.push("最后一步的改动只占整件的一小块，已自动加了一张特写。")
+    return { ok: true, text: lines.join("\n"), images }
+  }
+
+  /** The box `look` frames for a feature id, a part (or reference body) by name, or a face selector. */
+  private async focusBox(doc: Doc, d: DisplayData, focus: string | { part: string } | { faces: Record<string, unknown> }): Promise<{ box: Box; name: string } | { error: string }> {
+    if (typeof focus === "string") {
+      const f = doc.tree.features.find((x) => x.id === focus)
+      if (!f) return { error: `找不到特征「${focus}」` }
+      const box = boxOfGroups(d, (g) => g.origin === focus)
+      return box ? { box, name: displayName(doc.tree, f) } : { error: `「${displayName(doc.tree, f)}」生成的面现在都不在了（被后面的特征盖掉或切掉了），框不出来：换一个特征，或者用 at 回滚到它那一步看` }
+    }
+    if ("part" in focus) {
+      const k = d.parts?.findIndex((p) => p.name === focus.part) ?? -1
+      if (k >= 0) return { box: boxOfGroups(d, (g) => g.part === k)!, name: focus.part }
+      const ref = d.refs?.find((r) => r.name === focus.part || r.id === focus.part)
+      if (ref) return { box: meshBox(ref.mesh.vertices), name: ref.name }
+      const names = [...(d.parts ?? []).map((p) => p.name), ...(d.refs ?? []).map((r) => r.name)]
+      return { error: `没有叫「${focus.part}」的零件或参考体${names.length ? `：现在有 ${names.join("、")}` : ""}` }
+    }
+    const hashes = await this.opts.kernel.locate("face", focus.faces)
+    if (!hashes?.length) return { error: `选择器什么都没选中：${JSON.stringify(focus.faces)}` }
+    const set = new Set(hashes)
+    const box = boxOfGroups(d, (g) => set.has(g.hash))
+    return box ? { box, name: `${hashes.length} 个面` } : { error: "选中的面不在显示的这一步里（用了 at 时，focus.faces 按最新一步选）" }
   }
 
   private async show(doc: Doc, input: Record<string, unknown>): Promise<CommandResult> {
@@ -894,9 +994,31 @@ function pickResult(answer: PickAnswer): CommandResult {
 }
 
 export function measureText(res: MeasureResult) {
-  const items = res.items.map((i, k) => `${res.items.length > 1 ? (k ? "B" : "A") + "：" : ""}${i.kind === "face" ? "面" : "边"} · ${i.what} · ${i.facts.join("，")}`)
+  const KIND = { face: "面", edge: "边", feature: "特征", part: "零件" } as const
+  const items = res.items.map((i, k) => `${res.items.length > 1 ? (k ? "B" : "A") + "：" : ""}${KIND[i.kind]} · ${i.what} · ${i.facts.join("，")}`)
   const between = res.between.map((b) => `${b.name}：${b.value}`)
   return [...items, ...between].join("\n")
+}
+
+const round2 = (x: number) => Math.round(x * 100) / 100
+
+/** Bounding box of a flat vertex array. */
+function meshBox(v: Float32Array): Box {
+  const lo: [number, number, number] = [Infinity, Infinity, Infinity]
+  const hi: [number, number, number] = [-Infinity, -Infinity, -Infinity]
+  for (let i = 0; i < v.length; i += 3)
+    for (let a = 0; a < 3; a++) {
+      lo[a] = Math.min(lo[a], v[i + a])
+      hi[a] = Math.max(hi[a], v[i + a])
+    }
+  return [lo, hi]
+}
+
+/** All reference bodies together (when there is no solid yet). */
+function refsBox(d: DisplayData): Box | null {
+  if (!d.refs?.length) return null
+  const boxes = d.refs.map((r) => meshBox(r.mesh.vertices))
+  return [[0, 1, 2].map((a) => Math.min(...boxes.map((b) => b[0][a]))), [0, 1, 2].map((a) => Math.max(...boxes.map((b) => b[1][a])))] as Box
 }
 
 /** A file an `import` names, relative to the part's folder (or absolute). */
