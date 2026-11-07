@@ -85,7 +85,7 @@ export function DrawingSheet({ studio, title }: { studio: Studio; title: string 
     isoScale = Math.min(s, room[0] / Math.max(1e-9, w(isoView)), room[1] / Math.max(1e-9, h(isoView))) * 0.9
     at.iso = [x0 + w(f) * s + GAP, y0 + h(f) * s + GAP]
   }
-  const no = `FT-${hash(JSON.stringify(studio.tree)).slice(0, 6).toUpperCase()}`
+  const no = `AR-${hash(JSON.stringify(studio.tree)).slice(0, 6).toUpperCase()}`
 
   const exportSvg = () => {
     if (!svg.current) return

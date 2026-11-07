@@ -60,7 +60,7 @@ ssh jim-server 'ln -sfn /srv/arbor/releases/<sha7> /srv/arbor/current'
 服务器上的 Caddy 配置（`/etc/caddy/Caddyfile`）：页面先找预渲染的 `{path}/index.html`，没有再回落到 `index.html`；带哈希的资源长期缓存；模型文件名不带哈希，重新烘焙后最多缓存 1 小时；页面本身不缓存（`header` 在 `try_files` 改写路径之前执行，所以按「不是 assets / models」匹配，而不是按 `/index.html`）。
 
 ```caddyfile
-arbor.linjiejim.com {
+arbor.linjiejim.com, featuretree.linjiejim.com {
 	import logging
 	# No text/event-stream here: the studio chat streams and must not be buffered.
 	encode {
@@ -97,6 +97,26 @@ arbor.linjiejim.com {
 		}
 	}
 }
+```
+
+### 旧域名 featuretree.linjiejim.com
+
+2026-11-08 项目从 FeatureTree 改名为 Arbor，站点从 `featuretree.linjiejim.com` 搬到 `arbor.linjiejim.com`。服务器目录、API 进程也一起改了名：静态站在 `/srv/arbor`，API 在 `/root/arbor/api`，进程是 `arbor-api`，密钥在 `/root/arbor/shared/.env`；分享数据已经复制过来了。
+
+新域名的 DNS 加好以前，两个域名由同一个站点块提供（上面那样）。部署工作流的健康检查先试新域名，连不上就检查旧域名。
+
+在 DNSPod 加好 `arbor` 的 A 记录（`43.161.221.68`）以后，运行一次：
+
+```bash
+ssh jim-server /root/arbor/switch-old-domain.sh
+```
+
+脚本先确认新域名已经解析到服务器、证书已经签好，然后把旧域名改成永久跳转（路径保留，旧链接和分享链接都能打开），校验通过才重载 Caddy，最后把 watchtower 的健康检查改到新域名。条件不满足时它会说明原因、什么都不改，可以放心重复运行。
+
+旧目录 `/srv/featuretree`、`/root/featuretree` 留到 2026-11-15 前后，确认没问题后删掉：
+
+```bash
+ssh jim-server 'rm -rf /srv/featuretree /root/featuretree'
 ```
 
 Caddy 默认不认识 `.glb`，不给 Content-Type 也就不压缩；上面显式设了 `model/gltf-binary` 并加进压缩列表。网格数据压缩率很高，例如一个 276 KB 的齿轮 GLB 用 zstd 传输只有 45 KB。
