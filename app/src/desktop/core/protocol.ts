@@ -42,13 +42,19 @@ export type PartNote = {
 
 export type KernelPhase = { phase: "loading" } | { phase: "ready" } | { phase: "error"; message: string }
 
-export type PartSummary = { path: string; name: string; features: number; openNotes: number; error?: string }
+export type PartSummary = { path: string; name: string; features: number; openNotes: number; error?: string; kind?: "part" | "assembly" }
 
 /** One open part as the window sees it. */
 export type DocState = {
   path: string
   name: string
+  /** With the shared parameters merged in (their notes say so). */
   tree: Tree
+  kind: "part" | "assembly"
+  /** The shared parameter file the part uses: its name and the parameters it holds. */
+  shared?: { file: string; names: string[]; error?: string }
+  /** Editing inside an assembly: the assembly file and its name. */
+  context?: { assembly: string; name: string }
   rev: number
   report: BuildReport | null
   canUndo: boolean

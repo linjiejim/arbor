@@ -292,6 +292,8 @@ function feature(f: Feature, tree: Tree): string[] {
     }
     case "rib":
       return [...head, `${ref("tool", f.id)} = rib(part, ${ref("plane", f.sketch)}, ${ref("pts", f.sketch)}, ${py(f.t)}${f.flip ? ", flip=True" : ""})`, combine(f.id, "add")]
+    case "component":
+      return [...head, `# 装配里的零件 ${f.file}：装配不能导出成 build123d 代码，请分别导出每个零件`]
     case "import": {
       const v = ref("tool", f.id)
       const out = [...head, `${v} = import_step(${JSON.stringify(f.file)})  # 相对零件文件所在的文件夹`]
@@ -428,10 +430,25 @@ export function buildCode(raw: Tree, opts: { title?: string; body?: boolean } = 
   const body: string[] = []
   // After a split, body features act on the parts dict (see onParts).
   let partNames: string[] = []
+  // Material added under a new part name starts a part of its own (kernel: newPart); the first one names the body.
+  let mainName: string | undefined
+  let hasBody = false
   for (const f of tree.features) {
     ctx.where = `特征「${clip(oneLine(displayName(tree, f)))}」（${f.id}）`
     ctx.feature = f
     const out = feature(f, tree)
+    const adds = ((f.op === "extrude" || f.op === "revolve" || f.op === "sweep" || f.op === "loft") && (f.mode ?? "add") === "add") || (f.op === "import" && f.mode === "add")
+    const main = mainName ?? "主体"
+    if (adds && f.part && hasBody && !partNames.includes(f.part) && !(partNames.length === 0 && f.part === main)) {
+      const pre = partNames.length ? [] : [`parts = {${JSON.stringify(main)}: part}`]
+      if (!partNames.length) partNames = [main]
+      partNames.push(f.part)
+      const tool = out[out.length - 1].match(/^part = (tool_\w+) if part is None/)?.[1]
+      body.push(...pre, ...out.slice(0, -1), `# 新零件「${oneLine(f.part)}」：不和别的零件合并`, tool ? `parts[${JSON.stringify(f.part)}] = ${tool}` : "# （这一步没有生成工具体）", "part = Compound(list(parts.values()))", "")
+      continue
+    }
+    if (adds && !hasBody && f.part) mainName = f.part
+    if (adds) hasBody = true
     if (f.op === "split") partNames = partNames.filter((n) => n !== f.of).concat(f.parts)
     body.push(...(partNames.length && f.op !== "split" && f.op !== "sketch" ? onParts(out, f, partNames) : out), "")
   }

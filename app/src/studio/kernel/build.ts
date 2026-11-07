@@ -159,7 +159,7 @@ export type DisplayData = {
   /** One per edge: a run of points in `edges` (segment pairs). */
   edgeGroups: { start: number; count: number; hash: number; part?: number }[]
   /** After a split: the parts, with where each moves at full explode. */
-  parts?: { name: string; explode: V3; center: V3 }[]
+  parts?: { name: string; explode: V3; center: V3; hidden?: boolean }[]
   /** Reference bodies (`import`, desktop app): drawn see-through, not part of the model. */
   refs?: { id: string; name: string; mesh: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array }; edges: Float32Array | null }[]
   /** Outline of the sketch, when the shown step is a sketch. */
@@ -190,12 +190,40 @@ type Step = {
   /** After a split: the parts (`body` is their compound), and each part's face origins. */
   parts?: Part[]
   partOrigins?: string[][]
+  /** The name the first feature gave the body (`part` on the first addition), before there are parts. */
+  mainName?: string
   /** Reference bodies so far (`import` with mode reference): carried along, never merged. */
   refs?: Ref[]
 }
 
 /** A reference body: shown and measured against, not part of the model. `owned`: made by this step. */
 type Ref = { id: string; name: string; shape: AnyShape; mesh: Mesh; edges: EdgeMesh; owned: boolean }
+
+/**
+ * A component of an assembly as the host read it: a STEP file's bytes, or a part (or sub-assembly) file's
+ * tree, already merged with its shared parameters, with what it imports and its own components.
+ */
+export type ComponentSource = {
+  file: string
+  error?: string
+  bytes?: Uint8Array | null
+  tree?: Tree
+  assets?: { name: string; bytes: Uint8Array | null; error?: string }[]
+  components?: ComponentSource[]
+}
+
+/** A built component: its parts' final shapes (unnamed: a single-body part), and how many features failed. */
+type Built = { parts: { name: string | null; shape: Shape3D }[]; failed: number }
+
+/** Built components by content, shared by every kernel in the thread (switching parts doesn't rebuild them). */
+const BUILT = new Map<string, Built>()
+const MAX_BUILT = 16
+
+/** A placement in an assembly, numbers already worked out. */
+export type Placement = { rotate: { axis: "X" | "Y" | "Z"; angle: number }[]; at: V3 }
+
+/** Editing a part inside an assembly: where it sits, and the other components with where they sit. */
+export type ContextSource = { self: Placement; assembly: string; others: { name: string; source: ComponentSource; place: Placement }[] }
 
 /** A file `import` reads, as the host handed it over: parsed once per content. */
 type Asset = { hash: string; shape: AnyShape | null; error?: string }
@@ -207,7 +235,8 @@ type Thread = { r: number; major: number }
  * split moves the normal side along the normal). `owned`: made by this step
  * (else carried over, and freed by the step that made it).
  */
-type Part = { name: string; body: Shape3D; explode: V3; owned: boolean }
+/** `auto`: made by adding material under a new name (or the body that was there): explodes away from the middle. */
+type Part = { name: string; body: Shape3D; explode: V3; owned: boolean; auto?: boolean; hidden?: boolean }
 
 /** New faces smaller than this (mm²) are reported as slivers. */
 const SLIVER_AREA = 0.01
@@ -227,6 +256,43 @@ export class Kernel {
   private parsed = new Map<string, AnyShape>()
   /** Editing a part inside an assembly: the other parts, placed in this part's frame, drawn see-through (read-only). */
   private context: Ref[] = []
+  private contextKey = ""
+  /** An assembly's components as the host read them, by the file name written in the feature, and their content keys. */
+  private components = new Map<string, { source: ComponentSource; key: string }>()
+  private componentsGiven = false
+
+  /** The host hands over what an assembly's `component` features read. Call before `rebuild`. */
+  setComponents(list: ComponentSource[]) {
+    this.componentsGiven = true
+    this.components = new Map(list.map((c) => [c.file, { source: c, key: componentKey(c) }]))
+  }
+
+  /**
+   * Editing a part inside an assembly: build the other components (cached) and place them in this part's
+   * frame as see-through, read-only reference bodies. Null leaves the assembly.
+   */
+  setContext(ctx: ContextSource | null) {
+    const key = ctx ? JSON.stringify([ctx.self, ctx.others.map((o) => [o.name, componentKey(o.source), o.place])]) : ""
+    if (key === this.contextKey) return
+    this.context.forEach((r) => r.shape.delete())
+    this.context = []
+    this.contextKey = key
+    if (!ctx) return
+    for (const o of ctx.others) {
+      let built: Built
+      try {
+        built = buildComponent(o.source)
+      } catch {
+        continue
+      }
+      for (const p of built.parts) {
+        const shape = unplace(place(p.shape.clone(), o.place), ctx.self)
+        const name = p.name && built.parts.length > 1 ? `${o.name}/${p.name}` : o.name
+        this.context.push({ id: name, name, shape, mesh: meshShape(shape), edges: meshEdges(shape), owned: true })
+      }
+    }
+  }
+
 
   /**
    * The host (the desktop app) hands over the files `import` features read: the bytes, or why it
@@ -293,7 +359,12 @@ export class Kernel {
     let failed = paramError !== undefined
     for (let i = 0; i < tree.features.length; i++) {
       const f = tree.features[i]
-      key += "\n" + JSON.stringify(f) + (off.has(f.id) ? "\noff" : "") + (f.op === "import" ? `\n${this.assets.get(f.file)?.hash ?? "-"}` : "")
+      key +=
+        "\n" +
+        JSON.stringify(f) +
+        (off.has(f.id) ? "\noff" : "") +
+        (f.op === "import" ? `\n${this.assets.get(f.file)?.hash ?? "-"}` : "") +
+        (f.op === "component" ? `\n${this.components.get(f.file)?.key ?? "-"}` : "")
       const cached = this.steps[i]
       if (cached && cached.key === key) {
         if (cached.result.state === "error" || cached.result.state === "skipped") failed = true
@@ -325,7 +396,7 @@ export class Kernel {
       lastOk,
       body: last?.body ? stats(last.body) : null,
       checks: tree.checks?.length && last?.body ? runChecks(last.body, last.origins, tree.checks, this.scope, this.checkBodies(last)) : undefined,
-      refs: last?.refs?.length ? last.refs.map((r) => ({ id: r.id, name: r.name, size: sizeOf(r.shape) })) : undefined,
+      refs: last?.refs?.length || this.context.length ? [...(last?.refs ?? []), ...this.context].map((r) => ({ id: r.id, name: r.name, size: sizeOf(r.shape) })) : undefined,
       parts: last?.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, volume: r2(measureShapeVolumeProperties(p.body).volume), size: stats(p.body).size })) : undefined,
       ms: performance.now() - t0,
     }
@@ -374,6 +445,7 @@ export class Kernel {
         // Which part each face and edge belongs to, for colouring, hiding and exploding parts.
         const faceToPart = new Map<number, number>()
         const edgeToPart = new Map<number, number>()
+        const auto = autoExplode(body.parts)
         out.parts = body.parts.map((p, k) => {
           const fs = facesOf(p.body)
           const es = edgesOf(p.body)
@@ -382,14 +454,15 @@ export class Kernel {
           fs.forEach((f) => f.delete())
           es.forEach((e) => e.delete())
           const [a, b] = p.body.boundingBox.bounds as [V3, V3]
-          return { name: p.name, explode: p.explode, center: mul(add(a, b), 0.5) }
+          return { name: p.name, explode: p.auto ? add(p.explode, auto[k]) : p.explode, center: mul(add(a, b), 0.5), hidden: p.hidden }
         })
         out.groups = out.groups.map((g) => ({ ...g, part: faceToPart.get(g.hash) }))
         out.edgeGroups = out.edgeGroups.map((g) => ({ ...g, part: edgeToPart.get(g.hash) }))
       }
     }
-    const refs = (body ?? step).refs
-    if (refs?.length) {
+    // The assembly around a part being edited in context draws like reference bodies.
+    const refs = [...((body ?? step)?.refs ?? []), ...this.context]
+    if (refs.length) {
       out.refs = refs.map((r) => ({
         id: r.id,
         name: r.name,
@@ -796,12 +869,14 @@ export class Kernel {
     this.disposeFrom(0)
     for (const shape of this.parsed.values()) shape.delete()
     this.parsed.clear()
+    this.context.forEach((r) => r.shape.delete())
+    this.context = []
   }
 
   // ---------------------------------------------------------------- internals
 
   /** Last step before `i` that produced a body (ok state). */
-  private lastBuilt(i: number): Step | null {
+  lastBuilt(i: number): Step | null {
     for (let k = Math.min(i, this.steps.length) - 1; k >= 0; k--) if (this.steps[k].result.state === "ok") return this.steps[k]
     return null
   }
@@ -830,6 +905,7 @@ export class Kernel {
       edges: prev?.edges ?? null,
       parts: prev?.parts?.map((p) => ({ ...p, owned: false })),
       partOrigins: prev?.partOrigins,
+      mainName: prev?.mainName,
       refs: prev?.refs?.map((r) => ({ ...r, owned: false })),
     }
   }
@@ -845,12 +921,26 @@ export class Kernel {
     try {
       const dup = tree.features.findIndex((x) => x.id === f.id)
       if (tree.features[dup] !== f) throw new InputError(`特征 id「${f.id}」重复了`)
+      const part = partOf(f, tree)
+      const g = part !== f.part ? ({ ...f, part } as Feature) : f
+      const isNew = startsPart(g, prev)
+      if (!isNew && g.part && BODY_OPS.has(f.op) && prev?.body && !(prev.parts && prev.parts.length > 1) && g.part !== (prev.mainName ?? "主体"))
+        throw new InputError(`没有叫「${g.part}」的零件：现在只有一个实体${prev.mainName ? `「${prev.mainName}」` : ""}。要新建零件，就在加料（拉伸、旋转、扫掠、放样）时写这个名字`)
+      const assembly = tree.features.some((x) => x.op === "component")
+      if (assembly && f.op !== "component") throw new InputError("装配里只能放零件（component）。要改零件的形状，用 open_part 打开它的文件")
       const out =
         f.op === "split"
           ? this.split(f, prev)
-          : prev?.parts && prev.parts.length > 1 && (BODY_OPS.has(f.op) || (f.op === "import" && (f.mode ?? "reference") !== "reference"))
-            ? this.onParts(f, prev, prev.parts, warnings)
-            : this.apply(f, prev, warnings)
+          : f.op === "component"
+            ? this.component(f, prev, warnings)
+            : isNew
+            ? this.newPart(g, prev!, warnings)
+            : prev?.parts && prev.parts.length > 1 && (BODY_OPS.has(f.op) || (f.op === "import" && (f.mode ?? "reference") !== "reference"))
+              ? this.onParts(g, prev, prev.parts, warnings)
+              : this.apply(f, prev, warnings)
+      // The first addition may name the body: it is that part until a second one comes.
+      if (!prev?.body && g.part && addsMaterial(g)) step.mainName = g.part
+      if (f.op === "component" && !prev?.body && !out.parts) step.mainName = out.summary.match(/^零件「(.+?)」/)?.[1]
       if (out.parts) step.parts = out.parts
       if (out.ref) step.refs = [...(step.refs ?? []), { id: f.id, name: displayName(tree, f), shape: out.ref, mesh: meshShape(out.ref as Shape3D), edges: meshEdges(out.ref as Shape3D), owned: true }]
       Object.assign(step.result, { summary: out.summary, selected: out.selected })
@@ -1321,6 +1411,10 @@ export class Kernel {
         const sources = f.features.flatMap((id) => this.toolsOf(id))
         return this.copyTools(body, sources, [(s) => s.mirror(f.plane, origin)], `镜像 ${f.features.length} 个特征 · ${label}`, warnings)
       }
+      case "split":
+      case "component":
+        // Routed by `run` (they change the parts, not one body).
+        throw new InputError(`${OP_NAMES[f.op]}不能用在这里`)
     }
   }
 
@@ -1368,6 +1462,65 @@ export class Kernel {
     ]
     const body = compoundOf(next.map((p) => p.body))
     return { body, parts: next, geom: { op: "sketch", plane: frameOf(plane) }, summary: `拆成 ${back}（V=${fmt(vl)}）、${front}（V=${fmt(vu)}）` }
+  }
+
+  /** An assembly's component: the part file's final shape (built in a kernel of its own, cached), placed. */
+  private component(f: Extract<Feature, { op: "component" }>, prev: Step | null, warnings: string[]): ApplyOut {
+    const n = (v: number | string) => num(v, this.scope)
+    const got = this.components.get(f.file)
+    if (!got) throw new InputError(this.componentsGiven ? `没有读到「${f.file}」` : "装配只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
+    const built = buildComponent(got.source)
+    const base = f.name ?? f.file.split(/[\\/]/).pop()!.replace(/\.(arbor-asm\.json|arbor\.json|json|step|stp)$/i, "")
+    if (built.failed) warnings.push(`零件「${base}」有 ${built.failed} 个特征失败，用的是失败前的形状`)
+    const placement: Placement = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: n(r.angle) })), at: (f.at ?? [0, 0, 0]).map(n) as V3 }
+    const added: Part[] = built.parts.map((p) => ({
+      name: p.name && built.parts.length > 1 ? `${base}/${p.name}` : base,
+      body: place(p.shape.clone(), placement),
+      explode: [0, 0, 0],
+      owned: true,
+      auto: true,
+      hidden: f.hidden,
+    }))
+    const before: Part[] = !prev?.body ? [] : prev.parts && prev.parts.length > 1 ? prev.parts.map((p) => ({ ...p, owned: false })) : [{ name: prev.mainName ?? "主体", body: prev.body, explode: [0, 0, 0], owned: false, auto: true }]
+    for (const a of added) {
+      if (before.some((p) => p.name === a.name)) {
+        added.forEach((x) => x.body.delete())
+        throw new InputError(`零件名「${a.name}」重复了：给 component 写不同的 name`)
+      }
+      for (const p of before) {
+        const r = relation(a.body, p.body, true)
+        if (r.overlap > 1e-6) warnings.push(`「${a.name}」和「${p.name}」重叠 ${fmt(r.overlap)} mm³`)
+      }
+    }
+    const parts = [...before, ...added]
+    const summary = `零件「${base}」← ${f.file} · ${sizeOf(added.length === 1 ? added[0].body : compoundOf(added.map((a) => a.body))).map(fmt).join(" × ")}`
+    if (parts.length === 1) return { body: parts[0].body, summary }
+    return { body: compoundOf(parts.map((p) => p.body)), parts, summary }
+  }
+
+  /**
+   * Material added under a part name that doesn't exist yet: the tool body alone becomes a new part,
+   * not merged with anything. The body that was there becomes a part too (its first name, or 「主体」).
+   */
+  private newPart(f: Feature, prev: Step, warnings: string[]): ApplyOut {
+    const name = f.part!
+    if ("until" in f && f.until) throw new InputError(`新建零件「${name}」时不能用 until：新零件不和别的料合并，没有「碰到为止」。写 distance`)
+    const alone: Step = { ...prev, body: null, origins: [], parts: undefined, partOrigins: undefined }
+    const w: string[] = []
+    const out = this.apply(f, alone, w)
+    warnings.push(...w.filter((x) => !/不相连的实体/.test(x)))
+    if (!out.body) throw new InputError("这一步没有生成实体")
+    const before: Part[] =
+      prev.parts && prev.parts.length > 1
+        ? prev.parts.map((p) => ({ ...p, owned: false }))
+        : [{ name: prev.mainName ?? "主体", body: prev.body!, explode: [0, 0, 0], owned: false, auto: true }]
+    for (const p of before) {
+      const r = relation(out.body, p.body, true)
+      if (r.overlap > 1e-6) warnings.push(`新零件「${name}」和「${p.name}」重叠 ${fmt(r.overlap)} mm³`)
+    }
+    const parts: Part[] = [...before, { name, body: out.body, explode: [0, 0, 0], owned: true, auto: true }]
+    const named = prev.parts && prev.parts.length > 1 ? "" : prev.mainName ? "" : "；原来的实体叫作「主体」"
+    return { ...out, body: compoundOf(parts.map((p) => p.body)), parts, summary: `${out.summary} · 新零件「${name}」${named}` }
   }
 
   /**
@@ -1435,6 +1588,121 @@ export class Kernel {
     }
     return { body: cur, tools, summary }
   }
+}
+
+/** What a component's built shape depends on: its tree, the bytes it reads, its own components. */
+function componentKey(c: ComponentSource): string {
+  if (c.error) return `error:${c.error}`
+  if (c.bytes !== undefined) return `step:${c.bytes ? contentHash(c.bytes) : "missing"}`
+  return JSON.stringify([c.tree, (c.assets ?? []).map((a) => [a.name, a.bytes ? contentHash(a.bytes) : a.error]), (c.components ?? []).map(componentKey)])
+}
+
+/** Build a component (a part file in a kernel of its own, or a STEP file), or take it from the cache. */
+function buildComponent(src: ComponentSource): Built {
+  const key = componentKey(src)
+  const hit = BUILT.get(key)
+  if (hit) {
+    BUILT.delete(key)
+    BUILT.set(key, hit)
+    return hit
+  }
+  if (src.error) throw new InputError(src.error)
+  let built: Built
+  if (src.bytes !== undefined) {
+    if (!src.bytes) throw new InputError(`读不到「${src.file}」`)
+    const shape = readStep(src.bytes) as Shape3D
+    built = { parts: [{ name: null, shape }], failed: 0 }
+  } else {
+    const sub = new Kernel()
+    try {
+      sub.setAssets(src.assets ?? [])
+      sub.setComponents(src.components ?? [])
+      const rep = sub.rebuild(src.tree ?? EMPTY_TREE)
+      const last = sub.lastBuilt(Infinity)
+      if (!last?.body) {
+        const err = rep.paramError ?? rep.features.find((x) => x.state === "error")?.message
+        throw new InputError(`「${src.file}」一步都没有建成${err ? `：${err}` : ""}`)
+      }
+      const failed = rep.features.filter((x) => x.state === "error").length
+      const parts = last.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, shape: p.body.clone() })) : [{ name: null, shape: last.body.clone() }]
+      built = { parts, failed }
+    } finally {
+      sub.dispose()
+    }
+  }
+  BUILT.set(key, built)
+  for (const [k, b] of BUILT) {
+    if (BUILT.size <= MAX_BUILT) break
+    b.parts.forEach((p) => p.shape.delete())
+    BUILT.delete(k)
+  }
+  return built
+}
+
+/** Rotate (in order, about the origin) then move: a component's place in its assembly. */
+function place<T extends AnyShape>(shape: T, p: Placement): T {
+  let s = shape as AnyShape
+  for (const r of p.rotate) s = s.rotate(r.angle, [0, 0, 0], AXIS[r.axis])
+  if (p.at.some((x) => x !== 0)) s = s.translate(p.at)
+  return s as T
+}
+
+/** The inverse of `place`: from the assembly back into the part's own frame. */
+function unplace<T extends AnyShape>(shape: T, p: Placement): T {
+  let s = shape as AnyShape
+  if (p.at.some((x) => x !== 0)) s = s.translate(mul(p.at, -1))
+  for (const r of [...p.rotate].reverse()) s = s.rotate(-r.angle, [0, 0, 0], AXIS[r.axis])
+  return s as T
+}
+
+/**
+ * Where parts that weren't cut apart move at full explode: the biggest of them stays, the others move
+ * away from its middle by 0.6 of the whole's size along that direction (at least 15 mm), as the
+ * upper part of a split moves off along the cut while the lower one stays.
+ */
+function autoExplode(parts: Part[]): V3[] {
+  const boxes = parts.map((p) => p.body.boundingBox.bounds as [V3, V3])
+  const lo: V3 = [0, 1, 2].map((a) => Math.min(...boxes.map((b) => b[0][a]))) as V3
+  const hi: V3 = [0, 1, 2].map((a) => Math.max(...boxes.map((b) => b[1][a]))) as V3
+  const size = sub(hi, lo)
+  const autos = parts.flatMap((p, k) => (p.auto ? [k] : []))
+  if (!autos.length) return parts.map(() => [0, 0, 0])
+  const vol = (k: number) => measureShapeVolumeProperties(parts[k].body).volume
+  const anchor = autos.reduce((a, b) => (vol(b) > vol(a) ? b : a))
+  const centre = (k: number) => mul(add(boxes[k][0], boxes[k][1]), 0.5)
+  return parts.map((p, k) => {
+    if (!p.auto || k === anchor) return [0, 0, 0]
+    let d = sub(centre(k), centre(anchor))
+    let l = Math.hypot(...d)
+    if (l < 1e-6) {
+      d = [0, 0, 1]
+      l = 1
+    }
+    const u = mul(d, 1 / l)
+    const across = Math.abs(dot(size, u.map(Math.abs) as V3))
+    return mul(u, Math.max(15, 0.6 * across))
+  })
+}
+
+/** Features that add material through a tool body (so can start a part). */
+function addsMaterial(f: Feature) {
+  if (f.op === "extrude" || f.op === "revolve" || f.op === "sweep" || f.op === "loft") return (f.mode ?? "add") === "add"
+  return f.op === "import" && f.mode === "add"
+}
+
+/** Does `f` add material under a part name the model doesn't have yet (with a body already there)? */
+function startsPart(f: Feature, prev: Step | null) {
+  if (!f.part || !addsMaterial(f) || !prev?.body) return false
+  if (prev.parts && prev.parts.length > 1) return !prev.parts.some((p) => p.name === f.part)
+  return f.part !== (prev.mainName ?? "主体")
+}
+
+/** A pattern or mirror of features that all went to one part goes to that part too. */
+function partOf(f: Feature, tree: Tree): string | undefined {
+  if (f.part || !((f.op === "linear_pattern" || f.op === "circular_pattern" || f.op === "mirror") && f.features?.length)) return f.part
+  const parts = new Set(f.features.map((id) => tree.features.find((x) => x.id === id)?.part))
+  const [only] = parts
+  return parts.size === 1 && only ? only : undefined
 }
 
 /** A sketch's closed regions, for features that need an area. */

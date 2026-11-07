@@ -9,6 +9,8 @@ import { Check, DESKTOP_CHECKS, EdgeSelector, FaceSelector, Feature, Num, type F
  */
 
 const OP_DOCS: Record<FeatureOp, string> = {
+  component:
+    "装配里放一个零件：file 写零件文件（.arbor.json）、子装配（.arbor-asm.json）或外购件（.step），name 是它在装配里的名字，用 rotate、at 摆到位置（先旋转后平移）。只能用在装配文件（.arbor-asm.json）里；要改零件的形状，用 open_part 打开它的文件（加 context 写装配文件，就能看着其他零件改）。",
   sketch: "在基准面（或贴在某个平面上）画一个闭合草图，可以由多个图形组合，cut=true 的图形挖掉前面的图形；图形也可以是文字（刻字、凸字）。草图本身不改变实体。",
   extrude: "把草图沿法向拉伸成实体：mode=add 加料、mode=cut 切除；direction=both 两侧对称（distance 是两侧加起来的总长）；through=true 切除贯穿；until 成形到下一面或某个面（柱子要长到上面的板时用 until: \"next\"，不要自己算距离）；thin 薄壁（等厚的壁，开放的线 path 也能用）；draft 拔模角（锥形凸台、带斜度的槽）。",
   revolve: "把草图绕过原点的一根坐标轴旋转成回转体。轮廓只能在轴的一侧（可以贴着轴）。",
@@ -29,7 +31,7 @@ const OP_DOCS: Record<FeatureOp, string> = {
 }
 
 /** Ops only the desktop app (Arbor) runs: they read files next to the part. Not offered to the site's assistant. */
-export const DESKTOP_OPS = new Set<FeatureOp>(["import"])
+export const DESKTOP_OPS = new Set<FeatureOp>(["import", "component"])
 
 /** The site assistant's check items: without the desktop-only kinds. */
 const WebCheck = z.discriminatedUnion(
@@ -64,11 +66,26 @@ const featureTools = Object.fromEntries(
   }),
 ) as Record<FeatureOp, ReturnType<typeof tool>>
 
-const { import: importTool, ...webFeatureTools } = featureTools
+const { import: importTool, component: componentTool, ...webFeatureTools } = featureTools
 
 /** Tools of the desktop app's agents on top of STUDIO_TOOLS (see DESKTOP_OPS); `check` replaces the site's with every kind. */
 export const DESKTOP_TOOLS = {
   import: importTool,
+  component: componentTool,
+  set_params: tool({
+    description:
+      "新建、修改或删除命名参数。值可以是数字或引用其他参数的表达式（如 \"L-2*t\"）。关键尺寸都应该做成参数，特征里用参数名引用。零件用了共享参数文件（share_params）时，共享参数文件里已有的名字会写回那个文件；shared: true 把这次 set 的参数都写进共享文件。",
+    inputSchema: z.object({
+      set: z.record(z.string(), Num).optional().describe("要新建或修改的参数"),
+      remove: z.array(z.string()).optional().describe("要删除的参数名"),
+      notes: z
+        .record(z.string(), z.string())
+        .optional()
+        .describe('参数说明，给学习者看：每个新参数一句短中文，说清是什么尺寸、沿哪个方向，如 { "L": "总长，沿 X", "t": "壁厚" }'),
+      shared: z.boolean().optional().describe("写进共享参数文件（零件要先用 share_params 指定共享参数文件）"),
+    }),
+    toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
+  }),
   check: checkTool(Check),
 } satisfies ToolSet
 

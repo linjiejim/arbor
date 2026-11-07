@@ -38,10 +38,11 @@ const own: CommandSpec[] = [
     name: "open_part",
     audience: "both",
     description:
-      "打开一个零件文件（*.arbor.json，就是特征树 JSON），之后的命令都作用在它上面；Arbor 窗口会切到这个零件。文件不存在时要新建就设 create=true，可以用 template 从现成的特征树开始。",
+      "打开一个零件文件（*.arbor.json，就是特征树 JSON）或装配文件（*.arbor-asm.json），之后的命令都作用在它上面；Arbor 窗口会切到它。文件不存在时要新建就设 create=true，可以用 template 从现成的特征树开始。写 context（装配文件）就是在装配里改这个零件：装配里的其他零件按相对位置半透明地显示在旁边，可以 look、measure、check 它们（只读）；不写 context 再打开一次就退出。",
     input: z.object({
-      path: z.string().describe("零件文件路径，相对当前目录或绝对路径，例如 parts/box.arbor.json"),
+      path: z.string().describe("零件文件路径，相对当前目录或绝对路径，例如 parts/box.arbor.json；装配用 .arbor-asm.json 结尾"),
       create: z.boolean().optional().describe("文件不存在时新建"),
+      context: z.string().optional().describe("在这个装配（.arbor-asm.json）里改这个零件：装配里要有一个 component 的 file 是它"),
       template: z
         .enum(STARTERS.map((s) => s.id) as [string, ...string[]])
         .optional()
@@ -123,10 +124,23 @@ const own: CommandSpec[] = [
   {
     name: "export",
     audience: "both",
-    description: "导出当前零件：step / stl（实体）、py（等价的 build123d 代码）、json（特征树）。",
+    description:
+      "导出当前零件或装配：step（实体；多个零件时一个文件里多个带名字的零件）/ stl（多个零件时打包成 zip，每个零件一个文件）、py（等价的 build123d 代码，装配不能导出）、json（特征树）、bom（零件清单 Markdown：名称、文件、数量、体积、外形）。",
     input: z.object({
       path: z.string().describe("输出文件路径，相对当前目录；扩展名决定格式，除非写了 format"),
-      format: z.enum(["step", "stl", "py", "json"]).optional(),
+      format: z.enum(["step", "stl", "py", "json", "bom"]).optional(),
+    }),
+  },
+  {
+    name: "share_params",
+    audience: "both",
+    description:
+      "让当前零件或装配用一个共享参数文件（*.params.json）：几个零件写同一个文件，就共用这些尺寸（例如笔杆内径和笔舌直径）。共享参数以文件为准；之后 set_params 改到它们时会写回这个文件，用到它的零件都会重建。move 把零件自己的参数移进共享文件；stop 停用（当前值抄回零件）。",
+    input: z.object({
+      file: z.string().optional().describe("共享参数文件，相对零件文件所在的文件夹，例如 pen.params.json"),
+      create: z.boolean().optional().describe("文件不存在时新建"),
+      move: z.array(z.string()).optional().describe("把零件自己的这些参数移进共享文件"),
+      stop: z.boolean().optional().describe("不再用共享参数文件"),
     }),
   },
   {

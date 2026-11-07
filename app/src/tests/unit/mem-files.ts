@@ -8,24 +8,38 @@ export function memFiles() {
   /** Bumped on every write: the modification time of this disk. */
   const written = new Map<string, number>()
   let clock = 0
+  // Like the real file system, `a/../b` reaches `b` when reading and writing.
+  const norm = (p: string) => {
+    const out: string[] = []
+    for (const seg of p.split("/")) {
+      if (seg === "..") out.pop()
+      else out.push(seg)
+    }
+    return out.join("/")
+  }
   const files: Files = {
-    read: async (p) => {
+    read: async (raw) => {
+      const p = norm(raw)
       const v = disk.get(p)
       return v === undefined ? null : typeof v === "string" ? v : new TextDecoder().decode(v)
     },
-    readBytes: async (p) => {
+    readBytes: async (raw) => {
+      const p = norm(raw)
       const v = disk.get(p)
       return v === undefined ? null : typeof v === "string" ? new TextEncoder().encode(v) : v
     },
-    stat: async (p) => {
+    stat: async (raw) => {
+      const p = norm(raw)
       const v = disk.get(p)
       return v === undefined ? null : { size: typeof v === "string" ? v.length : v.byteLength, mtimeMs: written.get(p) ?? 0 }
     },
-    write: async (p, d) => {
+    write: async (raw, d) => {
+      const p = norm(raw)
       disk.set(p, d)
       written.set(p, ++clock)
     },
-    watch: (p, cb) => {
+    watch: (raw, cb) => {
+      const p = norm(raw)
       watchers.set(p, cb)
       return () => watchers.delete(p)
     },

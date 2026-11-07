@@ -3,7 +3,7 @@
 // (initNodeKernel in Node).
 import { getOC } from "replicad"
 import type { Tree } from "../../studio/dsl"
-import { Kernel } from "../../studio/kernel/build"
+import { Kernel, type ComponentSource, type ContextSource } from "../../studio/kernel/build"
 import type { MeasureSpec } from "../../studio/kernel/measure"
 import type { KernelHost } from "./engine"
 import type { KernelPhase, V3 } from "./protocol"
@@ -51,6 +51,12 @@ export class DirectKernel implements KernelHost {
   }
   async setAssets(list: { name: string; bytes: Uint8Array | null; error?: string }[]) {
     this.k.setAssets(list)
+  }
+  async setComponents(list: ComponentSource[]) {
+    this.k.setComponents(list)
+  }
+  async setContext(ctx: ContextSource | null) {
+    this.k.setContext(ctx)
   }
   async exportBody(format: "step" | "stl", index?: number) {
     const blob = await this.k.exportBody(format, index)

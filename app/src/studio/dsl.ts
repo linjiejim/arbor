@@ -139,7 +139,10 @@ const Base = {
   name: z.string().optional().describe('中文显示名，例如 "底座拉伸"'),
   intent: z.string().optional().describe("一句话设计意图：为什么这样做"),
   suppressed: z.boolean().optional().describe("压缩：暂时不参与重建（学习者在特征树里设置）"),
-  part: z.string().optional().describe("拆件之后：只作用在这个零件上（零件名）。不写时切除和孔作用在碰到的所有零件上，加料要正好接上一个零件"),
+  part: z
+    .string()
+    .optional()
+    .describe("零件名：只作用在这个零件上。加料时写一个还没有的名字，就新建一个零件（不和别的料合并）。有多个零件时不写：切除和孔作用在碰到的所有零件上，加料要正好接上一个零件"),
 }
 const Mode = z.enum(["add", "cut"]).optional().describe("add = 加料（默认），cut = 切除")
 
@@ -279,6 +282,23 @@ export const Feature = z.discriminatedUnion("op", [
       .describe("依次绕过原点的坐标轴旋转，角度用度；先旋转、后平移"),
     at: Vec3.optional().describe("平移 [x, y, z]"),
   }),
+  // Desktop (Arbor) only: an assembly (*.arbor-asm.json) is a tree of these, each a part file placed in it.
+  z.object({
+    ...Base,
+    op: z.literal("component"),
+    file: z
+      .string()
+      .min(1)
+      .max(200)
+      .describe("零件文件（.arbor.json）、子装配（.arbor-asm.json）或外购件（.step），相对装配文件所在的文件夹"),
+    rotate: z
+      .array(z.object({ axis: Axis, angle: Num }))
+      .max(3)
+      .optional()
+      .describe("依次绕过原点的坐标轴旋转，角度用度；先旋转、后平移"),
+    at: Vec3.optional().describe("平移 [x, y, z]，零件自己的原点放到这里"),
+    hidden: z.boolean().optional().describe("先不显示（还在装配里，导出、核对照常）"),
+  }),
   z.object({
     ...Base,
     op: z.literal("rib"),
@@ -356,6 +376,8 @@ export const DESKTOP_CHECKS = new Set(["position", "gap"])
 export type Check = z.infer<typeof Check>
 
 export const Tree = z.object({
+  /** Desktop (Arbor): a shared parameter file (*.params.json) next to the part; its parameters win over the part's own. */
+  uses: z.string().min(1).max(200).optional(),
   params: z.record(z.string(), Num),
   /** One line per parameter for people (「总长，沿 X」); never used in calculations. */
   paramNotes: z.record(z.string(), z.string()).optional(),
@@ -385,6 +407,7 @@ export const OP_NAMES: Record<FeatureOp, string> = {
   rib: "筋",
   split: "拆件",
   import: "导入",
+  component: "零件",
 }
 
 /** Display name: the model's own name, else 「拉伸2」 style numbering. */
