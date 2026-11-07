@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>FeatureTree 改名为 Arbor</title>
+    <noscript><meta http-equiv="refresh" content="0; url=https://arbor.linjiejim.com/" /></noscript>
+    <style>
+      body { margin: 0; height: 100vh; display: grid; place-items: center; font: 15px/1.6 system-ui, sans-serif; background: #191919; color: #ececec; }
+      a { color: #7ea6ff; }
+    </style>
+  </head>
+  <body>
+    <!-- Served by the old host (featuretree.linjiejim.com) for every page: carries this browser's progress to the new host. See src/lib/moved.ts. -->
+    <p>FeatureTree 改名为 Arbor，正在带上你的学习进度去 <a id="to" href="https://arbor.linjiejim.com/">arbor.linjiejim.com</a>……</p>
+    <script>
+      ;(function () {
+        // Opened on the new host itself (someone typed the path): just go home, no loop.
+        if (location.host === "arbor.linjiejim.com") return location.replace("/")
+        var to = "https://arbor.linjiejim.com" + location.pathname + location.search
+        var keys = ["arbor:progress", "featuretree:progress", "ft-studio-v1", "ft-studio-mode", "ft-studio-panel-w", "ft-studio-shares-v1", "arbor:practice"]
+        var data = {}
+        var n = 0
+        try {
+          if (!localStorage.getItem("arbor:moved")) {
+            for (var i = 0; i < keys.length; i++) {
+              var v = localStorage.getItem(keys[i])
+              if (v === null) continue
+              // The workbench's model goes along; its undo history stays (it can be long).
+              if (keys[i] === "ft-studio-v1") {
+                try {
+                  v = JSON.stringify({ tree: JSON.parse(v).tree, history: [] })
+                } catch (e) {
+                  continue
+                }
+              }
+              data[keys[i]] = v
+              n++
+            }
+          }
+        } catch (e) {}
+        var hash = location.hash
+        if (n) {
+          var moved = "#arbor-move=" + encodeURIComponent(JSON.stringify(data))
+          if (moved.length > 1500000) {
+            delete data["ft-studio-v1"]
+            moved = "#arbor-move=" + encodeURIComponent(JSON.stringify(data))
+          }
+          hash = moved
+          try {
+            localStorage.setItem("arbor:moved", String(Date.now()))
+          } catch (e) {}
+        }
+        document.getElementById("to").href = to
+        location.replace(to + hash)
+      })()
+    </script>
+  </body>
+</html>

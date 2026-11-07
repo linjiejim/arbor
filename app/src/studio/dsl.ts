@@ -431,3 +431,8 @@ export function displayName(tree: Tree, f: Feature) {
 
 /** Features that add or remove material through a tool body (patternable). */
 export const TOOL_OPS: FeatureOp[] = ["extrude", "revolve", "hole", "sweep", "loft"]
+
+/** The name a component shows as (and its parts are called): its `name`, else the file's name without the ending. */
+export function componentName(f: { name?: string; file: string }) {
+  return f.name ?? (f.file.split(/[\\/]/).pop() ?? f.file).replace(/\.(arbor-asm\.json|arbor\.json|json|step|stp)$/i, "")
+}

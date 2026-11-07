@@ -136,16 +136,19 @@ type TourApi = {
 
 const TourContext = React.createContext<TourApi | null>(null)
 
-/** Walks the page's hints in `step` order the first time `page` is opened. */
-export function Tour({ page, children, delay = 700 }: { page: string; children: React.ReactNode; delay?: number }) {
+/**
+ * Walks the page's hints in `step` order the first time `page` is opened, once
+ * `ready` (there is something for the hints to point at: a model, an open part).
+ */
+export function Tour({ page, children, delay = 700, ready = true }: { page: string; children: React.ReactNode; delay?: number; ready?: boolean }) {
   const hints = React.useRef(new Map<number, () => boolean>())
   const [active, setActive] = React.useState<number | null>(null)
 
   React.useEffect(() => {
-    if (tourSeen(page)) return
+    if (!ready || tourSeen(page)) return
     const t = window.setTimeout(() => setActive(nextStep(hints.current.keys(), null, (s) => hints.current.get(s)?.() ?? false)), delay)
     return () => window.clearTimeout(t)
-  }, [page, delay])
+  }, [page, delay, ready])
 
   const api = React.useMemo<TourApi>(() => {
     const visible = (step: number) => hints.current.get(step)?.() ?? false

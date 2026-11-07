@@ -5,7 +5,7 @@
 import type { PickInfo } from "../../studio/annotations"
 import { executeTool, moveFeature, treeText, type KernelPort } from "../../studio/apply"
 import { toBuild123d } from "../../studio/codegen"
-import { EMPTY_TREE, Feature, Tree, displayName } from "../../studio/dsl"
+import { EMPTY_TREE, Feature, Tree, componentName, displayName } from "../../studio/dsl"
 import type { BuildReport, ComponentSource, ContextSource, DisplayData } from "../../studio/kernel/build"
 import { num, num as evalNum } from "../../studio/expr"
 import {
@@ -751,9 +751,11 @@ export class Engine {
     if (input.create) {
       const sk = projectSkeleton(root)
       if (!list?.some((e) => !e.dir && isAssemblyFile(e.name))) {
-        await files.write(sk.params, sk.paramsText)
+        // An existing parameter file is the project's: keep it, the new assembly uses it.
+        const hadParams = (await files.read(sk.params)) !== null
+        if (!hadParams) await files.write(sk.params, sk.paramsText)
         await files.write(sk.assembly, sk.assemblyText)
-        created = `新建了装配 ${baseName(sk.assembly)} 和参数文件 ${baseName(sk.params)}。`
+        created = `新建了装配 ${baseName(sk.assembly)}${hadParams ? `，用已有的参数文件 ${baseName(sk.params)}` : ` 和参数文件 ${baseName(sk.params)}`}。`
       }
     } else if (list === null) return fail(`没有这个文件夹：${root}。要新建就设 create=true。`)
     this.project = await scanProject(files, root, this.scanCache)
@@ -797,7 +799,11 @@ export class Engine {
     const taken = new Set(asm.tree.features.map((f) => f.id))
     let n = asm.tree.features.length + 1
     while (taken.has(`c${n}`)) n++
-    const res = await this.onDoc(asm, "component", { id: `c${n}`, name: label, file }, { ...ctx, part: asm.path })
+    // A second copy of the same part (or another file with the same name) gets 「名字-2」.
+    const names = new Set(asm.tree.features.flatMap((f) => (f.op === "component" ? [componentName(f)] : [])))
+    let name = label
+    for (let k = 2; names.has(name); k++) name = `${label}-${k}`
+    const res = await this.onDoc(asm, "component", { id: `c${n}`, name, file }, { ...ctx, part: asm.path })
     if (!res.ok) return res
     if (input.name !== undefined) return this.openPart({ path: besides(asm.path, file), context: asm.path }, ctx)
     await this.rescan()

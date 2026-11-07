@@ -6,7 +6,10 @@ import { LucideProvider } from "lucide-react"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/toast"
 import { App } from "./App"
+import { takeMovedFromAddress } from "./lib/moved"
 import "./index.css"
+
+takeMovedFromAddress()
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -29,7 +29,7 @@ import {
   type Shape3D,
 } from "replicad"
 import type { PickInfo } from "../annotations"
-import { displayName, EMPTY_TREE, OP_NAMES, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type Point, type SketchShape, type Tree } from "../dsl"
+import { componentName, displayName, EMPTY_TREE, OP_NAMES, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type Point, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
 import { MAX_COUNT } from "../limits"
 import { referencesOf } from "../apply"
@@ -1507,7 +1507,7 @@ export class Kernel {
     const got = this.components.get(f.file)
     if (!got) throw new InputError(this.componentsGiven ? `没有读到「${f.file}」` : "装配只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
     const built = buildComponent(got.source)
-    const base = f.name ?? f.file.split(/[\\/]/).pop()!.replace(/\.(arbor-asm\.json|arbor\.json|json|step|stp)$/i, "")
+    const base = componentName(f)
     if (!built.parts.length) {
       warnings.push(`零件「${base}」还是空的：在装配里编辑它（open_part 加 context）`)
       return { summary: `零件「${base}」← ${f.file} · 还是空的` }

@@ -11,6 +11,7 @@ import type { Check, Tree } from "@/studio/dsl"
 import { initNodeKernel } from "@/studio/kernel/node"
 import { withPinned } from "@/studio/pinned"
 import { markTourSeen, nextStep, tourPosition, tourSeen } from "@/lib/tour"
+import { MOVE_PREFIX, mergeProgress, takeMoved } from "@/lib/moved"
 import { memFiles } from "./mem-files"
 
 const AGENT: CallContext = { actor: "agent", session: "s1", cwd: "/home/jim/work" }
@@ -96,6 +97,29 @@ describe("projects in the engine", () => {
     mem.disk.set("/home/jim/work/pen/pen.params.json", JSON.stringify({ params: { L: 140 } }))
     expect((await engine.run("open_project", { path: "pen", create: true }, AGENT)).ok).toBe(true)
     expect(JSON.parse(mem.disk.get("/home/jim/work/pen/pen.params.json") as string).params.L).toBe(140)
+  })
+
+  it("create keeps a parameter file that is already there", async () => {
+    const mem = memFiles()
+    mem.disk.set("/home/jim/work/p/p.params.json", JSON.stringify({ params: { L: 140 } }))
+    mem.disk.set("/home/jim/work/p/parts/a.arbor.json", tree(1))
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files, home: HOME })
+    const r = await engine.run("open_project", { path: "p", create: true }, AGENT)
+    expect(r.text).toMatch(/用已有的参数文件 p\.params\.json/)
+    expect(JSON.parse(mem.disk.get("/home/jim/work/p/p.params.json") as string).params.L).toBe(140)
+    expect(mem.disk.has("/home/jim/work/p/p.arbor-asm.json")).toBe(true)
+  })
+
+  it("the same part added twice gets a second name, not a failed component", async () => {
+    const mem = memFiles()
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files, home: HOME })
+    await engine.run("open_project", { path: "/home/jim/work/kit", create: true }, USER)
+    mem.disk.set("/home/jim/work/kit/parts/bolt.arbor.json", JSON.stringify({ params: {}, features: [{ id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "circle", d: 6 }] }, { id: "e", op: "extrude", sketch: "s", distance: 20 }] }))
+    expect((await engine.run("add_part", { file: "/home/jim/work/kit/parts/bolt.arbor.json" }, USER)).ok).toBe(true)
+    const second = await engine.run("add_part", { file: "/home/jim/work/kit/parts/bolt.arbor.json" }, USER)
+    expect(second.ok, second.text).toBe(true)
+    const asm = JSON.parse(mem.disk.get("/home/jim/work/kit/kit.arbor-asm.json") as string)
+    expect(asm.features.map((f: { name: string }) => f.name)).toEqual(["bolt", "bolt-2"])
   })
 
   it("refuses the home folder and a missing folder without create", async () => {
@@ -202,5 +226,33 @@ describe("learning progress after the rename", () => {
     expect(store.has("featuretree:progress")).toBe(false)
     expect(JSON.parse(store.get("arbor:progress")!).done).toEqual(["1.1.1", "1.1.2"])
     vi.unstubAllGlobals()
+  })
+})
+
+describe("moving from the old host", () => {
+  const store = (init: Record<string, string> = {}) => {
+    const m = new Map(Object.entries(init))
+    return { m, s: { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) } }
+  }
+  const hand = (data: Record<string, string>) => MOVE_PREFIX + encodeURIComponent(JSON.stringify(data))
+
+  it("merges progress from both hosts and takes the rest only where this host has nothing", () => {
+    const { m, s } = store({ "arbor:progress": JSON.stringify({ done: ["1.1.2"], quiz: { a: [{ score: 1 }] } }), "ft-studio-mode": "build" })
+    const old = { "featuretree:progress": JSON.stringify({ done: ["1.1.1", "1.1.2"], last: "1.1.1", quiz: { a: [{ score: 0 }], b: [{ score: 3 }] } }), "ft-studio-mode": "teach", "ft-studio-v1": '{"tree":{"params":{},"features":[]},"history":[]}' }
+    expect(takeMoved(hand(old), s)).toBe(true)
+    const p = JSON.parse(m.get("arbor:progress")!)
+    expect(p.done.sort()).toEqual(["1.1.1", "1.1.2"])
+    expect(p.quiz.a).toHaveLength(2)
+    expect(p.quiz.b).toHaveLength(1)
+    expect(m.get("ft-studio-mode"), "this host's own setting wins").toBe("build")
+    expect(m.get("ft-studio-v1")).toContain('"features":[]')
+  })
+
+  it("ignores other fragments and survives a broken hand-over", () => {
+    const { m, s } = store()
+    expect(takeMoved("#term-datum", s)).toBe(false)
+    expect(takeMoved(MOVE_PREFIX + "%7Bbroken", s)).toBe(true)
+    expect(m.size).toBe(0)
+    expect(mergeProgress(null, null)).toBeNull()
   })
 })

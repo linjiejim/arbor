@@ -87,7 +87,7 @@ export function DesktopApp() {
   const assembly = doc?.kind === "assembly" && !doc.context
   return (
     <WordsContext.Provider value={DESKTOP_WORDS}>
-    <Tour page="desktop">
+    <Tour page="desktop" ready={Boolean(doc)}>
     <div className="flex h-dvh flex-col bg-background">
       <TitleBar snapshot={snapshot} doc={doc} pick={pick} onSetup={() => setSetupOpen(true)} sheet={sheet && Boolean(doc)} onSheet={setSheet} />
       <div className="flex min-h-0 flex-1">

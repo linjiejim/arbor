@@ -111,7 +111,13 @@ arbor.linjiejim.com, featuretree.linjiejim.com {
 ssh jim-server /root/arbor/switch-old-domain.sh
 ```
 
-脚本先确认新域名已经解析到服务器、证书已经签好，然后把旧域名改成永久跳转（路径保留，旧链接和分享链接都能打开），校验通过才重载 Caddy，最后把 watchtower 的健康检查改到新域名。条件不满足时它会说明原因、什么都不改，可以放心重复运行。
+脚本先确认新域名已经解析到服务器、证书已经签好，再改旧域名，Caddy 配置校验通过才重载，最后把 watchtower 的健康检查改到新域名。条件不满足时它会说明原因、什么都不改，可以放心重复运行。
+
+旧域名切换后：
+
+- `/api/*` 用 308 转到新域名，静态文件用 301。
+- 页面一律返回 `moved.html`（`app/public/moved.html`）。浏览器的本地存储按域名分开，所以这一页先读出这个浏览器在旧域名上的学习进度和工作台模型，放在网址片段 `#arbor-move=…` 里，打开新域名的同一个路径；新域名启动时合并进来，再把片段从地址里去掉（`src/lib/moved.ts`）。
+- 片段不会发给服务器。自己填的 DeepSeek key 和对话记录不带过去。
 
 旧目录 `/srv/featuretree`、`/root/featuretree` 留到 2026-11-15 前后，确认没问题后删掉：
 

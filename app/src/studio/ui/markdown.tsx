@@ -151,12 +151,17 @@ export function Markdown({ text, onPin, streaming = false, terms = false }: { te
   const termIds = React.useMemo(() => {
     if (!terms) return blocks.map(() => [] as string[])
     const seen = new Set<string>()
-    return blocks.map((b) =>
-      TERM_NAMES.filter((t) => !seen.has(t.id) && b.includes(t.name)).map((t) => {
+    return blocks.map((b) => {
+      // Only prose counts: a mention inside code or a link text isn't marked, so it mustn't use up the term.
+      const prose = b
+        .replace(/```[\s\S]*?(```|$)/g, " ")
+        .replace(/`[^`\n]*`/g, " ")
+        .replace(/\[[^\]]*\]\([^)]*\)/g, " ")
+      return TERM_NAMES.filter((t) => !seen.has(t.id) && prose.includes(t.name)).map((t) => {
         seen.add(t.id)
         return t.id
-      }),
-    )
+      })
+    })
   }, [blocks, terms])
   const components = React.useMemo<Components>(
     () =>

@@ -179,8 +179,16 @@ export function useStudio(shared?: Tree) {
           const d = await c.display()
           return renderViews(d, views, highlight, { pins: pinsRef.current })
         }
-        const run = await executeTool(c, treeRef.current, name, input, look)
-        if (run.tree !== treeRef.current || run.report) await commit(run.tree, run.report)
+        let run = await executeTool(c, treeRef.current, name, input, look)
+        // A practice's requirements are fixed: when the tool changed or dropped one, it is put back and
+        // the tool's result says so, measured on the tree that is actually kept.
+        const pinned = withPinned(run.tree, pinnedRef.current)
+        if (pinned !== run.tree) {
+          const report = await commit(pinned)
+          const ids = (pinnedRef.current ?? []).map((x) => x.id).join("、")
+          const note = `练习的要求（${ids}）是固定的，不能改或删，已经恢复原样。核对结果以恢复后的为准：${(report?.checks ?? []).filter((r) => (pinnedRef.current ?? []).some((p) => p.id === r.id)).map((r) => `${r.said} ${r.pass ? "✓" : `✗（要求 ${r.expected}，实际 ${r.actual}）`}`).join("；")}`
+          run = { ...run, tree: pinned, report: report ?? undefined, output: { ...run.output, text: `${run.output.text}\n${note}` } }
+        } else if (run.tree !== treeRef.current || run.report) await commit(run.tree, run.report)
         if (run.report) setCheckBaseline(Object.fromEntries((run.report.checks ?? []).map((r) => [r.id, r.pass])))
         return run
       })

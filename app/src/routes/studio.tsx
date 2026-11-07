@@ -153,7 +153,7 @@ export function StudioPage() {
   }
 
   return (
-    <Tour page="studio">
+    <Tour page="studio" ready={ready}>
     <div className="flex h-dvh flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
         <IconButton label="返回首页" onClick={() => navigate("/")}>

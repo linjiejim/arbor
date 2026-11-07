@@ -6,7 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Input } from "@/components/ui/input"
 import { notify } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
-import type { Feature } from "@/studio/dsl"
+import { componentName, type Feature } from "@/studio/dsl"
 import type { PartsView } from "@/studio/scene"
 import type { Studio } from "@/studio/use-studio"
 import { arbor } from "../bridge"
@@ -27,7 +27,7 @@ function partsOf(studio: Studio, name: string) {
 export function ComponentActions({ f, doc, studio, view, onView }: { f: Feature; doc: DocState; studio: Studio; view: PartsView; onView: (v: PartsView) => void }) {
   {
     if (f.op !== "component") return null
-    const name = f.name ?? f.file.split("/").pop() ?? f.file
+    const name = componentName(f)
     const parts = partsOf(studio, name)
     const hidden = parts.length > 0 && parts.every((k) => view.hidden.has(k))
     const reveal = "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
@@ -55,7 +55,12 @@ export function ComponentActions({ f, doc, studio, view, onView }: { f: Feature;
             size="sm"
             variant="ghost"
             className={cn("h-6 px-1.5 text-caption text-muted-foreground", reveal)}
-            onClick={() => void arbor.call("open_part", { path: besides(doc.path, f.file), context: doc.path })}
+            onClick={async () => {
+              // A sub-assembly opens as itself; a part opens inside this assembly.
+              const nested = /\.arbor-asm\.json$/i.test(f.file)
+              const r = await arbor.call("open_part", nested ? { path: besides(doc.path, f.file) } : { path: besides(doc.path, f.file), context: doc.path })
+              if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
+            }}
           >
             改
           </Button>
