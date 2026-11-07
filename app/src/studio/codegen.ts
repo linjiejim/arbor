@@ -113,7 +113,7 @@ const ref = (prefix: string, id: string) => (typeof id === "string" && ID.test(i
 const RESERVED = new Set([
   ...FUNC_NAMES,
   ...CONST_NAMES,
-  ..."math part parts joined split_plane rib on_face on_feature show_object".split(" "),
+  ..."math part parts joined split_plane rib on_face on_feature round_corners onto_band show_object".split(" "),
   ..."False None True and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield".split(
     " ",
   ),
@@ -170,11 +170,10 @@ function shape2d(s: SketchShape): string {
         const next = pts[(i + 1) % pts.length]
         if (i === pts.length - 1 && !next.via && !next.spline && JSON.stringify(a) === JSON.stringify(pts[0].to)) break
         segs.push(segment(a, next))
-        if (next.r !== undefined) rounded.push(`${xy(next.to)} R${py(next.r)}`)
+        if (next.r !== undefined) rounded.push(`(${xy(next.to)}, ${py(next.r)})`)
       }
       const face = `make_face([${segs.join(", ")}])`
-      // build123d rounds face corners afterwards (fillet on vertices); left as a note.
-      return rounded.length ? `${face}  # 拐角圆角（导出时没有画出）：${rounded.join("，")}` : face
+      return rounded.length ? `round_corners(${face}, [${rounded.join(", ")}])` : face
     }
   }
 }
@@ -296,6 +295,13 @@ function feature(f: Feature, tree: Tree): string[] {
         ]
       }
       const d = py(f.distance ?? 0)
+      if (f.onto)
+        return [
+          ...out,
+          "# 沿面等深：草图投影到面上，和面下（切除）或面上（加料）这一层求交",
+          `${ref("tool", f.id)} = extrude(${sk}, amount=1000, both=True) & onto_band(${faces(f.onto)}[0], ${d}, cut=${f.mode === "cut" ? "True" : "False"}, sketch=${sk})`,
+          combine(f.id, f.mode),
+        ]
       const opts = f.direction === "both" ? `amount=${d} / 2, both=True` : f.direction === "reverse" ? `amount=${d}, dir=-${sk}.faces()[0].normal_at()` : `amount=${d}`
       return [...out, `${ref("tool", f.id)} = extrude(${sk}, ${opts}${taper})`, combine(f.id, f.mode)]
     }
@@ -549,6 +555,32 @@ Z 轴朝上，单位毫米。选择器按语义转成 build123d 的过滤；「�
     "        if kept:",
     "            return Compound(kept)",
     '    raise ValueError("筋碰不到实体")',
+    "",
+    "",
+    "def round_corners(face, corners):",
+    '    """Round an outline\'s corners at these points: [((x, y), r), …]."""',
+    "    for (x, y), r in corners:",
+    "        face = fillet(face.vertices().sort_by_distance(Vector(x, y, 0))[0], radius=r)",
+    "    return face",
+    "",
+    "",
+    "def onto_band(face, depth, cut, sketch, big=1000):",
+    '    """The layer `depth` thick under (cut) or over (add) a planar or cylindrical face; on a cylinder, the side the sketch faces."""',
+    "    if face.geom_type == GeomType.PLANE:",
+    "        n = face.normal_at()",
+    "        return extrude(Plane(origin=face.center(), z_dir=n) * Rectangle(2 * big, 2 * big), amount=depth, dir=-n if cut else n)",
+    "    axis, r = face.axis_of_rotation, face.radius",
+    "    p = face.position_at(0.5, 0.5)",
+    "    radial = (p - axis.position) - axis.direction * (p - axis.position).dot(axis.direction)",
+    "    convex = face.normal_at(p).dot(radial) > 0",
+    "    inner, outer = (r - depth, r) if cut == convex else (r, r + depth)",
+    "    base = Plane(origin=axis.position - axis.direction * big, z_dir=axis.direction)",
+    "    up = (Align.CENTER, Align.CENTER, Align.MIN)",
+    "    band = base * (Cylinder(outer, 2 * big, align=up) - Cylinder(inner, 2 * big, align=up))",
+    "    side = (sketch.center() - axis.position) - axis.direction * (sketch.center() - axis.position).dot(axis.direction)",
+    "    if side.length < 1e-6:",
+    "        return band",
+    "    return band & (Plane(origin=axis.position, z_dir=side.normalized()) * Box(4 * big, 4 * big, 2 * big, align=up))",
     "",
     "",
     "def on_feature(items, tool):",

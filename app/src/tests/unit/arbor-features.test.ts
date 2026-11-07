@@ -162,7 +162,18 @@ describe("exports and the site assistant", () => {
     expect(code).toMatch(/Spline\(\(5, 0\), \(6, 5\), \(5, 10\)\)/)
     expect(code).toMatch(/\.rotate\(Axis\.Z, -\(180\) \/ 2\)/)
     expect(code).toMatch(/part = part & tool_x/)
-    expect(code).toMatch(/拐角圆角/)
+    expect(code).toMatch(/round_corners\(make_face\(\[[^\n]*\]\), \[\(\(5, 0\), 1\)\]\)/)
+    // An even-depth cut exports as the same intersection.
+    const onto = toBuild123d({
+      params: {},
+      features: [
+        { id: "c", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "circle", d: 20 }] },
+        { id: "cap", op: "extrude", sketch: "c", distance: 40 },
+        { id: "t", op: "sketch", on: { plane: "XZ", offset: -20 }, shapes: [{ type: "text", text: "A", size: 5 }] },
+        { id: "m", op: "extrude", sketch: "t", distance: 1, mode: "cut", onto: { kind: "cylinder" } },
+      ],
+    })
+    expect(onto).toMatch(/tool_m = extrude\(sk_t, amount=1000, both=True\) & onto_band\(.*\[0\], 1, cut=True, sketch=sk_t\)/)
   })
 
   it("keeps the new fields out of the site assistant's tools, and gives them to the desktop agents", () => {
@@ -174,5 +185,7 @@ describe("exports and the site assistant", () => {
       expect(web).not.toContain(word)
       expect(desk).toContain(word)
     }
+    // Nor in the descriptions the site's assistant reads.
+    expect(web).not.toMatch(/spline|样条|拐角倒|\{to, r\}|求交|等深/)
   })
 })

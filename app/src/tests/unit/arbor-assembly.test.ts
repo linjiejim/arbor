@@ -205,6 +205,44 @@ describe("shared parameters and assemblies", () => {
     expect(st.text).toMatch(/零件「笔杆」有 1 个特征失败，用的是失败前的形状/)
   })
 
+  it("writes shared parameters onto the file as it is now, lets own parameters use them, and stops keeping the values in use", async () => {
+    const { run, files, disk } = await penWorkspace()
+    // Someone edits the shared file; before the watcher fires, the agent sets another shared parameter.
+    await files.write("/work/pen.params.json", JSON.stringify({ params: { D: 10, L: 30 } }))
+    const set = await run("set_params", { set: { D: 12 } })
+    expect(set.ok, set.text).toBe(true)
+    expect(JSON.parse(disk.get("/work/pen.params.json") as string).params).toEqual({ D: 12, L: 30 })
+    await run("open_part", { path: "parts/cap.arbor.json" })
+    const own = await run("set_params", { set: { R: "D/2" } })
+    expect(own.ok, own.text).toBe(true)
+    const saved = JSON.parse(disk.get("/work/parts/cap.arbor.json") as string)
+    expect(saved.params).toEqual({ t: 1, R: "D/2" })
+    // An own parameter the shared file overrides: stopping keeps the shared value that was in use.
+    await run("set_params", { set: { t: 1 } })
+    disk.set("/work/parts/cap.arbor.json", JSON.stringify({ ...saved, params: { ...saved.params, D: 5 } }))
+    await files.write("/work/parts/cap.arbor.json", disk.get("/work/parts/cap.arbor.json") as string)
+    await run("get_state", {})
+    const stop = await run("share_params", { stop: true })
+    expect(stop.ok, stop.text).toBe(true)
+    expect(JSON.parse(disk.get("/work/parts/cap.arbor.json") as string).params.D).toBe(12)
+  })
+
+  it("keeps a single component a named part: measured by name, hidden when asked", async () => {
+    const mem = memFiles()
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files })
+    const run = (name: string, input: unknown) => engine.run(name, input, AGENT)
+    await mem.files.write("/work/block.arbor.json", JSON.stringify({ params: {}, features: box(10, 10, 10) }))
+    await run("open_part", { path: "one.arbor-asm.json", create: true })
+    await run("component", { id: "b", name: "块", file: "block.arbor.json", hidden: true })
+    const m = await run("measure", { a: { part: "块" } })
+    expect(m.text).toMatch(/零件「块」 · 体积 1000/)
+    const k = new Kernel()
+    k.setComponents([{ file: "block.arbor.json", tree: { params: {}, features: box(10, 10, 10) } }])
+    k.rebuild({ params: {}, features: [{ id: "b", op: "component", name: "块", file: "block.arbor.json", hidden: true }] })
+    expect(k.display().parts?.[0]).toMatchObject({ name: "块", hidden: true })
+    k.dispose()
+  })
+
   it("builds a component once while only another one changes", async () => {
     const { run, touch, disk } = await penWorkspace()
     const spy = vi.spyOn(Kernel.prototype, "rebuild")

@@ -56,7 +56,14 @@ type FeatureSchema = (typeof Feature.options)[number]
 const WebSketchShape = z.discriminatedUnion(
   "type",
   SketchShape.options.map((o) =>
-    o.shape.type.value === "polyline" || o.shape.type.value === "path" ? (o as z.ZodObject).extend({ points: z.array(WebPoint).min(2).describe((o.shape as { points: z.ZodType }).points.description ?? "") }) : o,
+    o.shape.type.value === "polyline" || o.shape.type.value === "path"
+      ? (o as z.ZodObject).extend({
+          points: z
+            .array(WebPoint)
+            .min(2)
+            .describe(o.shape.type.value === "path" ? "开放的线，依次连接，不自动闭合；只能用于薄壁拉伸（thin）和筋（rib）" : "依次连接并自动闭合；{to, via} 表示三点圆弧"),
+        })
+      : o,
   ) as unknown as [(typeof SketchShape.options)[number], ...(typeof SketchShape.options)[number][]],
 )
 

@@ -410,7 +410,7 @@ export class Kernel {
       refs.set(r.id, r.shape)
       refs.set(r.name, r.shape)
     }
-    return { refs, parts: step.parts && step.parts.length > 1 ? step.parts : [] }
+    return { refs, parts: step.parts ?? [] }
   }
 
   /** Mesh + per-face status of one step (default: the last that built). */
@@ -442,7 +442,7 @@ export class Kernel {
       const bb = body.body.boundingBox.bounds as [V3, V3]
       out.bbox = [[...bb[0]], [...bb[1]]] as [V3, V3]
       out.threads = this.threadRings(this.steps.indexOf(body), body)
-      if (body.parts && body.parts.length > 1) {
+      if (body.parts && (body.parts.length > 1 || body.parts.some((p) => p.hidden))) {
         // Which part each face and edge belongs to, for colouring, hiding and exploding parts.
         const faceToPart = new Map<number, number>()
         const edgeToPart = new Map<number, number>()
@@ -941,7 +941,6 @@ export class Kernel {
               : this.apply(f, prev, warnings)
       // The first addition may name the body: it is that part until a second one comes.
       if (!prev?.body && g.part && addsMaterial(g)) step.mainName = g.part
-      if (f.op === "component" && !prev?.body && !out.parts) step.mainName = out.summary.match(/^零件「(.+?)」/)?.[1]
       if (out.parts) step.parts = out.parts
       if (out.ref) step.refs = [...(step.refs ?? []), { id: f.id, name: displayName(tree, f), shape: out.ref, mesh: meshShape(out.ref as Shape3D), edges: meshEdges(out.ref as Shape3D), owned: true }]
       Object.assign(step.result, { summary: out.summary, selected: out.selected })
@@ -1519,7 +1518,7 @@ export class Kernel {
       auto: true,
       hidden: f.hidden,
     }))
-    const before: Part[] = !prev?.body ? [] : prev.parts && prev.parts.length > 1 ? prev.parts.map((p) => ({ ...p, owned: false })) : [{ name: prev.mainName ?? "主体", body: prev.body, explode: [0, 0, 0], owned: false, auto: true }]
+    const before: Part[] = !prev?.body ? [] : prev.parts?.length ? prev.parts.map((p) => ({ ...p, owned: false })) : [{ name: prev.mainName ?? "主体", body: prev.body, explode: [0, 0, 0], owned: false, auto: true }]
     for (const a of added) {
       if (before.some((p) => p.name === a.name)) {
         added.forEach((x) => x.body.delete())
@@ -1531,9 +1530,11 @@ export class Kernel {
       }
     }
     const parts = [...before, ...added]
-    const summary = `零件「${base}」← ${f.file} · ${sizeOf(added.length === 1 ? added[0].body : compoundOf(added.map((a) => a.body))).map(fmt).join(" × ")}`
-    if (parts.length === 1) return { body: parts[0].body, summary }
-    return { body: compoundOf(parts.map((p) => p.body)), parts, summary }
+    const all = added.length === 1 ? null : compoundOf(added.map((a) => a.body))
+    const size = sizeOf(all ?? added[0].body)
+    all?.delete()
+    // Even a single component stays a named part (measure, checks and hiding go by its name).
+    return { body: compoundOf(parts.map((p) => p.body)), parts, summary: `零件「${base}」← ${f.file} · ${size.map(fmt).join(" × ")}` }
   }
 
   /**

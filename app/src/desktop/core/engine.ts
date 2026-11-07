@@ -364,9 +364,10 @@ export class Engine {
     }
     if (STUDIO_TOOL_NAMES.has(name)) {
       await this.ensureKernel(doc)
-      const before = doc.tree
-      const run = await executeTool(this.port(doc), doc.tree, name, input)
-      if (run.tree !== before) await this.adopt(doc, run.tree, ctx.actor, { report: run.report })
+      // With shared parameters merged in, so expressions that use them check out; saved without them.
+      const before = this.effective(doc, doc.tree)
+      const run = await executeTool(this.port(doc), before, name, input)
+      if (run.tree !== before) await this.adopt(doc, this.unshare(doc, run.tree), ctx.actor, { report: run.report })
       else if (run.report) doc.report = run.report
       return { ok: run.output.ok, text: run.output.text }
     }
@@ -476,23 +477,30 @@ export class Engine {
     const sharedNotes = pick(notes, true)
     const lines: string[] = []
     if (sh && (Object.keys(sharedSet).length || sharedRemove.length || Object.keys(sharedNotes).length)) {
-      const params = { ...sh.params, ...sharedSet }
-      for (const k of sharedRemove) delete params[k]
-      const pnotes = { ...sh.notes, ...sharedNotes }
-      for (const k of sharedRemove) delete pnotes[k]
+      const apply = (cur: { params: Shared["params"]; notes: Record<string, string> }) => {
+        const params = { ...cur.params, ...sharedSet }
+        const pnotes = { ...cur.notes, ...sharedNotes }
+        for (const k of sharedRemove) {
+          delete params[k]
+          delete pnotes[k]
+        }
+        return { params, notes: pnotes }
+      }
       try {
-        resolveParams({ ...doc.tree.params, ...params })
+        resolveParams({ ...doc.tree.params, ...apply({ params: sh.params, notes: sh.notes }).params })
       } catch (e) {
         return fail(`参数不对：${(e as Error).message}`)
       }
-      const users = await this.writeShared(sh, params, pnotes, ctx)
+      const users = await this.writeShared(sh, apply, ctx)
       const what = [...Object.entries(sharedSet).map(([k, v]) => `${k} = ${v}`), ...sharedRemove.map((k) => `删除 ${k}`)].join("，") || "参数说明"
       lines.push(`共享参数（${sh.file}）：${what}。${users.length > 1 ? `用到它的 ${users.map((d) => d.name).join("、")} 都已重建。` : ""}`)
     }
     const own = { set: pick(set, false), remove: remove.filter((k) => !sharedRemove.includes(k)), notes: pick(notes, false) }
     if (Object.keys(own.set).length || own.remove.length || Object.keys(own.notes).length) {
-      const run = await executeTool(this.port(doc), doc.tree, "set_params", own)
-      if (run.tree !== doc.tree) await this.adopt(doc, run.tree, ctx.actor, { report: run.report })
+      // Checked against the merged table (own parameters may use shared ones), saved without the shared ones.
+      const eff = this.effective(doc, doc.tree)
+      const run = await executeTool(this.port(doc), eff, "set_params", own)
+      if (run.tree !== eff) await this.adopt(doc, this.unshare(doc, run.tree), ctx.actor, { report: run.report })
       lines.push(run.output.text)
     } else lines.push(treeText(doc.tree, doc.report!))
     const shadow = shadowed(doc.tree, doc.shared)
@@ -500,8 +508,14 @@ export class Engine {
     return { ok: this.allOk(doc), text: lines.join("\n") }
   }
 
-  /** Write a shared parameter file and rebuild every open part that uses it. Returns those parts. */
-  private async writeShared(sh: Shared, params: Shared["params"], notes: Record<string, string>, ctx: CallContext) {
+  /**
+   * Change a shared parameter file and rebuild every open part that uses it. The change applies to the
+   * file as it is on disk now (someone may have edited it since it was loaded). Returns those parts.
+   */
+  private async writeShared(sh: Shared, change: (cur: { params: Shared["params"]; notes: Record<string, string> }) => { params: Shared["params"]; notes: Record<string, string> }, ctx: CallContext) {
+    const latest = await loadShared(this.opts.files, sh.path, sh.path.split(/[\\/]/).pop()!)
+    if (latest.error && latest.text !== null) throw new InputError(latest.error)
+    const { params, notes } = change(latest.text === null ? { params: {}, notes: {} } : { params: latest.params, notes: latest.notes })
     const text = sharedText({ params, notes })
     this.sharedWritten.set(sh.path, text)
     await this.opts.files.write(sh.path, text)
@@ -527,8 +541,10 @@ export class Engine {
       if (!doc.tree.uses) return { ok: true, text: "这个零件本来就没有用共享参数文件。" }
       const { uses: _drop, ...rest } = doc.tree
       void _drop
-      const kept = { ...(doc.shared?.params ?? {}), ...doc.tree.params }
-      await this.adopt(doc, { ...rest, params: kept }, ctx.actor, { summary: `不再用共享参数文件 ${doc.tree.uses}（参数抄回零件里）` })
+      // The values in use: the shared ones won, so they stay.
+      const kept = { ...doc.tree.params, ...(doc.shared?.params ?? {}) }
+      const keptNotes = { ...(doc.tree.paramNotes ?? {}), ...(doc.shared?.notes ?? {}) }
+      await this.adopt(doc, { ...rest, params: kept, paramNotes: Object.keys(keptNotes).length ? keptNotes : undefined }, ctx.actor, { summary: `不再用共享参数文件 ${doc.tree.uses}（参数抄回零件里）` })
       return { ok: this.allOk(doc), text: `已停用共享参数文件，共享参数的当前值抄回了零件自己的参数表。\n${treeText(doc.tree, doc.report!)}` }
     }
     const file = input.file?.trim()
@@ -551,7 +567,7 @@ export class Engine {
       const own = Object.fromEntries(Object.entries(doc.tree.params).filter(([k]) => !move.includes(k)))
       const ownNotes = Object.fromEntries(Object.entries(doc.tree.paramNotes ?? {}).filter(([k]) => !move.includes(k)))
       tree = { ...tree, params: own, paramNotes: Object.keys(ownNotes).length ? ownNotes : undefined }
-      await this.writeShared(sh, params, notes, ctx)
+      await this.writeShared(sh, (cur) => ({ params: { ...cur.params, ...Object.fromEntries(move.map((k) => [k, params[k]])) }, notes: { ...cur.notes, ...Object.fromEntries(Object.entries(notes).filter(([k]) => move.includes(k))) } }), ctx)
     }
     await this.adopt(doc, tree, ctx.actor, { summary: `用共享参数文件 ${file}${move.length ? `，移进去 ${move.join("、")}` : ""}` })
     const shadow = shadowed(doc.tree, doc.shared)
@@ -574,7 +590,17 @@ export class Engine {
       delete params[k]
       delete notes[k]
     }
-    if (Object.keys(changed).length) await this.writeShared(sh, { ...sh.params, ...changed }, sh.notes, ctx)
+    if (Object.keys(changed).length) await this.writeShared(sh, (cur) => ({ params: { ...cur.params, ...changed }, notes: cur.notes }), ctx)
+    return { ...tree, params, paramNotes: Object.keys(notes).length ? notes : undefined }
+  }
+
+  /** A tree worked on with the shared parameters merged in, back to the part's own: shared ones out (unless it had its own). */
+  private unshare(doc: Doc, tree: Tree): Tree {
+    const sh = doc.shared
+    if (!sh || sh.error) return tree
+    const drop = (k: string) => k in sh.params && !(k in doc.tree.params)
+    const params = Object.fromEntries(Object.entries(tree.params).filter(([k]) => !drop(k)))
+    const notes = Object.fromEntries(Object.entries(tree.paramNotes ?? {}).filter(([k]) => !(k in sh.notes && !(k in (doc.tree.paramNotes ?? {})))))
     return { ...tree, params, paramNotes: Object.keys(notes).length ? notes : undefined }
   }
 
