@@ -37,3 +37,8 @@ export const writeAppInfo = (info: AppInfo) => writeJson("app.json", info, 0o644
 
 export const readRecent = () => readJson<string[]>("recent.json") ?? []
 export const writeRecent = (paths: string[]) => writeJson("recent.json", paths.slice(0, 20), 0o644)
+
+/** The app's own preferences (checkboxes in the app menu). */
+export type AppSettings = { autoUpdate: boolean }
+export const readSettings = (): AppSettings => ({ autoUpdate: true, ...readJson<Partial<AppSettings>>("settings.json") })
+export const writeSettings = (s: AppSettings) => writeJson("settings.json", s, 0o644)

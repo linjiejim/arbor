@@ -1,7 +1,7 @@
 {
   "name": "arbor",
   "productName": "Arbor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop workbench where a local coding agent builds parametric parts over MCP or a CLI, and you watch, tweak and annotate.",
   "private": true,
   "license": "MIT",
@@ -15,8 +15,9 @@
     "start": "electron .",
     "check": "../app/node_modules/.bin/tsc -p tsconfig.json --noEmit",
     "smoke": "node scripts/smoke-mcp.mjs",
+    "test": "node --test src/update/*.test.ts",
     "icons": "node scripts/icons.mjs",
-    "dist": "node scripts/build.mjs && electron-builder --mac --publish never"
+    "dist": "node scripts/build.mjs && electron-builder --mac dir --publish never && node scripts/release.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

@@ -125,8 +125,26 @@ export interface ArborBridge {
   copy(text: string): Promise<void>
   /** A menu item or the dock asked for something. */
   onMenu(cb: (action: MenuAction) => void): () => void
+  /** The self-update: where it is now, and every change after. */
+  update(): Promise<UpdateStatus>
+  onUpdate(cb: (status: UpdateStatus) => void): () => void
+  /** A message for the person (the result of 检查更新…). */
+  onNotice(cb: (notice: Notice) => void): () => void
+  /** Quit, put the downloaded version in place, start again. */
+  restartToUpdate(): Promise<void>
   platform: string
 }
+
+/**
+ * The self-update. `downloading` is shown only when the person asked (检查更新…);
+ * a background download stays quiet until it is `ready`.
+ */
+export type UpdateStatus =
+  | { phase: "idle" }
+  | { phase: "downloading"; version: string; percent: number | null; asked: boolean }
+  | { phase: "ready"; version: string }
+
+export type Notice = { tone: "info" | "success" | "error"; text: string }
 
 export type MenuAction = "undo" | "redo" | "agent-setup"
 
