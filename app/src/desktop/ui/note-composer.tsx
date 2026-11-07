@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/input"
  * what the site's 「让助教改」 buttons start (a feature card, a failed requirement).
  * `text` null = closed; otherwise the text it opens with.
  */
-export function NoteComposer({ text, onClose, onSave }: { text: string | null; onClose: () => void; onSave: (text: string) => Promise<void> }) {
+/** `onSave` resolves true when the note was saved: only then does the dialog close (the draft stays otherwise). */
+export function NoteComposer({ text, onClose, onSave }: { text: string | null; onClose: () => void; onSave: (text: string) => Promise<boolean> }) {
   const [value, setValue] = React.useState(text ?? "")
   const [opened, setOpened] = React.useState(text)
   if (opened !== text) {
@@ -34,6 +35,7 @@ export function NoteComposer({ text, onClose, onSave }: { text: string | null; o
             rows={5}
             autoFocus
             value={value}
+            maxLength={600}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.nativeEvent.isComposing) {

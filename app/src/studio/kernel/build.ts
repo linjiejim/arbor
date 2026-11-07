@@ -781,7 +781,11 @@ export class Kernel {
       const dup = tree.features.findIndex((x) => x.id === f.id)
       if (tree.features[dup] !== f) throw new InputError(`特征 id「${f.id}」重复了`)
       const out =
-        f.op === "split" ? this.split(f, prev) : prev?.parts && prev.parts.length > 1 && BODY_OPS.has(f.op) ? this.onParts(f, prev, prev.parts, warnings) : this.apply(f, prev, warnings)
+        f.op === "split"
+          ? this.split(f, prev)
+          : prev?.parts && prev.parts.length > 1 && (BODY_OPS.has(f.op) || (f.op === "import" && (f.mode ?? "reference") !== "reference"))
+            ? this.onParts(f, prev, prev.parts, warnings)
+            : this.apply(f, prev, warnings)
       if (out.parts) step.parts = out.parts
       if (out.ref) step.refs = [...(step.refs ?? []), { id: f.id, name: displayName(tree, f), shape: out.ref, mesh: meshShape(out.ref as Shape3D), edges: meshEdges(out.ref as Shape3D), owned: true }]
       Object.assign(step.result, { summary: out.summary, selected: out.selected })
@@ -1308,7 +1312,7 @@ export class Kernel {
     if (!runs.length) throw firstError
     const vol = (x: Shape3D) => measureShapeVolumeProperties(x).volume
     const changed = runs.filter((r) => r.out.body && Math.abs(vol(r.out.body) - vol(r.p.body)) > 1e-6 * Math.max(1, vol(r.p.body)))
-    const adds = f.op === "rib" || runs.some((r) => r.out.tools?.some((t) => t.mode === "add"))
+    const adds = f.op === "rib" || (f.op === "import" && f.mode === "add") || runs.some((r) => r.out.tools?.some((t) => t.mode === "add"))
     let used = changed
     if (adds && !f.part) {
       used = changed.filter((r) => countOf(r.out.body!, "solid") === countOf(r.p.body, "solid"))

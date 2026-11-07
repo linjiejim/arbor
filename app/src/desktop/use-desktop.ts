@@ -232,7 +232,7 @@ export function useDesktopNotes(
   studio: Studio,
   doc: DocState | null,
   pick: PickRequest | null,
-): Annotations & { nextPin: number; compose: string | null; setCompose: (text: string | null) => void; addPartNote: (text: string) => Promise<void> } {
+): Annotations & { nextPin: number; compose: string | null; setCompose: (text: string | null) => void; addPartNote: (text: string) => Promise<boolean> } {
   const [draft, setDraft] = React.useState<PickInfo | null>(null)
   /** A note about the part or a feature being written (the site's 「让助教改」 becomes one). */
   const [compose, setCompose] = React.useState<string | null>(null)
@@ -310,11 +310,16 @@ export function useDesktopNotes(
     [locate],
   )
 
+  /** Save a note about the whole part; false (and the reason shown) when it wasn't saved, so the draft stays. */
   const addPartNote = React.useCallback(
     async (text: string) => {
       const r = await arbor.call("add_note", { text }, path)
-      if (!r.ok) notify.error(r.text)
-      else notify.success("已记下，agent 用 get_notes 会读到")
+      if (!r.ok) {
+        notify.error(r.text.replace(/^✗ /, ""))
+        return false
+      }
+      notify.success("已记下，agent 用 get_notes 会读到")
+      return true
     },
     [path],
   )

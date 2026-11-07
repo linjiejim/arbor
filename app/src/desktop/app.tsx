@@ -137,9 +137,10 @@ export function DesktopApp() {
         text={notes.compose}
         onClose={() => notes.setCompose(null)}
         onSave={async (text) => {
-          await notes.addPartNote(text)
+          if (!(await notes.addPartNote(text))) return false
           notes.setCompose(null)
           setTab("notes")
+          return true
         }}
       />
     </div>

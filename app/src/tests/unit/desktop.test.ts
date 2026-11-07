@@ -368,6 +368,31 @@ describe("arbor: importing STEP", () => {
     expect(faces.text).toMatch(/法向 -Y 中心\(0, -20, 8\) 来自 board/)
   }, 60_000)
 
+  it("cuts every split part an imported solid reaches: what's exported is what's reported", async () => {
+    const k = new DirectKernel()
+    await k.setAssets([{ name: "cutter.step", bytes: await boardStep(20, 20, 20) }])
+    const cube = [
+      { id: "s", op: "sketch" as const, on: { plane: "XY" as const }, shapes: [{ type: "rect" as const, w: 20, h: 20 }] },
+      { id: "e", op: "extrude" as const, sketch: "s", distance: 20 },
+      { id: "sp", op: "split" as const, by: { plane: "XY" as const, offset: 10 }, parts: ["low", "high"] },
+    ]
+    // The right half of both parts goes.
+    const r = await k.rebuild({ params: {}, features: [...cube, { id: "c", op: "import", file: "cutter.step", mode: "cut", at: [10, 0, 0] }] })
+    expect(r.features.at(-1)!.state).toBe("ok")
+    expect(r.body!.volume).toBeCloseTo(4000, 3)
+    expect(r.parts!.map((p) => p.volume)).toEqual([2000, 2000])
+    const exported = (await k.exportBody("step"))!
+    const again = new DirectKernel()
+    await again.setAssets([{ name: "x.step", bytes: exported }])
+    const back = await again.rebuild({ params: {}, features: [{ id: "i", op: "import", file: "x.step", mode: "add" }] })
+    expect(back.body!.volume).toBeCloseTo(4000, 3)
+    // Adding an imported solid after a split: it must land on one part, as any added material.
+    const add = await k.rebuild({ params: {}, features: [...cube, { id: "a", op: "import", file: "cutter.step", mode: "add", at: [0, 0, 20] }] })
+    expect(add.features.at(-1)!).toMatchObject({ state: "ok", summary: expect.stringContaining("high") })
+    k.dispose()
+    again.dispose()
+  }, 60_000)
+
   it("tells what's wrong with a missing file, and that the site can't read files at all", async () => {
     const { run } = await caseEngine()
     const missing = await run("import", { id: "nope", file: "nope.step" })
