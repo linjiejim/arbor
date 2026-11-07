@@ -28,5 +28,9 @@ export const arbor: ArborBridge =
     agentSetup: missing,
     copy: missing,
     onMenu: () => () => {},
+    update: () => Promise.resolve({ phase: "idle" }),
+    onUpdate: () => () => {},
+    onNotice: () => () => {},
+    restartToUpdate: missing,
     platform: "web",
   } satisfies ArborBridge)

@@ -23,7 +23,27 @@ npm start          # 打开 Arbor
 
 - Electron 的二进制从 GitHub 下载，本机直连慢时用上面的镜像；`NODE_USE_ENV_PROXY=1` 让 Node 的 fetch 走 `https_proxy`。
 - `npm run dev`：窗口走 Vite 开发服务器（热更新），主进程和引擎改了要重新运行。
-- `npm run dist`：打包成 `release/mac-arm64/Arbor.app` 和 `release/Arbor-<版本>-arm64.dmg`。没有签名，第一次打开要右键 → 打开。
+- `npm run dist`：打包成 `release/mac-arm64/Arbor.app`，再由 `scripts/release.mjs` 签上临时签名（ad hoc），在 `release/upload/` 里做出 dmg 和更新用的 zip。本机打的包不生成更新清单，也不会推送给已安装的 App。
+
+## 下载安装和更新
+
+从 [GitHub Releases](https://github.com/linjiejim/featuretree/releases/latest) 下载 `Arbor-<版本>-arm64.dmg`（Intel Mac 选 `x64`），把 Arbor 拖进「应用程序」。Arbor 没有 Apple 签名，第一次打开时 macOS 会拦一下：到「系统设置 → 隐私与安全性」点「仍要打开」。也可以在终端运行 `xattr -dr com.apple.quarantine /Applications/Arbor.app`。
+
+装好以后 Arbor 会自己更新：启动 15 秒后检查一次，之后每 6 小时检查一次。它读取最新 release 里的 `arbor-update.json`，在后台下载这台机器对应的 zip，校验大小、SHA-256 和签名（公钥内置在 App 里，`desktop/src/update/public-key.ts`），解压到 App 旁边的隐藏文件夹 `.arbor-update/`。下载好以后，标题栏出现「重启以更新到 x.y.z」；不点也没关系，下次退出 Arbor 时会换上新版本。
+
+- 菜单 Arbor → 检查更新…：立即检查，结果会提示出来（已是最新、正在下载、失败原因）。
+- 菜单 Arbor → 自动检查更新：取消勾选后就不再自动检查，设置存在 `~/.arbor/settings.json`。
+- 只有放在可写位置的 Arbor.app 能自动更新：直接从 dmg 里运行不行，被 macOS 隔离运行（App Translocation）时也不行，检查更新会说明原因。
+- 下载走 Chromium 的网络栈，跟随系统代理。
+- 测试时可以用环境变量 `ARBOR_UPDATE_URL` 指向另一份清单；签名照样要校验。
+
+### 发布
+
+1. 改 `desktop/package.json` 的 `version`（同时改 `package-lock.json` 顶部的版本），合并进 main。
+2. 推送 `arbor-v<版本>` tag。工作流 `.github/workflows/arbor-release.yml` 会核对 tag 和版本号是否一致，然后在 macOS 上构建 arm64 和 x64 两个包，签名并打包，建一个草稿 release，上传 dmg、zip 和 `arbor-update.json`。
+3. 检查草稿，然后发布，并设为 latest：`gh release edit arbor-v<版本> --draft=false --latest`。已安装的 App 只读最新一个已发布的 release，发布这一步才算推送了更新。这个仓库的 latest release 只留给 Arbor 用。
+
+更新包的签名用一把 ed25519 私钥，存在仓库 secret `ARBOR_UPDATE_KEY`（PEM 格式）；维护者本机备份在 `~/.arbor-release/update-key.pem`。已安装的 App 只认这把钥匙签的更新：换钥匙就要同时换掉 `public-key.ts`，并且所有人都得手动重新下载一次。`release.mjs` 写清单前会先用内置公钥验一遍签名，钥匙不对就在发布时报错，不会等到用户那边才失败。
 
 ## 接入 agent
 
@@ -110,7 +130,7 @@ python3 -I scripts/make-icons.py                           # 从 resources/logo/
 
 ## 已知局限
 
-- 只打了 macOS（arm64）包，没有签名和自动更新。
+- 只有 macOS 包（arm64 和 x64），没有 Apple 签名和公证，第一次打开要在系统设置里放行。
 - 没有「代码特征」：特征树表达不了的形状还做不了（规划见 `docs/specs/2026-11-07-arbor-desktop.md`）。
 - 导入的 STEP 是一个整体：选择器选不到它的面，核对只能对整个参考体量间隙和干涉；`mode: "cut"` 减去的是元件本身的外形，要留间隙得先在别处把它放大。
 - 工作台里的「让助教改」按钮在桌面版会打开「给 agent 留一条备注」，但按钮上的字还是「助教」（共用组件里的文字）。

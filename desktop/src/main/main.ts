@@ -11,6 +11,7 @@ import { clearEngineInfo, writeAppInfo, writeEngineInfo } from "../engine/home"
 import { startEngine } from "../engine/host"
 import { serveEngine } from "../engine/rpc"
 import { agentSetup } from "./setup"
+import { createUpdater } from "./updater"
 
 declare const __ARBOR_VERSION__: string
 
@@ -65,6 +66,15 @@ const screen: Screen = {
 }
 
 const { engine, kernel } = startEngine({ distDir, screen: () => screen })
+
+const updater = createUpdater({
+  status: (s) => win?.webContents.send("arbor:update", s),
+  // The answer to 检查更新…: in the window when there is one, otherwise a dialog.
+  notice: (n) => {
+    if (win) win.webContents.send("arbor:notice", n)
+    else void dialog.showMessageBox({ type: n.tone === "error" ? "warning" : "info", message: n.text })
+  },
+})
 
 function createWindow(mode: "focus" | "inactive") {
   const w = new BrowserWindow({
@@ -190,6 +200,14 @@ function refreshMenu() {
             label: PRODUCT,
             submenu: [
               { role: "about" as const },
+              { label: "检查更新…", click: () => void updater.check(true) },
+              {
+                label: "自动检查更新",
+                type: "checkbox" as const,
+                checked: updater.supported && updater.autoUpdate,
+                enabled: updater.supported,
+                click: (item: Electron.MenuItem) => updater.setAutoUpdate(item.checked),
+              },
               { type: "separator" as const },
               { label: "接入 Agent…", click: () => send("agent-setup") },
               { type: "separator" as const },
@@ -258,6 +276,8 @@ function wireIpc() {
   ipcMain.handle("arbor:export", (_e, format: ExportFormat) => exportDialog(format))
   ipcMain.handle("arbor:agent-setup", () => agentSetup(arborBin()))
   ipcMain.handle("arbor:copy", (_e, text: string) => clipboard.writeText(String(text)))
+  ipcMain.handle("arbor:update", () => updater.status())
+  ipcMain.handle("arbor:restart-to-update", () => updater.restart())
   ipcMain.on("arbor:renderer-ready", () => markReady())
   ipcMain.on("arbor:look-done", (_e, id: number, res: { images?: string[]; error?: string }) => {
     const l = looks.get(id)
@@ -316,7 +336,9 @@ if (!app.requestSingleInstanceLock()) {
     app.on("activate", () => {
       if (!win) createWindow("focus")
     })
+    updater.start()
     app.on("will-quit", () => {
+      updater.installOnQuit()
       clearEngineInfo(process.pid)
       engine.dispose()
       void rpc.close()

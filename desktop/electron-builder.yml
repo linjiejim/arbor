@@ -1,4 +1,5 @@
-# Arbor.app (and a .dmg). Unsigned: macOS asks once on first open (right-click → Open).
+# Arbor.app only; scripts/release.mjs signs it ad hoc and makes the dmg, the update zip and
+# arbor-update.json. No Apple certificate: macOS asks once on first open (see desktop/README.md).
 appId: com.linjiejim.arbor
 productName: Arbor
 copyright: Copyright © 2026 Jim Lin
@@ -20,9 +21,6 @@ mac:
   category: public.app-category.developer-tools
   target:
     - dir
-    - dmg
   identity: null
   extendInfo:
     NSHumanReadableCopyright: Copyright © 2026 Jim Lin
-dmg:
-  title: Arbor

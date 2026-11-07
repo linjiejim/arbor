@@ -39,6 +39,8 @@ export function DesktopApp() {
 
   // The agent's `look`: render the views it asked for, from the mesh the engine sent.
   React.useEffect(() => arbor.onLook(async (req) => renderViews(req.display, req.views, req.highlight, { pins: req.pins })), [])
+  // What 检查更新… found.
+  React.useEffect(() => arbor.onNotice((n) => void (n.tone === "error" ? notify.error(n.text) : notify[n.tone](n.text))), [])
 
   // Menu items and shortcuts: ⌘Z undoes typing in a field, otherwise the last change to the part.
   const path = doc?.path

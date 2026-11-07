@@ -43,3 +43,26 @@ jobs:
             app/playwright-report/
             app/test-results/
           retention-days: 14
+
+  # Arbor (desktop/): type check, the updater's tests, and a build of the bundles and the window.
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            desktop/package-lock.json
+      - run: npm ci
+        working-directory: app
+      # The checks don't start Electron: skip downloading it.
+      - run: npm ci
+        working-directory: desktop
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+      - run: npm run check && npm test && node scripts/build.mjs
+        working-directory: desktop

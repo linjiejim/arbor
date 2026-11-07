@@ -1,10 +1,11 @@
-import { Download, Plug, Redo2, Undo2 } from "lucide-react"
+import * as React from "react"
+import { Download, Plug, Redo2, RotateCw, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
 import { StatusDot } from "@/components/ui/badge"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { arbor } from "../bridge"
-import type { DocState, PickRequest, Snapshot } from "../core/protocol"
+import type { DocState, PickRequest, Snapshot, UpdateStatus } from "../core/protocol"
 import { ArborMark } from "./brand"
 import { ago, commandLabel, useNow } from "./words"
 
@@ -29,6 +30,7 @@ export function TitleBar({ snapshot, doc, pick, onSetup }: { snapshot: Snapshot 
         <AgentStatus snapshot={snapshot} pick={pick} />
       </div>
       <div className="ml-auto flex items-center gap-1 [-webkit-app-region:no-drag]">
+        <UpdateStatusButton />
         <IconButton label="撤销（⌘Z）" disabled={!doc?.canUndo} onClick={() => call("undo")}>
           <Undo2 />
         </IconButton>
@@ -70,4 +72,38 @@ export function AgentStatus({ snapshot, pick }: { snapshot: Snapshot | null; pic
       </StatusDot>
     )
   return <StatusDot className="text-muted-foreground">等 agent 连上</StatusDot>
+}
+
+function useUpdateStatus() {
+  const [status, setStatus] = React.useState<UpdateStatus>({ phase: "idle" })
+  React.useEffect(() => {
+    let alive = true
+    const off = arbor.onUpdate(setStatus)
+    void arbor.update().then((s) => alive && setStatus(s))
+    return () => {
+      alive = false
+      off()
+    }
+  }, [])
+  return status
+}
+
+/** A downloaded update waits for a restart; a download the person asked for shows its progress. */
+function UpdateStatusButton() {
+  const status = useUpdateStatus()
+  if (status.phase === "ready")
+    return (
+      <Button size="sm" variant="primary" className="mr-1" onClick={() => void arbor.restartToUpdate()}>
+        <RotateCw />
+        重启以更新到 {status.version}
+      </Button>
+    )
+  if (status.phase === "downloading" && status.asked)
+    return (
+      <span className="mr-2 text-caption text-muted-foreground tabular">
+        正在下载 {status.version}
+        {status.percent !== null ? ` · ${status.percent}%` : "…"}
+      </span>
+    )
+  return null
 }
