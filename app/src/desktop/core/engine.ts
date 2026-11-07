@@ -516,6 +516,12 @@ export class Engine {
     const latest = await loadShared(this.opts.files, sh.path, sh.path.split(/[\\/]/).pop()!)
     if (latest.error && latest.text !== null) throw new InputError(latest.error)
     const { params, notes } = change(latest.text === null ? { params: {}, notes: {} } : { params: latest.params, notes: latest.notes })
+    // Checked as it will be written: the file on disk may differ from what was checked before.
+    try {
+      resolveParams(params)
+    } catch (e) {
+      throw new InputError(`共享参数不对，没有写入 ${sh.file}：${(e as Error).message}`)
+    }
     const text = sharedText({ params, notes })
     this.sharedWritten.set(sh.path, text)
     await this.opts.files.write(sh.path, text)
@@ -598,9 +604,15 @@ export class Engine {
   private unshare(doc: Doc, tree: Tree): Tree {
     const sh = doc.shared
     if (!sh || sh.error) return tree
-    const drop = (k: string) => k in sh.params && !(k in doc.tree.params)
-    const params = Object.fromEntries(Object.entries(tree.params).filter(([k]) => !drop(k)))
-    const notes = Object.fromEntries(Object.entries(tree.paramNotes ?? {}).filter(([k]) => !(k in sh.notes && !(k in (doc.tree.paramNotes ?? {})))))
+    const ownParams = doc.tree.params
+    const ownNotes = doc.tree.paramNotes ?? {}
+    // Shared names go; an own parameter they shadowed comes back as it was (the merge overwrote it).
+    const params = Object.fromEntries(
+      Object.entries(tree.params).flatMap(([k, v]) => (k in sh.params ? (k in ownParams ? [[k, ownParams[k]]] : []) : [[k, v]])),
+    )
+    const notes = Object.fromEntries(
+      Object.entries(tree.paramNotes ?? {}).flatMap(([k, v]) => (k in sh.params || k in sh.notes ? (k in ownNotes ? [[k, ownNotes[k]]] : []) : [[k, v]])),
+    )
     return { ...tree, params, paramNotes: Object.keys(notes).length ? notes : undefined }
   }
 

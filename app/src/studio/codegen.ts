@@ -299,7 +299,7 @@ function feature(f: Feature, tree: Tree): string[] {
         return [
           ...out,
           "# 沿面等深：草图投影到面上，和面下（切除）或面上（加料）这一层求交",
-          `${ref("tool", f.id)} = extrude(${sk}, amount=1000, both=True) & onto_band(${faces(f.onto)}[0], ${d}, cut=${f.mode === "cut" ? "True" : "False"}, sketch=${sk})`,
+          `${ref("tool", f.id)} = extrude(${sk}, amount=1000, both=True) & onto_band(${faces(f.onto)}[0], ${d}, cut=${f.mode === "cut" ? "True" : "False"}, plane=${src?.op === "sketch" ? sketchPlane(src.on) : "Plane.XY"})`,
           combine(f.id, f.mode),
         ]
       const opts = f.direction === "both" ? `amount=${d} / 2, both=True` : f.direction === "reverse" ? `amount=${d}, dir=-${sk}.faces()[0].normal_at()` : `amount=${d}`
@@ -564,8 +564,8 @@ Z 轴朝上，单位毫米。选择器按语义转成 build123d 的过滤；「�
     "    return face",
     "",
     "",
-    "def onto_band(face, depth, cut, sketch, big=1000):",
-    '    """The layer `depth` thick under (cut) or over (add) a planar or cylindrical face; on a cylinder, the side the sketch faces."""',
+    "def onto_band(face, depth, cut, plane, big=1000):",
+    '    """The layer `depth` thick under (cut) or over (add) a planar or cylindrical face; on a cylinder, the side the sketch plane is on (both when it passes through the axis)."""',
     "    if face.geom_type == GeomType.PLANE:",
     "        n = face.normal_at()",
     "        return extrude(Plane(origin=face.center(), z_dir=n) * Rectangle(2 * big, 2 * big), amount=depth, dir=-n if cut else n)",
@@ -577,10 +577,10 @@ Z 轴朝上，单位毫米。选择器按语义转成 build123d 的过滤；「�
     "    base = Plane(origin=axis.position - axis.direction * big, z_dir=axis.direction)",
     "    up = (Align.CENTER, Align.CENTER, Align.MIN)",
     "    band = base * (Cylinder(outer, 2 * big, align=up) - Cylinder(inner, 2 * big, align=up))",
-    "    side = (sketch.center() - axis.position) - axis.direction * (sketch.center() - axis.position).dot(axis.direction)",
-    "    if side.length < 1e-6:",
+    "    side = (plane.origin - axis.position).dot(plane.z_dir)",
+    "    if abs(side) < 1e-6:",
     "        return band",
-    "    return band & (Plane(origin=axis.position, z_dir=side.normalized()) * Box(4 * big, 4 * big, 2 * big, align=up))",
+    "    return band & (Plane(origin=axis.position, z_dir=plane.z_dir * (1 if side > 0 else -1)) * Box(4 * big, 4 * big, 2 * big, align=up))",
     "",
     "",
     "def on_feature(items, tool):",

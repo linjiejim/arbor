@@ -227,6 +227,23 @@ describe("shared parameters and assemblies", () => {
     expect(JSON.parse(disk.get("/work/parts/cap.arbor.json") as string).params.D).toBe(12)
   })
 
+  it("leaves a shadowed own parameter alone on other edits, and won't write a shared file that no longer resolves", async () => {
+    const { run, files, disk } = await penWorkspace()
+    await run("open_part", { path: "parts/cap.arbor.json" })
+    const cap = JSON.parse(disk.get("/work/parts/cap.arbor.json") as string)
+    await files.write("/work/parts/cap.arbor.json", JSON.stringify({ ...cap, params: { ...cap.params, D: 5 }, paramNotes: { D: "自己的直径" } }))
+    expect((await run("set_params", { set: { R: "D/2" } })).ok).toBe(true)
+    const saved = JSON.parse(disk.get("/work/parts/cap.arbor.json") as string)
+    expect(saved.params.D).toBe(5)
+    expect(saved.paramNotes.D).toBe("自己的直径")
+    // The shared file changed on disk to depend on D; removing D would leave L unresolvable.
+    await files.write("/work/pen.params.json", JSON.stringify({ params: { D: 10, L: "D*6" } }))
+    const bad = await run("set_params", { remove: ["D"] })
+    expect(bad.ok).toBe(false)
+    expect(bad.text).toMatch(/共享参数不对，没有写入/)
+    expect(JSON.parse(disk.get("/work/pen.params.json") as string).params).toEqual({ D: 10, L: "D*6" })
+  })
+
   it("keeps a single component a named part: measured by name, hidden when asked", async () => {
     const mem = memFiles()
     const engine = new Engine({ kernel: new DirectKernel(), files: mem.files })

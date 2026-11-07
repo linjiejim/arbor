@@ -173,7 +173,8 @@ describe("exports and the site assistant", () => {
         { id: "m", op: "extrude", sketch: "t", distance: 1, mode: "cut", onto: { kind: "cylinder" } },
       ],
     })
-    expect(onto).toMatch(/tool_m = extrude\(sk_t, amount=1000, both=True\) & onto_band\(.*\[0\], 1, cut=True, sketch=sk_t\)/)
+    expect(onto).toMatch(/tool_m = extrude\(sk_t, amount=1000, both=True\) & onto_band\(.*\[0\], 1, cut=True, plane=.*\)$/m)
+    expect(onto).toMatch(/side = \(plane\.origin - axis\.position\)\.dot\(plane\.z_dir\)/)
   })
 
   it("keeps the new fields out of the site assistant's tools, and gives them to the desktop agents", () => {
