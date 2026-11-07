@@ -157,13 +157,14 @@ export function DesktopApp() {
   )
 }
 
-function Banner({ tone, icon, children, action }: { tone: "info" | "warning" | "danger"; icon: React.ReactNode; children: React.ReactNode; action?: React.ReactNode }) {
+/** `keep`: the text keeps its width (a short label beside several buttons) instead of wrapping. */
+function Banner({ tone, icon, children, action, keep }: { tone: "info" | "warning" | "danger"; icon: React.ReactNode; children: React.ReactNode; action?: React.ReactNode; keep?: boolean }) {
   const color = { info: "border-info/40", warning: "border-warning/50", danger: "border-destructive/40" }[tone]
   const iconColor = { info: "text-info", warning: "text-warning", danger: "text-destructive" }[tone]
   return (
     <div role={tone === "danger" ? "alert" : "status"} className={`pointer-events-auto flex max-w-xl items-center gap-2.5 rounded-lg border bg-background py-1.5 pr-1.5 pl-3 shadow-popover ${color}`}>
       <span className={`shrink-0 [&_svg]:size-4 ${iconColor}`}>{icon}</span>
-      <span className="min-w-0 flex-1 text-body">{children}</span>
+      <span className={`${keep ? "shrink-0" : "min-w-0 flex-1"} text-body`}>{children}</span>
       {action}
     </div>
   )
@@ -196,6 +197,7 @@ function AssemblyBanner({ doc }: { doc: DocState }) {
     <Banner
       tone="info"
       icon={<Boxes />}
+      keep
       action={
         <div className="flex flex-wrap justify-end gap-1">
           {files.slice(0, 6).map((c) => (
