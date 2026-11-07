@@ -173,7 +173,9 @@ describe("exports and the site assistant", () => {
         { id: "m", op: "extrude", sketch: "t", distance: 1, mode: "cut", onto: { kind: "cylinder" } },
       ],
     })
-    expect(onto).toMatch(/tool_m = extrude\(sk_t, amount=1000, both=True\) & onto_band\(.*\[0\], 1, cut=True, plane=.*\)$/m)
+    expect(onto).toMatch(/^plane_t = Plane\.XZ/m)
+    expect(onto).toMatch(/^sk_t = plane_t \* /m)
+    expect(onto).toMatch(/tool_m = extrude\(sk_t, amount=1000, both=True\) & onto_band\(.*\[0\], 1, cut=True, plane=plane_t\)$/m)
     expect(onto).toMatch(/side = \(plane\.origin - axis\.position\)\.dot\(plane\.z_dir\)/)
   })
 

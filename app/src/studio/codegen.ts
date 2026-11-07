@@ -255,10 +255,14 @@ function feature(f: Feature, tree: Tree): string[] {
       const regions = f.shapes.filter((s) => s.type !== "path")
       const paths = f.shapes.filter((s) => s.type === "path")
       const out = [...head]
+      // A sketch an `onto` extrusion uses keeps its plane: resolved now, while the face it sits on still exists.
+      const keepPlane = tree.features.some((x) => x.op === "extrude" && x.onto && x.sketch === f.id)
+      if (keepPlane) out.push(`${ref("plane", f.id)} = ${sketchPlane(f.on)}`)
+      const pl = keepPlane ? ref("plane", f.id) : sketchPlane(f.on)
       if (regions.length) {
         const [first, ...rest] = regions
         const body = rest.reduce((acc, s) => `${acc} ${"cut" in s && s.cut ? "-" : "+"} ${shape2d(s)}`, shape2d(first))
-        out.push(`${ref("sk", f.id)} = ${sketchPlane(f.on)} * (${body})`)
+        out.push(`${ref("sk", f.id)} = ${pl} * (${body})`)
       }
       // An open path: a curve for thin walls (trace), its points for ribs.
       if (paths[0]?.type === "path") out.push(`${ref("path", f.id)} = ${sketchPlane(f.on)} * (${shape2d(paths[0])})`, `${ref("plane", f.id)} = ${sketchPlane(f.on)}`, `${ref("pts", f.id)} = ${pathPointsPy(paths[0].points)}`)
@@ -299,7 +303,7 @@ function feature(f: Feature, tree: Tree): string[] {
         return [
           ...out,
           "# 沿面等深：草图投影到面上，和面下（切除）或面上（加料）这一层求交",
-          `${ref("tool", f.id)} = extrude(${sk}, amount=1000, both=True) & onto_band(${faces(f.onto)}[0], ${d}, cut=${f.mode === "cut" ? "True" : "False"}, plane=${src?.op === "sketch" ? sketchPlane(src.on) : "Plane.XY"})`,
+          `${ref("tool", f.id)} = extrude(${sk}, amount=1000, both=True) & onto_band(${faces(f.onto)}[0], ${d}, cut=${f.mode === "cut" ? "True" : "False"}, plane=${ref("plane", f.sketch)})`,
           combine(f.id, f.mode),
         ]
       const opts = f.direction === "both" ? `amount=${d} / 2, both=True` : f.direction === "reverse" ? `amount=${d}, dir=-${sk}.faces()[0].normal_at()` : `amount=${d}`
