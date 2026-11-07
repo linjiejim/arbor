@@ -1411,10 +1411,9 @@ export class Kernel {
         const sources = f.features.flatMap((id) => this.toolsOf(id))
         return this.copyTools(body, sources, [(s) => s.mirror(f.plane, origin)], `镜像 ${f.features.length} 个特征 · ${label}`, warnings)
       }
-      case "split":
       case "component":
-        // Routed by `run` (they change the parts, not one body).
-        throw new InputError(`${OP_NAMES[f.op]}不能用在这里`)
+        // Routed by `run` (it changes the parts, not one body).
+        throw new InputError("装配里的零件不在这里处理")
     }
   }
 
