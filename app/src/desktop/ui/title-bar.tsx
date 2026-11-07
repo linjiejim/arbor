@@ -6,7 +6,7 @@ import { StatusDot } from "@/components/ui/badge"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { arbor } from "../bridge"
 import type { DocState, PickRequest, Snapshot, UpdateStatus } from "../core/protocol"
-import { ArborMark } from "./brand"
+import { ArborMark } from "@/components/arbor-mark"
 import { ago, commandLabel, useNow } from "./words"
 
 /** The window's top bar; on macOS it is also the title bar (drag to move, traffic lights on the left). */

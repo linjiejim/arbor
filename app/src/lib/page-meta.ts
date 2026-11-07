@@ -17,7 +17,7 @@ export type PageMeta = {
   description: string
 }
 
-export const SITE_NAME = "FeatureTree"
+export const SITE_NAME = "Arbor"
 export const SITE_TAGLINE = "工业建模互动课"
 
 /** Pages with a fixed path, in sitemap order. */

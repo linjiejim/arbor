@@ -92,7 +92,7 @@ export function DrawingSheet({ studio, title }: { studio: Studio; title: string 
     const blob = new Blob([`<?xml version="1.0" encoding="UTF-8"?>\n${svg.current.outerHTML}`], { type: "image/svg+xml" })
     const a = document.createElement("a")
     a.href = URL.createObjectURL(blob)
-    a.download = `${title || "featuretree"}-工程图.svg`
+    a.download = `${title || "arbor"}-工程图.svg`
     a.click()
     setTimeout(() => URL.revokeObjectURL(a.href), 1000)
   }

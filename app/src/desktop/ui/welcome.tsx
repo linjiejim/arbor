@@ -3,7 +3,7 @@ import { FolderOpen, Plug, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { arbor, inApp } from "../bridge"
 import { Command, EXAMPLE_ASK } from "./agent-setup"
-import { ArborMark } from "./brand"
+import { ArborMark } from "@/components/arbor-mark"
 
 /** No part open yet: what Arbor is for, and the three ways in. */
 export function Welcome({ onSetup }: { onSetup: () => void }) {

@@ -20,7 +20,7 @@ from build123d import (
     offset,
 )
 
-from ftbake import AssemblyModel, Part
+from arborbake import AssemblyModel, Part
 
 W, L = 60.0, 40.0  # 外形
 H_BODY, H_LID, T = 25.0, 8.0, 2.0  # 盒身高、盖高、壁厚

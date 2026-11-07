@@ -6,7 +6,7 @@
 
 名字：arbor 既是「树」（特征树），也是机加工里夹着刀具转的「刀杆 / 心轴」。图标是一根车削出来的阶梯轴，台阶叠起来像一棵松树。
 
-- 建模能力和网页版 FeatureTree 工作台是同一套：特征树 JSON、语义选择器、OpenCascade 内核（`app/src/studio`）。
+- 建模能力和网页版 Arbor 工作台是同一套：特征树 JSON、语义选择器、OpenCascade 内核（`app/src/studio`）。
 - AI 来自你自己的 agent：Arbor 不调用任何模型，也不需要 key。
 - 零件就是一个 `.arbor.json` 文件（特征树 JSON），可以放进 git、可以直接编辑；备注在旁边的 `.notes.json`。
 
@@ -27,7 +27,7 @@ npm start          # 打开 Arbor
 
 ## 下载安装和更新
 
-从 [GitHub Releases](https://github.com/linjiejim/featuretree/releases/latest) 下载 `Arbor-<版本>-arm64.dmg`（Intel Mac 选 `x64`），把 Arbor 拖进「应用程序」。Arbor 没有 Apple 签名，第一次打开时 macOS 会拦一下：到「系统设置 → 隐私与安全性」点「仍要打开」。也可以在终端运行 `xattr -dr com.apple.quarantine /Applications/Arbor.app`。
+从 [GitHub Releases](https://github.com/linjiejim/arbor/releases/latest) 下载 `Arbor-<版本>-arm64.dmg`（Intel Mac 选 `x64`），把 Arbor 拖进「应用程序」。Arbor 没有 Apple 签名，第一次打开时 macOS 会拦一下：到「系统设置 → 隐私与安全性」点「仍要打开」。也可以在终端运行 `xattr -dr com.apple.quarantine /Applications/Arbor.app`。
 
 装好以后 Arbor 会自己更新：启动 15 秒后检查一次，之后每 6 小时检查一次。它读取最新 release 里的 `arbor-update.json`，在后台下载这台机器对应的 zip，校验大小、SHA-256 和签名（公钥内置在 App 里，`desktop/src/update/public-key.ts`），解压到 App 旁边的隐藏文件夹 `.arbor-update/`。下载好以后，标题栏出现「重启以更新到 x.y.z」；不点也没关系，下次退出 Arbor 时会换上新版本。
 

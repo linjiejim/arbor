@@ -116,11 +116,11 @@ export function StudioPage() {
     if (format === "py") {
       const { code, problems } = buildCode(studio.tree)
       if (problems.length) return notify.error(`有 ${problems.length} 处不能安全地写成代码，没有导出：${problems[0]}`)
-      return saveBlob(new Blob([code], { type: "text/x-python" }), "featuretree-model.py")
+      return saveBlob(new Blob([code], { type: "text/x-python" }), "arbor-model.py")
     }
     const blob = format === "json" ? new Blob([JSON.stringify(studio.tree, null, 2)], { type: "application/json" }) : await studio.exportBody(format)
     if (!blob) return notify("还没有实体可以导出")
-    saveBlob(blob, `featuretree-model.${format === "stl" && blob.type === "application/zip" ? "zip" : format}`)
+    saveBlob(blob, `arbor-model.${format === "stl" && blob.type === "application/zip" ? "zip" : format}`)
   }
 
   return (

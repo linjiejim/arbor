@@ -26,7 +26,7 @@ export function HomePage() {
         <div className="bg-blueprint pointer-events-none absolute inset-0 opacity-60 [mask-image:linear-gradient(to_bottom,black,transparent)]" aria-hidden />
         <div className="relative mx-auto grid max-w-[1200px] grid-cols-[1fr_1.15fr] items-center gap-10 px-6 pb-16 pt-12 max-lg:grid-cols-1 max-sm:px-4">
           <div>
-            <div className="font-mono text-small text-primary">FeatureTree / 工业建模互动课</div>
+            <div className="font-mono text-small text-primary">Arbor / 工业建模互动课</div>
             <h1 className="mt-3 text-hero font-semibold tracking-tight">
               看懂每一个特征
               <br />
@@ -146,7 +146,7 @@ export function HomePage() {
 
       <footer className="border-t">
         <div className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-x-6 gap-y-1 px-6 py-6 text-small text-faint-foreground max-sm:px-4">
-          <span>FeatureTree · 2026</span>
+          <span>Arbor · 2026</span>
           <span>几何：build123d + OpenCascade · 渲染：three.js · 草图求解：FreeCAD planegcs</span>
         </div>
       </footer>

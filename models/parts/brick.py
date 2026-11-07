@@ -20,7 +20,7 @@ from build123d import (
     offset,
 )
 
-from ftbake import Dim, Feature, Param, PartModel
+from arborbake import Dim, Feature, Param, PartModel
 
 PITCH = 8.0  # 凸点节距
 GAP = 0.2  # 相邻两块砖之间的间隙

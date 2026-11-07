@@ -11,7 +11,7 @@ solid that only a self-intersection check catches.
 from build123d import Axis, Plane, Rectangle, SortBy, extrude, fillet, offset
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Check
 
-from ftbake import Dim, Feature, Param, PartModel
+from arborbake import Dim, Feature, Param, PartModel
 
 L, W, H = 60.0, 40.0, 30.0
 

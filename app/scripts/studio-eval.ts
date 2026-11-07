@@ -1,5 +1,5 @@
 // Run the studio's evaluation prompts against the real model, headless.
-//   node --env-file=~/.config/featuretree/openrouter.env node_modules/.bin/tsx scripts/studio-eval.ts [ids…] [--thinking=disabled] [--model=…]
+//   node --env-file=~/.config/arbor/openrouter.env node_modules/.bin/tsx scripts/studio-eval.ts [ids…] [--thinking=disabled] [--model=…]
 // Same route as the hosted studio: OpenRouter when OPENROUTER_API_KEY is set, else DeepSeek (DEEPSEEK_API_KEY).
 // Tools execute directly against the kernel (no browser), so `look` is unavailable here.
 import fs from "node:fs"

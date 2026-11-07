@@ -1,10 +1,10 @@
-# FeatureTree · 工业建模互动课
+# Arbor · 工业建模互动课
 
 看懂每一个特征是怎么长出来的。
 
-线上：<https://featuretree.linjiejim.com>（部署见 `docs/deploy.md`）
+线上：<https://arbor.linjiejim.com>（部署见 `docs/deploy.md`）
 
-FeatureTree 是一个中文、讲概念、不绑定软件的 3D 工业建模学习网站。每个建模概念配一个能亲手操作的 3D 场景；真实零件按特征树一步步重建，几何由 OpenCascade 内核算出，每个面都标明是哪一步生成或修改的。
+Arbor 是一个中文、讲概念、不绑定软件的 3D 工业建模学习网站。每个建模概念配一个能亲手操作的 3D 场景；真实零件按特征树一步步重建，几何由 OpenCascade 内核算出，每个面都标明是哪一步生成或修改的。
 
 ## 有什么
 
@@ -17,7 +17,7 @@ FeatureTree 是一个中文、讲概念、不绑定软件的 3D 工业建模学�
 | 工具图鉴 `/atlas` | 18 个建模命令：悬停回放生成过程，抽屉里调参数，8 个软件的官方中文叫法。 |
 | 术语表 `/glossary` | 命令对照表和 28 张概念卡。 |
 | AI 建模工作台 `/studio`（Beta） | 用中文描述零件，AI 助教（默认 DeepSeek `deepseek-flash`）调用 13 种建模特征和查询工具，一步步建出参数化特征树，并讲清每一步的设计意图。几何在浏览器里由 OpenCascade（replicad）算出：每一步可以回滚，面按「新生成 / 被修改」着色并能看出来自哪个特征，参数直接改，导出 STEP、STL 和等价的 build123d 代码。可以附参考图，也有「边做边学」模式（关键步骤先让你预测）。不用 AI 也能从现成的特征树开始。 |
-| 桌面版 **Arbor**（`desktop/`） | 让本机的 coding agent（Claude Code、Codex……）通过 MCP 或命令行建模：38 个建模、观测、核对和协作工具，同一套特征树和内核；几个零件文件可以共用参数、组成装配一起看和核对；能导入开发板、元件的 STEP 模型，围着它建外壳并核对间隙和干涉。你在窗口里实时看每一步、拖参数、改特征，在面或边上留备注给 agent；agent 也能请你在模型上点一下。零件是可以进 git 的 `.arbor.json` 文件。macOS 版从 [Releases](https://github.com/linjiejim/featuretree/releases/latest) 下载，装好后会自动更新。见 [`desktop/README.md`](desktop/README.md)。 |
+| 桌面版 **Arbor**（`desktop/`） | 让本机的 coding agent（Claude Code、Codex……）通过 MCP 或命令行建模：38 个建模、观测、核对和协作工具，同一套特征树和内核；几个零件文件可以共用参数、组成装配一起看和核对；能导入开发板、元件的 STEP 模型，围着它建外壳并核对间隙和干涉。你在窗口里实时看每一步、拖参数、改特征，在面或边上留备注给 agent；agent 也能请你在模型上点一下。零件是可以进 git 的 `.arbor.json` 文件。macOS 版从 [Releases](https://github.com/linjiejim/arbor/releases/latest) 下载，装好后会自动更新。见 [`desktop/README.md`](desktop/README.md)。 |
 
 当前进度、验证结果、已知局限和开源前清单见 [`docs/report.md`](docs/report.md)。
 
@@ -33,7 +33,7 @@ app/                 网站：React 19 + Vite 8 + TypeScript + Tailwind v4 + thr
   e2e/               Playwright 冒烟测试
   public/models/     烘焙好的模型（manifest.json + 每组参数一个 GLB）
 desktop/             桌面版 Arbor：Electron 主进程、MCP 服务和 arbor 命令行、打包
-models/              build123d 模型源码和烘焙器 ftbake
+models/              build123d 模型源码和烘焙器 arborbake
 docs/
   report.md          完成报告：做了什么、怎么验证、局限、下一步
   research/          调研报告和 6 份原始笔记
@@ -97,7 +97,7 @@ cd app && npm run bake
   - 拆解讲解
   - `docs/`，包括调研
 
-同一个文件里两种都有时（例如课程的 `.tsx`），代码按 MIT，给学习者读的文字按 CC BY 4.0。转载课程文字请注明出处 FeatureTree 和许可协议。
+同一个文件里两种都有时（例如课程的 `.tsx`），代码按 MIT，给学习者读的文字按 CC BY 4.0。转载课程文字请注明出处 Arbor 和许可协议。
 
 ## 第三方
 

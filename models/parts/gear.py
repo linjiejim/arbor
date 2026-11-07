@@ -25,7 +25,7 @@ from build123d import (
     make_face,
 )
 
-from ftbake import Dim, Feature, Param, PartModel
+from arborbake import Dim, Feature, Param, PartModel
 
 ALPHA = radians(20)  # 压力角
 UP = (Align.CENTER, Align.CENTER, Align.MIN)

@@ -81,7 +81,7 @@ class GLB:
 
     def save(self, path: str, roots: list[int], asset_extras: dict[str, Any] | None = None) -> int:
         doc: dict[str, Any] = {
-            "asset": {"version": "2.0", "generator": "featuretree ftbake"},
+            "asset": {"version": "2.0", "generator": "arbor arborbake"},
             "scene": 0,
             "scenes": [{"nodes": roots}],
             "nodes": self.nodes,

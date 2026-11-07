@@ -1,5 +1,5 @@
 {
-  "name": "featuretree-app",
+  "name": "arbor-app",
   "private": true,
   "version": "0.0.0",
   "license": "MIT",
@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build && node scripts/prerender.mjs && node scripts/precompress.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
-    "bake": "cd ../models && ../.venv/bin/python -m ftbake",
+    "bake": "cd ../models && ../.venv/bin/python -m arborbake",
     "check": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p e2e/tsconfig.json --noEmit && oxlint src e2e && vitest run src/tests",
     "dev:api": "STUDIO_DATA_DIR=.tmp/studio tsx watch server/index.ts",
     "build:api": "esbuild server/index.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist-server/index.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" --log-level=warning",

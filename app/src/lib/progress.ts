@@ -11,13 +11,20 @@ import { ALL_LESSONS } from "@/content/curriculum"
 type QuizRecord = { score: number; total: number; at: number }
 type Progress = { done: string[]; last?: string; quiz?: Record<string, QuizRecord[]> }
 
-const KEY = "featuretree:progress"
+const KEY = "arbor:progress"
+/** Before the site was called Arbor: read once, moved to KEY, then removed. */
+const OLD_KEY = "featuretree:progress"
 const listeners = new Set<() => void>()
 let cache: Progress | null = null
 
 function read(): Progress {
   if (cache) return cache
   try {
+    const old = localStorage.getItem(KEY) === null ? localStorage.getItem(OLD_KEY) : null
+    if (old !== null) {
+      localStorage.setItem(KEY, old)
+      localStorage.removeItem(OLD_KEY)
+    }
     cache = JSON.parse(localStorage.getItem(KEY) ?? "") as Progress
   } catch {
     cache = { done: [] }

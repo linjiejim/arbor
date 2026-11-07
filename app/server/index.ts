@@ -1,4 +1,4 @@
-// FeatureTree studio API: relays the conversation to the model. Geometry never
+// Arbor studio API: relays the conversation to the model. Geometry never
 // touches this server — the browser runs the kernel and executes the tools.
 //
 //   POST /api/studio/chat    AI SDK UI message stream
