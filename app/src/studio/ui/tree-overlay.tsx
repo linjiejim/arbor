@@ -11,6 +11,7 @@ import { FeatureCard } from "./feature-card"
 import type { Annotations } from "../use-annotations"
 import type { Reselect } from "../use-reselect"
 import type { Studio } from "../use-studio"
+import { Hint } from "@/components/hint"
 
 const OP_ICON: Record<Feature["op"], OpId> = {
   sketch: "sketch",
@@ -53,6 +54,9 @@ export function TreeOverlay({
   parts = NO_PARTS_VIEW,
   onParts,
   readOnly = false,
+  rowActions,
+  partsList = true,
+  footer,
 }: {
   studio: Studio
   onHover: (h: Hover | null) => void
@@ -63,6 +67,12 @@ export function TreeOverlay({
   onParts?: (v: PartsView) => void
   /** A shared link: a click rolls back to that step; no feature card. */
   readOnly?: boolean
+  /** Buttons after a row (the desktop's assembly: show or hide a part, edit it in place). */
+  rowActions?: (f: Feature) => React.ReactNode
+  /** The list of parts with their eyes over the tree (off when the rows carry them). */
+  partsList?: boolean
+  /** Under the list (the desktop's 「+ 零件」). */
+  footer?: React.ReactNode
 }) {
   const { tree, report, rollback } = studio
   const root = React.useRef<HTMLElement>(null)
@@ -81,7 +91,8 @@ export function TreeOverlay({
     onHover(null)
   }
 
-  if (!tree.features.length) return null
+  if (!tree.features.length)
+    return footer ? <nav aria-label="特征树" className="pointer-events-auto absolute top-3 left-3 z-10">{footer}</nav> : null
   const peeked = peek && !editing ? tree.features.findIndex((f) => f.id === peek.id) : -1
   const edited = editing ? tree.features.find((f) => f.id === editing.id) : undefined
   const edit = (f: Feature, el: HTMLElement) => {
@@ -95,13 +106,21 @@ export function TreeOverlay({
     <nav ref={root} aria-label="特征树" className="pointer-events-none absolute top-3 bottom-20 left-3 z-10 flex max-w-[45%] flex-col">
       <div className="pointer-events-auto flex h-7 items-center gap-2 px-2 text-caption text-faint-foreground">
         <span>{tree.features.length} 个特征</span>
+        {tree.features.length > 0 && (
+          <Hint
+            step={2}
+            label="特征树怎么用"
+            side="right"
+            tips={["点一步：模型回到这一步，蓝色是它新生成的面。", "卡片里能改尺寸，也能在模型上重选面或边。", "「回到最新」回到最后一步。"]}
+          />
+        )}
         {rollback && (
           <Button size="sm" variant="secondary" className="h-6 px-2 text-caption" onClick={() => studio.showFeature(null)}>
             回到最新
           </Button>
         )}
       </div>
-      {studio.display?.parts && studio.display.parts.length > 1 && (
+      {partsList && studio.display?.parts && studio.display.parts.length > 1 && (
         <ul aria-label="零件" className="pointer-events-auto mb-1 flex flex-col gap-0.5 border-b pb-1">
           {studio.display.parts.map((p, k) => {
             const hidden = parts.hidden.has(k)
@@ -134,7 +153,7 @@ export function TreeOverlay({
           const active = rollback === f.id
           const after = rollbackIndex >= 0 && i > rollbackIndex
           return (
-            <li key={f.id}>
+            <li key={f.id} className="group/row flex items-center gap-0.5">
               <button
                 type="button"
                 onClick={(e) => (readOnly ? studio.showFeature(active ? null : f.id) : edit(f, e.currentTarget))}
@@ -162,10 +181,12 @@ export function TreeOverlay({
                   <CircleDashed className="size-3.5 shrink-0 text-faint-foreground" aria-label="未重建" />
                 ) : null}
               </button>
+              {rowActions?.(f)}
             </li>
           )
         })}
       </ol>
+      {footer && <div className="pointer-events-auto mt-1 px-1">{footer}</div>}
       {editing && edited && reselect && annotations && (
         <div className="pointer-events-none absolute inset-y-0 left-full ml-1 flex w-80 max-w-[calc(100vw-5rem)] flex-col">
           <div className="pointer-events-auto flex min-h-0 flex-col" style={{ marginTop: Math.max(0, Math.min(editing.top, editing.bound - 380)) }}>

@@ -9,7 +9,7 @@ fillet equals the wall the inner radius is zero and the kernel fails.
 
 from build123d import Axis, Plane, Rectangle, extrude, fillet, offset
 
-from ftbake import Dim, Feature, Param, PartModel
+from arborbake import Dim, Feature, Param, PartModel
 
 L, W, H = 60.0, 40.0, 30.0
 

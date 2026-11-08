@@ -8,7 +8,7 @@ body:
     attributes:
       label: 页面
       description: 出问题的页面链接，课程或拆解请写到第几步。
-      placeholder: https://featuretree.linjiejim.com/teardown/mug 第 9 步
+      placeholder: https://arbor.linjiejim.com/teardown/mug 第 9 步
     validations:
       required: true
   - type: textarea

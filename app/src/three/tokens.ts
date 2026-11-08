@@ -1,7 +1,7 @@
 import * as THREE from "three"
 
 /**
- * The 3D scene palette lives in CSS (src/styles/featuretree-theme.css). The viewport
+ * The 3D scene palette lives in CSS (src/styles/arbor-theme.css). The viewport
  * resolves the custom properties at runtime so light/dark mode and the accent
  * knob switch the scene together with the UI. No colour is hard-coded here.
  */

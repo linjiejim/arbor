@@ -7,4 +7,4 @@ MCowBQYDK2VwAyEAk6Bps+0Dm9ybV/E+BG39B9/rAlpSTcpiRioHkGPZ72w=
 `
 
 /** The latest release's manifest. This repository's "latest" release is always an Arbor release. */
-export const UPDATE_URL = "https://github.com/linjiejim/featuretree/releases/latest/download/arbor-update.json"
+export const UPDATE_URL = "https://github.com/linjiejim/arbor/releases/latest/download/arbor-update.json"

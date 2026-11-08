@@ -486,7 +486,7 @@ export function buildCode(raw: Tree, opts: { title?: string; body?: boolean } = 
   ctx = { problems: [], params: new Set(), badParams: new Set(), where: "", feature: null }
   const warn = problems.length ? [`# 有 ${problems.length} 处没能导出，代码里写成了 None，运行前要先改好：`, ...problems.map((p) => `#   ${p}`), ""] : []
   if (opts.body) return { code: [...warn, "# 参数", ...head, "", "part = None", "", ...body].join("\n").trimEnd(), problems }
-  return { code: [...prelude(opts.title ?? "FeatureTree 工作台导出"), ...warn, "# 参数", ...head, "", "part = None", "", ...body, "show_object(part) if 'show_object' in globals() else None", ""].join("\n"), problems }
+  return { code: [...prelude(opts.title ?? "Arbor 工作台导出"), ...warn, "# 参数", ...head, "", "part = None", "", ...body, "show_object(part) if 'show_object' in globals() else None", ""].join("\n"), problems }
 }
 
 /** `body: true` = just parameters and features (for reading); otherwise a runnable file. */
@@ -519,7 +519,7 @@ function prelude(title: string): string[] {
   return [
     `"""${safeTitle}
 
-由 FeatureTree AI 建模工作台的特征树生成（build123d 代数写法）。
+由 Arbor 工作台的特征树生成（build123d 代数写法）。
 Z 轴朝上，单位毫米。选择器按语义转成 build123d 的过滤；「来自某特征」按「落在该特征的工具体表面上」近似。
 """`,
     "import math",

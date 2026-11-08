@@ -4,11 +4,12 @@
 
 让本机的 coding agent（Claude Code、Codex……）通过 MCP 或命令行建参数化零件；你在 Arbor 窗口里实时看它每一步建了什么，拖参数、改特征，在面或边上留备注，agent 下一次调用就会知道。
 
-名字：arbor 既是「树」（特征树），也是机加工里夹着刀具转的「刀杆 / 心轴」。图标是一根车削出来的阶梯轴，台阶叠起来像一棵松树。
+名字：arbor 既是「树」（特征树），也是机加工里夹着刀具转的「刀杆 / 心轴」。标志是一个拉出厚度的小写 a：草图拉伸成实体。标志和图标由 `resources/logo/make-logo.py`（build123d 精确生成几何）和 `scripts/make-icons.py` 生成。
 
-- 建模能力和网页版 FeatureTree 工作台是同一套：特征树 JSON、语义选择器、OpenCascade 内核（`app/src/studio`）。
+- 建模能力和网页版 Arbor 工作台是同一套：特征树 JSON、语义选择器、OpenCascade 内核（`app/src/studio`）。
 - AI 来自你自己的 agent：Arbor 不调用任何模型，也不需要 key。
 - 零件就是一个 `.arbor.json` 文件（特征树 JSON），可以放进 git、可以直接编辑；备注在旁边的 `.notes.json`。
+- 一个文件夹就是一个项目：左栏列出里面的装配和零件。「文件 → 新建项目」建一个文件夹，里面放同名的空装配和共享参数文件；装配的特征树底部「+ 零件」新建零件（放在 `parts/` 下，共用项目参数）、放进已有零件或 STEP。
 
 ## 装好、跑起来
 
@@ -27,7 +28,7 @@ npm start          # 打开 Arbor
 
 ## 下载安装和更新
 
-从 [GitHub Releases](https://github.com/linjiejim/featuretree/releases/latest) 下载 `Arbor-<版本>-arm64.dmg`（Intel Mac 选 `x64`），把 Arbor 拖进「应用程序」。Arbor 没有 Apple 签名，第一次打开时 macOS 会拦一下：到「系统设置 → 隐私与安全性」点「仍要打开」。也可以在终端运行 `xattr -dr com.apple.quarantine /Applications/Arbor.app`。
+从 [GitHub Releases](https://github.com/linjiejim/arbor/releases/latest) 下载 `Arbor-<版本>-arm64.dmg`（Intel Mac 选 `x64`），把 Arbor 拖进「应用程序」。Arbor 没有 Apple 签名，第一次打开时 macOS 会拦一下：到「系统设置 → 隐私与安全性」点「仍要打开」。也可以在终端运行 `xattr -dr com.apple.quarantine /Applications/Arbor.app`。
 
 装好以后 Arbor 会自己更新：启动 15 秒后检查一次，之后每 6 小时检查一次。它读取最新 release 里的 `arbor-update.json`，在后台下载这台机器对应的 zip，校验大小、SHA-256 和签名（公钥内置在 App 里，`desktop/src/update/public-key.ts`），解压到 App 旁边的隐藏文件夹 `.arbor-update/`。下载好以后，标题栏出现「重启以更新到 x.y.z」；不点也没关系，下次退出 Arbor 时会换上新版本。
 
@@ -42,6 +43,8 @@ npm start          # 打开 Arbor
 1. 改 `desktop/package.json` 的 `version`（同时改 `package-lock.json` 顶部的版本），合并进 main。
 2. 推送 `arbor-v<版本>` tag。工作流 `.github/workflows/arbor-release.yml` 会核对 tag 和版本号是否一致，然后在 macOS 上构建 arm64 和 x64 两个包，签名并打包，建一个草稿 release，上传 dmg、zip 和 `arbor-update.json`。
 3. 检查草稿，然后发布，并设为 latest：`gh release edit arbor-v<版本> --draft=false --latest`。已安装的 App 只读最新一个已发布的 release，发布这一步才算推送了更新。这个仓库的 latest release 只留给 Arbor 用。
+
+仓库原名 `featuretree`，2026-11-08 改名为 `arbor`。0.2.0 及更早的 App 读的是旧仓库地址，靠 GitHub 对改名仓库的转发找到新版本：以后不要再建名叫 `featuretree` 的仓库，否则转发会断。
 
 更新包的签名用一把 ed25519 私钥，存在仓库 secret `ARBOR_UPDATE_KEY`（PEM 格式）；维护者本机备份在 `~/.arbor-release/update-key.pem`。已安装的 App 只认这把钥匙签的更新：换钥匙就要同时换掉 `public-key.ts`，并且所有人都得手动重新下载一次。`release.mjs` 写清单前会先用内置公钥验一遍签名，钥匙不对就在发布时报错，不会等到用户那边才失败。
 
@@ -76,11 +79,11 @@ Claude Code / Codex ──MCP (stdio)──► arbor mcp ──HTTP 127.0.0.1─
 - **谁改的都算**：agent、窗口里的你、直接改文件（编辑器、git），每次改动都记在「动态」里、都能撤销。agent 下一次调用时，结果开头会写「自你上次调用以来，用户改了：W 40 → 45」，避免它把你的改动改回去。
 - **发现**：App 启动时把端口和随机 token 写进 `~/.arbor/engine.json`（权限 600），把怎么启动自己写进 `~/.arbor/app.json`；只监听 127.0.0.1，并检查 Host 头。
 
-## 给 agent 的工具（38 个）
+## 给 agent 的工具（39 个）
 
 | 类 | 工具 |
 | --- | --- |
-| 零件和装配 | `guide`、`open_part`（零件 `.arbor.json` 或装配 `.arbor-asm.json`；带 `context` 就是在装配里改这个零件，其他零件半透明显示在旁边）、`list_parts`、`get_state`、`share_params`（几个零件共用一个参数文件 `*.params.json`） |
+| 零件和装配 | `guide`、`open_project`（一个文件夹作为项目，`create` 建出空装配和参数文件）、`open_part`（零件 `.arbor.json` 或装配 `.arbor-asm.json`；带 `context` 就是在装配里改这个零件，其他零件半透明显示在旁边）、`list_parts`（项目里的全部装配和零件）、`get_state`、`share_params`（几个零件共用一个参数文件 `*.params.json`） |
 | 建模（和网页工作台同一套） | `set_params`、`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`split`、`rib`、`edit_feature`、`delete_feature` |
 | 只有桌面版的建模 | `import`：读一个 STEP 文件（开发板、元件的官方模型），缺省作参考体；`component`：装配里放一个零件文件、子装配或 STEP。建模工具还多几个写法：加料时 `part` 写新名字就新建零件、`mode: "intersect"` 求交、`revolve.start` / `symmetric`、草图点的 `spline` 和拐角圆角 `r`、`extrude.onto` 沿平面或圆柱面等深刻字 |
 | 整体改 | `set_tree`（可带 `base_rev` 防止覆盖）、`move_feature`、`undo`、`redo` |
@@ -118,7 +121,8 @@ node scripts/smoke-mcp.mjs --app                           # 连正在运行的 
 npm start -- --remote-debugging-port=9223                  # 然后：
 node scripts/cdp.mjs shot out.png                          #   给窗口截图
 node scripts/cdp.mjs click 520 470                         #   在窗口里点（CSS 像素）
-python3 -I scripts/make-icons.py                           # 从 resources/logo/ 重新生成图标
+../.venv/bin/python -I resources/logo/make-logo.py         # 重新生成标志（SVG、网页用的路径、favicon）
+python3 -I scripts/make-icons.py                           # 从标志生成 App 图标
 ```
 
 代码在哪：
@@ -137,6 +141,5 @@ python3 -I scripts/make-icons.py                           # 从 resources/logo/
 - 只有 macOS 包（arm64 和 x64），没有 Apple 签名和公证，第一次打开要在系统设置里放行。
 - 没有「代码特征」：特征树表达不了的形状还做不了（规划见 `docs/specs/2026-11-07-arbor-desktop.md`）。
 - 导入的 STEP 是一个整体：选择器选不到它的面，核对只能对整个参考体量间隙和干涉；`mode: "cut"` 减去的是元件本身的外形，要留间隙得先在别处把它放大。
-- 工作台里的「让助教改」按钮在桌面版会打开「给 agent 留一条备注」，但按钮上的字还是「助教」（共用组件里的文字）。
 - 一个内核同一时间只装一个零件：agent 和窗口在不同零件之间来回切换时，每次切换要重建一次。
 - `request_pick` 一次最多等 280 秒；没等到就返回，agent 用同一句 prompt 再调用会接着等，期间你点的也不会丢。

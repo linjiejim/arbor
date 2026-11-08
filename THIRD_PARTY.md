@@ -1,6 +1,6 @@
 # 第三方组件与许可
 
-FeatureTree 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和文档用 CC BY 4.0（[`LICENSE-content`](LICENSE-content)）。下面是用到的第三方组件。许可证一栏取自 `app/node_modules` 里各包的 `package.json` 和 LICENSE 文件，以及 Python 环境里各包的 PyPI 元数据；版本是 `app/package-lock.json` 和 `models/requirements.txt` 锁定的版本。
+Arbor 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和文档用 CC BY 4.0（[`LICENSE-content`](LICENSE-content)）。下面是用到的第三方组件。许可证一栏取自 `app/node_modules` 里各包的 `package.json` 和 LICENSE 文件，以及 Python 环境里各包的 PyPI 元数据；版本是 `app/package-lock.json` 和 `models/requirements.txt` 锁定的版本。
 
 按是否随网站发布分成三类：
 

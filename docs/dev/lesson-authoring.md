@@ -1,6 +1,6 @@
 # 写一节互动课
 
-FeatureTree 的每节互动课由两个文件组成，放在 `app/src/content/lessons/`：
+Arbor 的每节互动课由两个文件组成，放在 `app/src/content/lessons/`：
 
 | 文件 | 内容 |
 | --- | --- |

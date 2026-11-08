@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
 import { StateView } from "@/components/ui/state"
+import { Hint } from "@/components/hint"
 import { arbor } from "../bridge"
 import type { Actor, DocState, PartNote, Snapshot } from "../core/protocol"
 import { AgentStatus } from "./title-bar"
@@ -29,10 +30,18 @@ export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate
             { value: "all", label: `全部 ${doc.notes.length}` },
           ]}
         />
-        <Button size="sm" variant="ghost" onClick={onWrite}>
-          <PenLine />
-          写一条
-        </Button>
+        <div className="flex items-center gap-1">
+          <Hint
+            step={4}
+            label="备注怎么用"
+            align="end"
+            tips={["在模型上单击一个面或一条边，写下要改什么。", "关于整个零件的，点「写一条」。", "agent 用 get_notes 读备注，改完会写一句回复。"]}
+          />
+          <Button size="sm" variant="ghost" onClick={onWrite}>
+            <PenLine />
+            写一条
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {list.length === 0 ? (
@@ -40,7 +49,6 @@ export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate
             size="sm"
             kind="empty"
             title={filter === "open" && doc.notes.length ? "备注都处理完了" : "还没有备注"}
-            description="在模型上单击一个面或一条边，写下要改什么；关于整个零件的，点「写一条」。Agent 用 get_notes 读到它们，点在模型上的那些还带着只选中那个面或边的选择器。"
           />
         ) : (
           <ul className="divide-y">
@@ -110,12 +118,13 @@ export function ActivityPanel({ doc, snapshot }: { doc: DocState; snapshot: Snap
   const now = useNow()
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex h-11 shrink-0 items-center border-b px-4">
+      <div className="flex h-11 shrink-0 items-center gap-1 border-b px-4">
         <AgentStatus snapshot={snapshot} pick={null} />
+        <Hint className="ml-auto" align="end" label="动态是什么" tips={["agent、你在窗口里，或者直接改文件：每一次改动都记在这里。", "每一条都能撤销（⌘Z）。"]} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {doc.changes.length === 0 ? (
-          <StateView size="sm" kind="empty" title="还没有改动" description="Agent、你在窗口里，或者有人直接改了文件，每一次改动都会记在这里，并且都能撤销。" />
+          <StateView size="sm" kind="empty" title="还没有改动" />
         ) : (
           <ul className="divide-y">
             {doc.changes.map((c) => (

@@ -21,7 +21,7 @@
 
 ## 例外
 
-- **3D 场景色板**：`--scene-*` 和 `--axis-*` 写在 `src/styles/featuretree-theme.css`，运行时由 `src/three/tokens.ts` 读出，亮暗模式随 UI 一起切换。坐标轴沿用所有 CAD 软件通用的 X 红 / Y 绿 / Z 蓝，只出现在坐标轴指示器和网格中轴线上，不承担任何状态含义。
+- **3D 场景色板**：`--scene-*` 和 `--axis-*` 写在 `src/styles/arbor-theme.css`，运行时由 `src/three/tokens.ts` 读出，亮暗模式随 UI 一起切换。坐标轴沿用所有 CAD 软件通用的 X 红 / Y 绿 / Z 蓝，只出现在坐标轴指示器和网格中轴线上，不承担任何状态含义。
 - **内容动效时长**：视口里「轮廓旋转成实体」「相机转到草图平面」这类动画本身就是讲解内容，时长 0.7–1.4s，不受 120–240ms 的界面动效限制。减少动态效果时一律直接跳到结果（`src/three/tween.ts`）。
 - **不用 AppShell 侧栏**：浏览页用 48px 顶栏；课程页和拆解页是沉浸式全屏，带自己的顶栏，因为 3D 视口需要宽度。
 - **参数滑杆**：kit 里还没有 Slider，`src/components/param-slider.tsx` 用原生 range 加 `accent-primary`，并配一个精确数值输入框。确认这个形态后，应提回 jim-uiux。

@@ -29,7 +29,7 @@ const arg = (name) => {
 }
 const keyFile = arg("--key")
 const key = process.env.ARBOR_UPDATE_KEY || (keyFile ? readFileSync(keyFile.replace(/^~(?=\/)/, os.homedir()), "utf8") : null)
-const baseUrl = arg("--base-url") ?? `https://github.com/linjiejim/featuretree/releases/download/arbor-v${version}`
+const baseUrl = arg("--base-url") ?? `https://github.com/linjiejim/arbor/releases/download/arbor-v${version}`
 
 const out = path.join(root, "release/upload")
 rmSync(out, { recursive: true, force: true })

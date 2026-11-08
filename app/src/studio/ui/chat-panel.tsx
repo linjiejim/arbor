@@ -16,6 +16,7 @@ import { ANNOTATED_VIEW, errorText, MAX_CALLS_PER_TURN, type StudioChat } from "
 import { Annotations as AnnotationList, circled, type Annotation } from "../annotations"
 import type { Annotations, Note } from "../use-annotations"
 import { Markdown } from "./markdown"
+import { Hint } from "@/components/hint"
 
 const EXAMPLES = [
   "做一个 80×50×30 的小盒子，顶部开口，壁厚 2，竖边 R6 圆角",
@@ -57,12 +58,18 @@ export function ChatPanel({
   onSelectFeature,
   onLoad,
   ready,
+  model,
+  practicing = false,
 }: {
   chat: StudioChat
   annotations: Annotations
   onSelectFeature: (id: string) => void
   onLoad: (t: Tree) => void
   ready: boolean
+  /** The model behind the tutor, for the ⓘ. */
+  model?: string
+  /** A practice is on: its card says what to build, so no example prompts or starters. */
+  practicing?: boolean
 }) {
   const [text, setText] = React.useState("")
   const [files, setFiles] = React.useState<FileUIPart[]>([])
@@ -144,6 +151,8 @@ export function ChatPanel({
         <div ref={content} data-empty={chat.messages.length === 0 || undefined} className="px-4 pt-4 pb-2">
           {chat.messages.length === 0 ? (
             <Intro
+              model={model}
+              practicing={practicing}
               onPick={(t) => {
                 if (!ready) return
                 stick.current = true
@@ -155,7 +164,7 @@ export function ChatPanel({
           ) : (
             <div className="space-y-4">
               {chat.messages.map((m, i) => (
-                <Message key={m.id} m={m} notes={notesFor[i]} streaming={chat.busy && i === chat.messages.length - 1} onShow={annotations.show} onSelectFeature={onSelectFeature} />
+                <Message key={m.id} m={m} notes={notesFor[i]} streaming={chat.busy && i === chat.messages.length - 1} onShow={annotations.show} onSelectFeature={onSelectFeature} terms={chat.mode === "teach"} />
               ))}
               {chat.paused && (
                 <div className="rounded-md border p-3 text-small text-muted-foreground">
@@ -251,13 +260,35 @@ export function ChatPanel({
   )
 }
 
-function Intro({ onPick, onLoad, disabled }: { onPick: (t: string) => void; onLoad: (t: Tree) => void; disabled: boolean }) {
+function Intro({ onPick, onLoad, disabled, model, practicing }: { onPick: (t: string) => void; onLoad: (t: Tree) => void; disabled: boolean; model?: string; practicing?: boolean }) {
   return (
     <div>
-      <h2 className="text-heading font-semibold">用说的来建模</h2>
-      <p className="mt-2 text-body text-muted-foreground">
-        描述零件的形状和尺寸，助教会一步步建出参数化特征树：每一步都能回滚查看，参数可以直接拖。几何由 OpenCascade 内核在你的浏览器里算出。
-      </p>
+      <h2 className="flex items-center gap-1.5 text-heading font-semibold">
+        用说的来建模
+        <Hint
+          step={1}
+          label="怎么用"
+          tips={[
+            "说出零件的形状和尺寸，助教一步步建出参数化特征树。",
+            "「边做边学」：关键步骤先让你猜，再讲为什么。",
+            "每一步都能回滚查看，参数可以直接拖。",
+            "几何由 OpenCascade 内核在你的浏览器里算出。",
+            ...(model ? [`助教用的模型：${model}`] : []),
+          ]}
+        />
+      </h2>
+      {practicing ? (
+        <p className="mt-2 text-body text-muted-foreground">说说你打算怎么做，助教会带你一步步建；也可以自己在模型上动手。</p>
+      ) : (
+        <Examples onPick={onPick} onLoad={onLoad} disabled={disabled} />
+      )}
+    </div>
+  )
+}
+
+function Examples({ onPick, onLoad, disabled }: { onPick: (t: string) => void; onLoad: (t: Tree) => void; disabled: boolean }) {
+  return (
+    <>
       <div className="mt-4 text-small text-faint-foreground">试试这些</div>
       <div className="mt-2 flex flex-col gap-2">
         {EXAMPLES.map((e) => (
@@ -287,7 +318,7 @@ function Intro({ onPick, onLoad, disabled }: { onPick: (t: string) => void; onLo
           </button>
         ))}
       </div>
-    </div>
+    </>
   )
 }
 
@@ -297,6 +328,7 @@ function Message({
   streaming,
   onShow,
   onSelectFeature,
+  terms,
 }: {
   m: UIMessage
   notes: Annotation[] | null
@@ -304,6 +336,8 @@ function Message({
   streaming: boolean
   onShow: (a: Annotation) => void
   onSelectFeature: (id: string) => void
+  /** 「边做边学」: concepts in the reply open their glossary card. */
+  terms: boolean
 }) {
   const onPin = React.useMemo(
     () =>
@@ -355,7 +389,7 @@ function Message({
     <div className="space-y-2">
       {thoughts.length > 0 && <Reasoning parts={thoughts} />}
       {m.parts.map((p, i) => {
-        if (p.type === "text") return p.text.trim() ? <Markdown key={i} text={p.text} onPin={onPin} streaming={streaming && p.state === "streaming"} /> : null
+        if (p.type === "text") return p.text.trim() ? <Markdown key={i} text={p.text} onPin={onPin} streaming={streaming && p.state === "streaming"} terms={terms && m.role === "assistant"} /> : null
         if (p.type.startsWith("tool-")) return <ToolCard key={i} part={p as ToolPart} onSelectFeature={onSelectFeature} />
         return null
       })}

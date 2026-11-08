@@ -1,7 +1,7 @@
 """Bake every model into the web app.
 
-  python -m ftbake            # all models
-  python -m ftbake mug brick  # some
+  python -m arborbake            # all models
+  python -m arborbake mug brick  # some
 
 For a part, every combination of the sandbox parameters (``Param.values``)
 is built feature by feature. Each combination becomes one GLB holding all

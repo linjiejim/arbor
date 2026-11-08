@@ -2,7 +2,7 @@
 // and a watcher on the part's folder, since editors and git replace files
 // rather than writing into them.
 import { realpathSync, watch, type FSWatcher } from "node:fs"
-import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises"
+import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promises"
 import path from "node:path"
 import type { Files } from "../../../app/src/desktop/core/engine"
 
@@ -30,6 +30,16 @@ export const nodeFiles: Files = {
       return s.isFile() ? { size: s.size, mtimeMs: s.mtimeMs } : null
     } catch {
       return null
+    }
+  },
+  async list(dir) {
+    try {
+      return (await readdir(dir, { withFileTypes: true })).map((d) => ({ name: d.name, dir: d.isDirectory() }))
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code
+      if (code === "ENOENT" || code === "ENOTDIR") return null
+      if (code === "EACCES" || code === "EPERM") return []
+      throw e
     }
   },
   async write(p, data) {

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>FeatureTree 改名为 Arbor</title>
+    <noscript><meta http-equiv="refresh" content="0; url=https://arbor.linjiejim.com/" /></noscript>
+    <style>
+      body { margin: 0; height: 100vh; display: grid; place-items: center; font: 15px/1.6 system-ui, sans-serif; background: #191919; color: #ececec; }
+      a { color: #7ea6ff; }
+    </style>
+  </head>
+  <body>
+    <!--
+      Served by the old host (featuretree.linjiejim.com) for every page. localStorage belongs to the
+      host, so this carries the browser's progress, model and settings to arbor.linjiejim.com in the
+      fragment (never sent to a server), together with the link's own fragment. The new host merges it
+      (safe to repeat: it is sent on every visit) and clears the address. See src/lib/moved.ts.
+    -->
+    <p>FeatureTree 改名为 Arbor，正在带上你的学习进度去 <a id="to" href="https://arbor.linjiejim.com/">arbor.linjiejim.com</a>……</p>
+    <script>
+      ;(function () {
+        var NEW = "https://arbor.linjiejim.com"
+        var LIMIT = 1500000
+        // On the new host itself (someone typed the path): home, keeping any hand-over.
+        if (location.host === "arbor.linjiejim.com") return location.replace("/" + location.search + location.hash)
+        var path = location.pathname === "/moved.html" ? "/" : location.pathname
+        var to = NEW + path + location.search
+        var keys = ["arbor:progress", "featuretree:progress", "ft-studio-v1", "ft-studio-mode", "ft-studio-panel-w", "ft-studio-shares-v1", "arbor:practice"]
+        var d = {}
+        var n = 0
+        try {
+          for (var i = 0; i < keys.length; i++) {
+            var v = localStorage.getItem(keys[i])
+            if (v === null) continue
+            // The workbench's model goes along; its undo history stays (it can be long).
+            if (keys[i] === "ft-studio-v1") {
+              try {
+                v = JSON.stringify({ tree: JSON.parse(v).tree, history: [] })
+              } catch (e) {
+                continue
+              }
+            }
+            d[keys[i]] = v
+            n++
+          }
+        } catch (e) {}
+        var hash = location.hash
+        if (n) {
+          var pack = function () {
+            return "#arbor-move=" + encodeURIComponent(JSON.stringify({ d: d, h: location.hash || undefined }))
+          }
+          // Too long for an address: the biggest things stay behind first, progress last.
+          var drop = ["ft-studio-v1", "ft-studio-shares-v1", "arbor:practice", "ft-studio-panel-w", "ft-studio-mode"]
+          var moved = pack()
+          for (var j = 0; moved.length > LIMIT && j < drop.length; j++) {
+            delete d[drop[j]]
+            moved = pack()
+          }
+          if (moved.length <= LIMIT) hash = moved
+        }
+        document.getElementById("to").href = to
+        location.replace(to + hash)
+      })()
+    </script>
+  </body>
+</html>

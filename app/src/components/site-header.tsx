@@ -14,7 +14,8 @@ const NAV = [
   { to: "/teardown", label: "案例拆解" },
   { to: "/atlas", label: "工具图鉴" },
   { to: "/glossary", label: "术语表" },
-  { to: "/studio", label: "AI 工作台" },
+  { to: "/studio", label: "工作台" },
+  { to: "/desktop", label: "桌面版" },
 ]
 
 /**
@@ -26,7 +27,7 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur-sm">
       <div className="mx-auto flex h-12 max-w-[1200px] items-center gap-2 px-6 max-sm:px-4">
-        <Link to="/" className="mr-4 rounded-sm" aria-label="FeatureTree 首页">
+        <Link to="/" className="mr-4 rounded-sm" aria-label="Arbor 首页">
           <Brand />
         </Link>
         <nav className="flex items-center gap-0.5 max-md:hidden">

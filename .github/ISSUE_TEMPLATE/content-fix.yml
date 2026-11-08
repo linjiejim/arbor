@@ -13,7 +13,7 @@ body:
     attributes:
       label: 在哪里
       description: 页面链接，以及第几步、哪道题或哪张卡。
-      placeholder: https://featuretree.linjiejim.com/lesson/projection 第 5 步
+      placeholder: https://arbor.linjiejim.com/lesson/projection 第 5 步
     validations:
       required: true
   - type: textarea

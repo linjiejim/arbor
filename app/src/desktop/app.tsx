@@ -1,19 +1,22 @@
 import * as React from "react"
 import { Boxes, CircleAlert, MousePointerClick, Sparkles, X } from "lucide-react"
+import { Tour } from "@/components/hint"
 import { Button, IconButton } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { notify } from "@/components/ui/toast"
 import { renderShots, renderViews } from "@/studio/look"
 import { NO_PARTS_VIEW, type Hover, type PartsView } from "@/studio/scene"
 import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
+import { DrawingSheet } from "@/studio/ui/drawing-sheet"
+import { DESKTOP_WORDS, WordsContext } from "@/studio/ui/host-words"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
 import { useReselect } from "@/studio/use-reselect"
 import { arbor } from "./bridge"
 import type { DocState, PartNote, PickRequest, ShowRequest } from "./core/protocol"
-import { besides } from "./core/sources"
 import { asNote, useDesktopNotes, useDesktopStudio, useEngine } from "./use-desktop"
 import { AgentSetupDialog } from "./ui/agent-setup"
+import { AddPartMenu, ComponentActions } from "./ui/assembly"
 import { NoteComposer } from "./ui/note-composer"
 import { PartsSidebar } from "./ui/parts-sidebar"
 import { ActivityPanel, NotesPanel } from "./ui/side-panels"
@@ -37,6 +40,8 @@ export function DesktopApp() {
   const [treeHover, setTreeHover] = React.useState<Hover | null>(null)
   const [setupOpen, setSetupOpen] = React.useState(false)
   const [tab, setTab] = React.useState("notes")
+  /** 「工程图」 over the 3D view; parameters stay editable beside it. */
+  const [sheet, setSheet] = React.useState(false)
 
   // The agent's `look`: render the views it asked for, from the mesh the engine sent.
   React.useEffect(
@@ -79,9 +84,12 @@ export function DesktopApp() {
   // A pick request is answered only on the part it asks about.
   const pickHere = pick && pick.path === path ? pick : null
 
+  const assembly = doc?.kind === "assembly" && !doc.context
   return (
+    <WordsContext.Provider value={DESKTOP_WORDS}>
+    <Tour page="desktop" ready={Boolean(doc)}>
     <div className="flex h-dvh flex-col bg-background">
-      <TitleBar snapshot={snapshot} doc={doc} pick={pick} onSetup={() => setSetupOpen(true)} />
+      <TitleBar snapshot={snapshot} doc={doc} pick={pick} onSetup={() => setSetupOpen(true)} sheet={sheet && Boolean(doc)} onSheet={setSheet} />
       <div className="flex min-h-0 flex-1">
         <PartsSidebar snapshot={snapshot} />
         <main className="relative min-h-0 min-w-0 flex-1">
@@ -97,7 +105,22 @@ export function DesktopApp() {
                 parts={partsView}
                 onParts={setPartsView}
               />
-              <TreeOverlay studio={studio} onHover={setTreeHover} reselect={reselect} annotations={notes} parts={partsView} onParts={setPartsView} />
+              <TreeOverlay
+                studio={studio}
+                onHover={setTreeHover}
+                reselect={reselect}
+                annotations={notes}
+                parts={partsView}
+                onParts={setPartsView}
+                partsList={!assembly}
+                rowActions={assembly ? (f) => <ComponentActions f={f} doc={doc} studio={studio} view={partsView} onView={setPartsView} /> : undefined}
+                footer={assembly ? <AddPartMenu doc={doc} /> : undefined}
+              />
+              {sheet && (
+                <div className="absolute inset-0 z-30 bg-background">
+                  <DrawingSheet studio={studio} title={doc.name} />
+                </div>
+              )}
               <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex flex-col items-center gap-2 px-56">
                 {pick && <PickBanner request={pick} elsewhere={pick.path !== path} />}
                 {show && show.path === path && !pick && <ShowBanner request={show} onClose={clearShow} />}
@@ -106,7 +129,7 @@ export function DesktopApp() {
                     {doc.error}
                   </Banner>
                 )}
-                {!pick && <AssemblyBanner doc={doc} />}
+                {!pick && doc.context && <ContextBanner doc={doc} />}
               </div>
             </>
           ) : (
@@ -130,11 +153,7 @@ export function DesktopApp() {
               <ActivityPanel doc={doc} snapshot={snapshot} />
             </TabsContent>
             <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
-              {Object.keys(doc.tree.params).length || doc.tree.checks?.length ? (
-                <ParamsPanel studio={studio} onHover={setTreeHover} annotations={notes} />
-              ) : (
-                <p className="px-4 py-4 text-body text-muted-foreground">还没有参数。Agent 会把关键尺寸定成参数，之后可以在这里直接改。</p>
-              )}
+              <ParamsPanel studio={studio} onHover={setTreeHover} annotations={notes} />
             </TabsContent>
             <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
               <CodePanel studio={studio} />
@@ -154,6 +173,8 @@ export function DesktopApp() {
         }}
       />
     </div>
+    </Tour>
+    </WordsContext.Provider>
   )
 }
 
@@ -170,45 +191,21 @@ function Banner({ tone, icon, children, action, keep }: { tone: "info" | "warnin
   )
 }
 
-/**
- * Assemblies: inside one, say so and offer the way back; on one, offer to edit each part in place
- * (the others stay around it, see-through).
- */
-function AssemblyBanner({ doc }: { doc: DocState }) {
-  if (doc.context)
-    return (
-      <Banner
-        tone="info"
-        icon={<Boxes />}
-        action={
-          <Button size="sm" variant="secondary" onClick={() => void arbor.call("open_part", { path: doc.context!.assembly })}>
-            回到装配
-          </Button>
-        }
-      >
-        在装配「{doc.context.name}」里编辑 · 其他零件半透明，只读
-      </Banner>
-    )
-  if (doc.kind !== "assembly") return null
-  const comps = doc.tree.features.flatMap((f) => (f.op === "component" ? [f] : []))
-  if (!comps.length) return null
-  const files = [...new Map(comps.filter((c) => !/\.(step|stp)$/i.test(c.file)).map((c) => [c.file, c])).values()]
+/** Editing a part inside an assembly: say so, and the way back. */
+function ContextBanner({ doc }: { doc: DocState }) {
+  if (!doc.context) return null
   return (
     <Banner
       tone="info"
       icon={<Boxes />}
       keep
       action={
-        <div className="flex flex-wrap justify-end gap-1">
-          {files.slice(0, 6).map((c) => (
-            <Button key={c.file} size="sm" variant="secondary" onClick={() => void arbor.call("open_part", { path: besides(doc.path, c.file), context: doc.path })}>
-              改 {c.name ?? c.file.split("/").pop()}
-            </Button>
-          ))}
-        </div>
+        <Button size="sm" variant="secondary" onClick={() => void arbor.call("open_part", { path: doc.context!.assembly })}>
+          回到装配
+        </Button>
       }
     >
-      装配 · {comps.length} 个零件
+      在「{doc.context.name}」里编辑「{doc.name}」
     </Banner>
   )
 }

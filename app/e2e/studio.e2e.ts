@@ -1,3 +1,4 @@
+import { PRACTICE } from "../src/content/practice"
 import { expect, expectRendered, test } from "./fixtures"
 
 /**
@@ -22,8 +23,10 @@ test.describe("工作台", () => {
     await tree.getByRole("button").nth(2).hover()
     await expect(page.getByRole("tooltip").getByText("单击看尺寸和选择"), "hovering a feature shows its details").toBeVisible()
     await expect(page.getByRole("status"), "the turn's status line is gone once it's done").toHaveCount(0)
-    await page.getByRole("tab", { name: "代码" }).first().click()
-    await expect(page.getByText(/extrude\(sk_sk1, amount=H\)/).first()).toBeVisible()
+    await page.getByRole("button", { name: "更多" }).click()
+    await page.getByRole("menuitem", { name: "代码" }).click()
+    await expect(page.getByRole("dialog", { name: "代码" }).getByText(/extrude\(sk_sk1, amount=H\)/).first()).toBeVisible()
+    await page.keyboard.press("Escape")
 
     // The requirements, measured by the kernel: a card in the chat, a live list on the parameters tab.
     await page.getByRole("tab", { name: "对话" }).click()
@@ -184,7 +187,7 @@ test.describe("工作台", () => {
   test("/studio 分享链接：另一个浏览器打开、试参数、复制到工作台、撤销", async ({ page, browser }) => {
     await page.goto("/studio?start=flange")
     await expect(page.getByText("5 个特征").first()).toBeVisible({ timeout: 90_000 })
-    await page.getByRole("button", { name: "分享模型" }).click()
+    await page.getByRole("button", { name: "分享", exact: true }).click()
     const dialog = page.getByRole("dialog", { name: "分享模型" })
     await dialog.getByLabel("标题").fill("法兰盘")
     await dialog.getByLabel("说明").fill("第三课作业")
@@ -251,7 +254,7 @@ test.describe("工作台", () => {
 
     // From the menu.
     const chooser = page.waitForEvent("filechooser")
-    await page.getByRole("button", { name: "导出与导入" }).click()
+    await page.getByRole("button", { name: "更多" }).click()
     await page.getByRole("menuitem", { name: "导入特征树（JSON）…" }).click()
     await (await chooser).setFiles({ name: "垫块.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(pad)) })
     await expect(page.getByText("已导入「垫块」")).toBeVisible()
@@ -278,7 +281,8 @@ test.describe("工作台", () => {
   test("/studio 工程图：三视图、尺寸、标题栏，导出 SVG", async ({ page }) => {
     await page.goto("/studio?start=flange")
     await expect(page.getByRole("navigation", { name: "特征树" }).getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
-    await page.getByRole("radio", { name: "工程图" }).click()
+    await page.getByRole("button", { name: "更多" }).click()
+    await page.getByRole("menuitem", { name: "工程图" }).click()
     const sheet = page.getByRole("img", { name: /工程图/ })
     await expect(sheet).toBeVisible()
     await expect(sheet.getByText("⌀90")).toBeVisible()
@@ -291,7 +295,7 @@ test.describe("工作台", () => {
     await page.getByRole("button", { name: "导出 SVG" }).click()
     expect((await download).suggestedFilename()).toMatch(/工程图\.svg$/)
     // Back to 3D.
-    await page.getByRole("radio", { name: "3D" }).click()
+    await page.getByRole("button", { name: "回到 3D" }).click()
     await expect(sheet).toHaveCount(0)
   })
 
@@ -310,5 +314,54 @@ test.describe("工作台", () => {
     await page.getByLabel("d0", { exact: true }).fill("40")
     await page.getByLabel("d0", { exact: true }).press("Enter")
     await expect(page.getByLabel("失败")).toHaveCount(0)
+  })
+
+  test("/studio 第一次进来：ⓘ 按顺序导览，跳过后不再弹出", async ({ page }) => {
+    // First load only: init scripts run again on reload, and the reload must see what the tour wrote.
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem("tour-reset")) return
+      sessionStorage.setItem("tour-reset", "1")
+      localStorage.removeItem("arbor:tour:studio")
+    })
+    await page.goto("/studio?start=flange")
+    await expect(page.getByRole("navigation", { name: "特征树" }).getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
+    const pop = page.getByRole("dialog").filter({ hasText: "导览" })
+    await expect(pop.getByText("导览 1/3")).toBeVisible()
+    await expect(pop).toContainText("说出零件的形状和尺寸")
+    // Through the first hint's tips, then on to the feature tree's.
+    for (let i = 0; i < 6 && (await pop.getByText("导览 1/3").isVisible()); i++) await pop.getByRole("button", { name: "下一条" }).click()
+    await expect(pop.getByText("导览 2/3")).toBeVisible()
+    await expect(pop).toContainText("点一步：模型回到这一步")
+    await pop.getByRole("button", { name: "跳过导览" }).click()
+    await expect(pop).toHaveCount(0)
+    await page.reload()
+    await expect(page.getByRole("navigation", { name: "特征树" }).getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
+    await page.waitForTimeout(1200)
+    await expect(page.getByText(/^导览 \d\/\d$/), "seen: it doesn't start again").toHaveCount(0)
+    // Any ⓘ still opens on its own.
+    await page.getByRole("button", { name: "特征树怎么用" }).click()
+    await expect(page.getByRole("dialog")).toContainText("点一步：模型回到这一步")
+  })
+
+  test("/studio?practice= 练习：要求实时打勾，做到了就完成", async ({ page }) => {
+    const p = PRACTICE.find((x) => x.id === "sketch-to-solid-1")!
+    await page.goto(`/studio?practice=${p.id}`)
+    const card = page.getByRole("region", { name: "练习" })
+    await expect(card.getByText(p.title)).toBeVisible()
+    await expect(card.getByText(`0/${p.checks.length}`)).toBeVisible({ timeout: 90_000 })
+    await expect(page).toHaveURL(/\/studio$/)
+    // Import the reference answer: every requirement ticks, the practice is done.
+    const chooser = page.waitForEvent("filechooser")
+    await page.getByRole("button", { name: "更多" }).click()
+    await page.getByRole("menuitem", { name: "导入特征树（JSON）…" }).click()
+    await (await chooser).setFiles({ name: "答案.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify(p.solution)) })
+    await expect(card.getByText(`${p.checks.length}/${p.checks.length}`)).toBeVisible()
+    await expect(card.getByText("练习完成")).toBeVisible()
+    // The requirements stayed pinned in the imported tree; the lesson shows it done.
+    await page.reload()
+    await expect(page.getByRole("region", { name: "练习" }).getByText(`${p.checks.length}/${p.checks.length}`)).toBeVisible({ timeout: 90_000 })
+    await page.getByRole("button", { name: "退出练习" }).click()
+    await expect(page.getByRole("region", { name: "练习" })).toHaveCount(0)
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem("arbor:progress") ?? "{}").done)).toContain(`practice:${p.id}`)
   })
 })

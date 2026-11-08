@@ -25,7 +25,7 @@ from build123d import (
     offset,
 )
 
-from ftbake import Dim, Feature, Param, PartModel
+from arborbake import Dim, Feature, Param, PartModel
 
 W, L, R, H = 68.0, 52.0, 10.0, 11.0  # 外形、角半径、高度（分型面在 z = 11）
 BOSSES = [(26, 18), (-26, 18), (-26, -18), (26, -18)]

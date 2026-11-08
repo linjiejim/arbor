@@ -24,7 +24,7 @@ from build123d import (
     offset,
 )
 
-from ftbake import AssemblyModel, Part, Recorder
+from arborbake import AssemblyModel, Part, Recorder
 from parts import enclosure_bottom
 
 W, L, R, T = 68.0, 52.0, 10.0, 1.8  # 外形、角半径、壁厚

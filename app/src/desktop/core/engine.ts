@@ -5,7 +5,7 @@
 import type { PickInfo } from "../../studio/annotations"
 import { executeTool, moveFeature, treeText, type KernelPort } from "../../studio/apply"
 import { toBuild123d } from "../../studio/codegen"
-import { EMPTY_TREE, Feature, Tree, displayName } from "../../studio/dsl"
+import { EMPTY_TREE, Feature, Tree, componentName, displayName } from "../../studio/dsl"
 import type { BuildReport, ComponentSource, ContextSource, DisplayData } from "../../studio/kernel/build"
 import { num, num as evalNum } from "../../studio/expr"
 import {
@@ -31,6 +31,7 @@ import type { MeasureResult, MeasureSpec } from "../../studio/kernel/measure"
 import { STARTERS } from "../../studio/starters"
 import { resolveParams } from "../../studio/expr"
 import { ASM_EXT, besides, effectiveTree, gather, isAssembly, loadShared, shadowed, sharedText, type Shared } from "./sources"
+import { baseName, canBeRoot, dirName, inside, isAssemblyFile, partFileName, projectSkeleton, relativePath, rootFor, scanProject, stripEnding, type Scan, type ScanCache } from "./project"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
 import { AGENT_GUIDE, COMMAND } from "./catalog"
 import { newNote, notesText, parseNotes, pickLines, type NotesFile } from "./notes"
@@ -48,6 +49,8 @@ import {
   type LookRequest,
   type PartSummary,
   type PickRequest,
+  type ProjectFile,
+  type ProjectSummary,
   type Snapshot,
 } from "./protocol"
 import { describeTreeChange } from "./tree-diff"
@@ -88,6 +91,8 @@ export interface Files {
   /** For `import`: the bytes of a file, and its size and modification time (to tell when it changed). */
   readBytes?(path: string): Promise<Uint8Array | null>
   stat?(path: string): Promise<{ size: number; mtimeMs: number } | null>
+  /** A folder's entries (null: no such folder). Without it there are no projects, only open files. */
+  list?(dir: string): Promise<{ name: string; dir: boolean }[] | null>
 }
 
 /** The window, when there is one: renders views for `look`. */
@@ -102,6 +107,8 @@ export type EngineOptions = {
   /** Recently opened parts, most recent first; kept by the host. */
   recent?: string[]
   onRecent?: (paths: string[]) => void
+  /** The person's home folder: never a project (nor anything above it). */
+  home?: string
 }
 
 type Entry = { tree: Tree; summary: string }
@@ -207,6 +214,9 @@ export class Engine {
   private late: { path: string; prompt: string; answer: PickAnswer } | null = null
   private recent: string[]
   private opts: EngineOptions
+  /** The project folder and what's in it (see project.ts). */
+  private project: Scan | null = null
+  private scanCache: ScanCache = new Map()
 
   constructor(opts: EngineOptions) {
     this.opts = opts
@@ -256,7 +266,26 @@ export class Engine {
       error: d.error,
       kind: isAssembly(d.path) ? ("assembly" as const) : ("part" as const),
     }))
-    return { parts, active: this.active, kernel: this.opts.kernel.phase, agent: { ...this.agent } }
+    return { parts, active: this.active, kernel: this.opts.kernel.phase, agent: { ...this.agent }, project: this.projectSummary() }
+  }
+
+  private projectSummary(): ProjectSummary | null {
+    const p = this.project
+    if (!p) return null
+    return {
+      root: p.root,
+      name: baseName(p.root),
+      truncated: p.truncated,
+      files: p.entries.map((e) => {
+        const doc = this.docs.get(e.path)
+        return {
+          ...e,
+          features: doc ? doc.tree.features.length : e.features,
+          open: Boolean(doc),
+          openNotes: doc ? doc.notes.notes.filter((n) => n.status === "open").length : 0,
+        }
+      }),
+    }
   }
 
   docState(path?: string | null): DocState | null {
@@ -333,7 +362,10 @@ export class Engine {
   private async runLocked(name: string, input: Record<string, unknown>, ctx: CallContext): Promise<CommandResult> {
     try {
       if (name === "open_part") return await this.openPart(input as { path: string; create?: boolean; template?: string; context?: string }, ctx)
-      if (name === "list_parts") return this.listParts()
+      if (name === "list_parts") return await this.listParts()
+      if (name === "open_project") return await this.openProject(input as { path: string; create?: boolean }, ctx)
+      if (name === "scan_project") return await this.rescan()
+      if (name === "add_part") return await this.addPart(input as { name?: string; file?: string }, ctx)
       if (name === "close_part") return this.closePart(this.partKey(String(input.path)))
       const doc = await this.resolveDoc(ctx)
       if (!doc) return fail("还没有打开零件：先用 open_part（path 写零件文件，新零件加 create: true）。")
@@ -642,6 +674,7 @@ export class Engine {
     }
     this.active = path
     if (ctx.session) this.sessions.set(ctx.session, path)
+    await this.joinProject(path)
     // What was there before the agent arrived isn't news to it.
     if (ctx.actor === "agent") this.markSeen(doc)
     this.emitDoc(doc)
@@ -655,7 +688,11 @@ export class Engine {
     return { ok: true, text: `${head}。Arbor 窗口已切到这个${what}。${warn}${notes}${inCtx}${asmHint}\n${treeText(doc.tree, doc.report!)}` }
   }
 
-  private listParts(): CommandResult {
+  private async listParts(): Promise<CommandResult> {
+    if (this.project) {
+      await this.rescan()
+      return { ok: true, text: this.projectText() }
+    }
     const parts = [...this.docs.values()]
     if (!parts.length) return { ok: true, text: `没有打开的零件。${this.recent.length ? `\n最近打开过：\n${this.recent.slice(0, 10).map((p) => `- ${p}`).join("\n")}` : ""}` }
     const lines = parts.map((d) => {
@@ -663,6 +700,114 @@ export class Engine {
       return `${d.path === this.active ? "▸" : "-"} ${d.path}（${isAssembly(d.path) ? "装配" : "零件"}）：${d.tree.features.length} 个${isAssembly(d.path) ? "零件" : "特征"}${open ? `，${open} 条未处理备注` : ""}${d.error ? `，文件有错：${d.error}` : ""}`
     })
     return { ok: true, text: `打开的零件（▸ = 窗口里正在看的）：\n${lines.join("\n")}` }
+  }
+
+  // ---------------------------------------------------------------- project
+
+  /** The project the file just opened belongs to (project.ts `rootFor`), scanned again. */
+  private async joinProject(path: string) {
+    if (!this.opts.files.list) return
+    const root = await rootFor(this.opts.files, path, this.project?.root ?? null, this.opts.home)
+    if (!root) return
+    this.project = await scanProject(this.opts.files, root, this.scanCache)
+  }
+
+  private async rescan(): Promise<CommandResult> {
+    if (!this.project) return { ok: true, text: "没有打开项目。" }
+    this.project = await scanProject(this.opts.files, this.project.root, this.scanCache)
+    this.emitSnapshot()
+    return { ok: true, text: this.projectText() }
+  }
+
+  private projectText() {
+    const p = this.projectSummary()
+    if (!p) return "没有打开项目。"
+    const line = (f: ProjectFile) =>
+      `${f.path === this.active ? "▸" : "-"} ${relativePath(p.root, f.path)}（${f.kind === "assembly" ? "装配" : "零件"}）：${f.features ?? "?"} 个${f.kind === "assembly" ? "零件" : "特征"}${f.open ? "，打开着" : ""}${f.openNotes ? `，${f.openNotes} 条未处理备注` : ""}`
+    const asm = p.files.filter((f) => f.kind === "assembly")
+    const parts = p.files.filter((f) => f.kind === "part")
+    const others = [...this.docs.values()].filter((d) => !inside(p.root, d.path))
+    return [
+      `项目 ${p.name}（${p.root}）。▸ = 窗口里正在看的；路径相对项目文件夹。`,
+      asm.length ? `装配：\n${asm.map(line).join("\n")}` : "还没有装配。",
+      parts.length ? `零件：\n${parts.map(line).join("\n")}` : "还没有零件。",
+      others.length ? `项目外打开着的：\n${others.map((d) => `- ${d.path}`).join("\n")}` : "",
+      p.truncated ? "（文件太多，只列出了一部分）" : "",
+    ]
+      .filter(Boolean)
+      .join("\n")
+  }
+
+  /** A folder as the project: `create` writes an empty assembly and parameter file named after it, and opens the assembly. */
+  private async openProject(input: { path: string; create?: boolean }, ctx: CallContext): Promise<CommandResult> {
+    const files = this.opts.files
+    if (!files.list) return fail("这里不能打开项目（没有文件夹列表）")
+    let root = input.path.trim().replace(/\\/g, "/").replace(/\/+$/, "")
+    if (!/^([A-Za-z]:)?\//.test(root) && ctx.cwd) root = `${ctx.cwd.replace(/[\\/]+$/, "")}/${root}`
+    root = files.canonical?.(root) ?? root
+    if (!canBeRoot(root, this.opts.home)) return fail(`${root} 不能做项目文件夹（不能是主目录或更上层）`)
+    const list = await files.list(root)
+    let created = ""
+    if (input.create) {
+      const sk = projectSkeleton(root)
+      if (!list?.some((e) => !e.dir && isAssemblyFile(e.name))) {
+        // An existing parameter file is the project's: keep it, the new assembly uses it.
+        const hadParams = (await files.read(sk.params)) !== null
+        if (!hadParams) await files.write(sk.params, sk.paramsText)
+        await files.write(sk.assembly, sk.assemblyText)
+        created = `新建了装配 ${baseName(sk.assembly)}${hadParams ? `，用已有的参数文件 ${baseName(sk.params)}` : ` 和参数文件 ${baseName(sk.params)}`}。`
+      }
+    } else if (list === null) return fail(`没有这个文件夹：${root}。要新建就设 create=true。`)
+    this.project = await scanProject(files, root, this.scanCache)
+    // A single top-level assembly is what the project is about: open it.
+    const top = this.project.entries.filter((e) => e.kind === "assembly" && e.folder === "")
+    if (top.length === 1) {
+      const r = await this.openPart({ path: top[0].path }, ctx)
+      if (!r.ok) return r
+    } else this.emitSnapshot()
+    return {
+      ok: true,
+      text: `${created ? created : ""}${this.projectText()}\n多个零件的东西：零件放在 parts/ 下（open_part path=parts/<名字>.arbor.json create=true），用装配里的 component 放进来；共用的尺寸写进项目的参数文件（share_params）。`,
+    }
+  }
+
+  /**
+   * The window's 「+ 零件」 on an assembly: `name` makes parts/<name>.arbor.json (using the assembly's
+   * parameter file) and opens it inside the assembly; `file` puts an existing part, assembly or STEP in.
+   */
+  private async addPart(input: { name?: string; file?: string }, ctx: CallContext): Promise<CommandResult> {
+    const asm = await this.resolveDoc(ctx)
+    if (!asm || !isAssembly(asm.path)) return fail("先打开一个装配")
+    const dir = dirName(asm.path)
+    let file: string
+    let label: string
+    if (input.name !== undefined) {
+      const fname = partFileName(input.name)
+      if (!fname) return fail("零件要有名字")
+      const path = `${dir}/parts/${fname}`
+      if ((await this.opts.files.read(path)) !== null) return fail(`已经有这个零件了：parts/${fname}`)
+      const uses = asm.tree.uses ? relativePath(`${dir}/parts`, besides(asm.path, asm.tree.uses)) : undefined
+      await this.opts.files.write(path, `${JSON.stringify({ ...(uses ? { uses } : {}), params: {}, features: [] }, null, 2)}\n`)
+      file = `parts/${fname}`
+      label = stripEnding(fname)
+    } else if (input.file) {
+      const abs = this.opts.files.canonical?.(input.file) ?? input.file
+      if (abs === asm.path) return fail("装配不能放进它自己")
+      file = relativePath(dir, abs)
+      label = stripEnding(baseName(abs)).replace(/\.(step|stp)$/i, "")
+    } else return fail("写 name（新零件）或 file（已有的文件）")
+    const taken = new Set(asm.tree.features.map((f) => f.id))
+    let n = asm.tree.features.length + 1
+    while (taken.has(`c${n}`)) n++
+    // A second copy of the same part (or another file with the same name) gets 「名字-2」.
+    const names = new Set(asm.tree.features.flatMap((f) => (f.op === "component" ? [componentName(f)] : [])))
+    let name = label
+    for (let k = 2; names.has(name); k++) name = `${label}-${k}`
+    const res = await this.onDoc(asm, "component", { id: `c${n}`, name, file }, { ...ctx, part: asm.path })
+    if (!res.ok) return res
+    if (input.name !== undefined) return this.openPart({ path: besides(asm.path, file), context: asm.path }, ctx)
+    await this.rescan()
+    return res
   }
 
   private closePart(path: string): CommandResult {

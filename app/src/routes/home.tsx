@@ -26,7 +26,7 @@ export function HomePage() {
         <div className="bg-blueprint pointer-events-none absolute inset-0 opacity-60 [mask-image:linear-gradient(to_bottom,black,transparent)]" aria-hidden />
         <div className="relative mx-auto grid max-w-[1200px] grid-cols-[1fr_1.15fr] items-center gap-10 px-6 pb-16 pt-12 max-lg:grid-cols-1 max-sm:px-4">
           <div>
-            <div className="font-mono text-small text-primary">FeatureTree / 工业建模互动课</div>
+            <div className="font-mono text-small text-primary">Arbor / 工业建模互动课</div>
             <h1 className="mt-3 text-hero font-semibold tracking-tight">
               看懂每一个特征
               <br />
@@ -78,16 +78,19 @@ export function HomePage() {
               <MessageSquareText />
             </div>
             <div className="flex-1">
-              <div className="flex items-center gap-2 text-heading font-semibold">
-                AI 建模工作台 <span className="rounded-sm border px-1.5 text-caption font-medium text-muted-foreground">Beta</span>
-              </div>
+              <div className="text-heading font-semibold">工作台</div>
               <p className="mt-1 text-body text-muted-foreground">
-                用中文描述一个零件，AI 助教调用建模工具一步步建出参数化特征树：每一步讲清设计意图，可以回滚、直接改参数、导出 STEP。几何在你的浏览器里由 OpenCascade 算出。
+                用中文描述一个零件，AI 助教一步步建出参数化特征树，边做边讲每一步为什么这样做。课程里的练习也在这里做。要用自己的 agent 建真东西，用桌面版。
               </p>
             </div>
-            <Button asChild variant="secondary">
-              <Link to="/studio">打开工作台</Link>
-            </Button>
+            <div className="flex gap-2">
+              <Button asChild variant="secondary">
+                <Link to="/studio">打开工作台</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link to="/desktop">桌面版</Link>
+              </Button>
+            </div>
           </div>
         </div>
       </section>
@@ -146,7 +149,7 @@ export function HomePage() {
 
       <footer className="border-t">
         <div className="mx-auto flex max-w-[1200px] flex-wrap items-center gap-x-6 gap-y-1 px-6 py-6 text-small text-faint-foreground max-sm:px-4">
-          <span>FeatureTree · 2026</span>
+          <span>Arbor · 2026</span>
           <span>几何：build123d + OpenCascade · 渲染：three.js · 草图求解：FreeCAD planegcs</span>
         </div>
       </footer>

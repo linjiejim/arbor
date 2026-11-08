@@ -2,6 +2,8 @@ import * as React from "react"
 import { Link } from "react-router"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { ConceptText } from "@/components/concept-term"
+import { remarkTerms, termMentions, type MdNode } from "../md-terms"
 import { CIRCLED_RE, circledNumber } from "../annotations"
 import { closeOpen, splitBlocks } from "../md-blocks"
 
@@ -59,8 +61,6 @@ const base: Components = {
   td: ({ children }) => <td className="border px-2 py-1 tabular">{children}</td>,
 }
 
-type MdNode = { type: string; value?: string; url?: string; children?: MdNode[] }
-
 /** ①②… in prose become links to `#pin-N`, so a reply can point back at an annotation. */
 function remarkPins() {
   const walk = (node: MdNode) => {
@@ -85,26 +85,41 @@ function remarkPins() {
   return (tree: MdNode) => walk(tree)
 }
 
+/** Plugin lists by what they do, so finished blocks keep the same props while a reply streams. */
+const PLUGINS = new Map<string, Plugins>()
+function pluginsFor(pins: boolean, ids: string[]): Plugins {
+  const key = `${pins ? 1 : 0}|${ids.join(",")}`
+  let p = PLUGINS.get(key)
+  if (!p) {
+    p = [remarkGfm, ...(pins ? [remarkPins] : []), ...(ids.length ? [remarkTerms(ids)] : [])]
+    PLUGINS.set(key, p)
+  }
+  return p
+}
+
 /**
  * The assistant's replies: Markdown (GFM) with the site's type and colours.
  * Raw HTML is not rendered. Bare lesson paths become links too; with `onPin`,
  * ①②… are buttons that show that annotation on the model. While `streaming`,
  * finished blocks stay put and only the last one re-renders.
  */
-export function Markdown({ text, onPin, streaming = false }: { text: string; onPin?: (n: number) => void; streaming?: boolean }) {
+export function Markdown({ text, onPin, streaming = false, terms = false }: { text: string; onPin?: (n: number) => void; streaming?: boolean; terms?: boolean }) {
   const blocks = React.useMemo(() => {
     const list = splitBlocks(text.replace(BARE_SITE_PATH, "$1[$2]($2)"))
     if (streaming && list.length) list[list.length - 1] = closeOpen(list[list.length - 1])
     return list
   }, [text, streaming])
+  const termIds = React.useMemo(() => (terms ? termMentions(blocks) : blocks.map(() => [] as string[])), [blocks, terms])
   const components = React.useMemo<Components>(
     () =>
-      onPin
+      onPin || terms
         ? {
             ...base,
             a: (props) => {
-              const pin = props.href?.match(/^#pin-(\d+)$/)
-              if (!pin) return <Anchor href={props.href}>{props.children}</Anchor>
+              const term = props.href?.match(/^#term-(.+)$/)
+              if (term) return <ConceptText id={term[1]}>{props.children}</ConceptText>
+              const pin = onPin ? props.href?.match(/^#pin-(\d+)$/) : null
+              if (!pin || !onPin) return <Anchor href={props.href}>{props.children}</Anchor>
               return (
                 <button
                   type="button"
@@ -118,13 +133,12 @@ export function Markdown({ text, onPin, streaming = false }: { text: string; onP
             },
           }
         : base,
-    [onPin],
+    [onPin, terms],
   )
-  const plugins = React.useMemo(() => (onPin ? [remarkGfm, remarkPins] : [remarkGfm]), [onPin])
   return (
     <div className="text-reading break-words">
       {blocks.map((b, i) => (
-        <Block key={i} source={b} plugins={plugins} components={components} />
+        <Block key={i} source={b} plugins={pluginsFor(Boolean(onPin), termIds[i] ?? [])} components={components} />
       ))}
     </div>
   )

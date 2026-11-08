@@ -2,7 +2,8 @@ import * as React from "react"
 import { applyEdit, executeTool, treeText, type ToolRun } from "./apply"
 import { takeKernel } from "./boot"
 import type { KernelClient } from "./client"
-import { EMPTY_TREE, Tree } from "./dsl"
+import { EMPTY_TREE, Tree, type Check } from "./dsl"
+import { withPinned } from "./pinned"
 import type { BuildReport, DisplayData } from "./kernel/build"
 import type { Dim } from "./kernel/dims"
 import type { MeasureTarget } from "./kernel/measure"
@@ -72,12 +73,17 @@ export function useStudio(shared?: Tree) {
     setDisplay(await c.display(index >= 0 ? index : undefined))
   }, [])
 
+  /** A practice's checks: every tree adopted keeps them (pinned.ts). */
+  const pinnedRef = React.useRef<Check[] | null>(null)
+  const readyRef = React.useRef(false)
+
   /** Rebuild `t`, adopt it as the current tree, refresh the view. */
   const commit = React.useCallback(
-    async (t: Tree, rep?: BuildReport) => {
+    async (given: Tree, rep?: BuildReport) => {
       const c = client.current
       if (!c) return null
-      const r = rep ?? (await c.rebuild(t))
+      const t = withPinned(given, pinnedRef.current)
+      const r = t === given && rep ? rep : await c.rebuild(t)
       treeRef.current = t
       setTreeState(t)
       setReport(r)
@@ -99,6 +105,7 @@ export function useStudio(shared?: Tree) {
       .then(async () => {
         if (!life.alive) return
         setKernel({ phase: "ready" })
+        readyRef.current = true
         // /studio?start=<id> opens a ready-made tree (from a teardown, or a shared link).
         const url = new URL(location.href)
         const starter = persist ? STARTERS.find((x) => x.id === url.searchParams.get("start")) : undefined
@@ -172,8 +179,16 @@ export function useStudio(shared?: Tree) {
           const d = await c.display()
           return renderViews(d, views, highlight, { pins: pinsRef.current })
         }
-        const run = await executeTool(c, treeRef.current, name, input, look)
-        if (run.tree !== treeRef.current || run.report) await commit(run.tree, run.report)
+        let run = await executeTool(c, treeRef.current, name, input, look)
+        // A practice's requirements are fixed: when the tool changed or dropped one, it is put back and
+        // the tool's result says so, measured on the tree that is actually kept.
+        const pinned = withPinned(run.tree, pinnedRef.current)
+        if (pinned !== run.tree) {
+          const report = await commit(pinned)
+          const ids = (pinnedRef.current ?? []).map((x) => x.id).join("、")
+          const note = `练习的要求（${ids}）是固定的，不能改或删，已经恢复原样。核对结果以恢复后的为准：${(report?.checks ?? []).filter((r) => (pinnedRef.current ?? []).some((p) => p.id === r.id)).map((r) => `${r.said} ${r.pass ? "✓" : `✗（要求 ${r.expected}，实际 ${r.actual}）`}`).join("；")}`
+          run = { ...run, tree: pinned, report: report ?? undefined, output: { ...run.output, text: `${run.output.text}\n${note}` } }
+        } else if (run.tree !== treeRef.current || run.report) await commit(run.tree, run.report)
         if (run.report) setCheckBaseline(Object.fromEntries((run.report.checks ?? []).map((r) => [r.id, r.pass])))
         return run
       })
@@ -246,6 +261,15 @@ export function useStudio(shared?: Tree) {
 
   const measure = React.useCallback(async (targets: MeasureTarget[]) => (rollbackRef.current ? null : (client.current?.measure(targets) ?? null)), [])
 
+  /** Pin a practice's checks (null: none); the current tree gets them now. */
+  const pinChecks = React.useCallback(
+    (checks: Check[] | null) => {
+      pinnedRef.current = checks
+      if (checks && readyRef.current && withPinned(treeRef.current, checks) !== treeRef.current) void commit(treeRef.current)
+    },
+    [commit],
+  )
+
   const setPins = React.useCallback((pins: Pin[]) => {
     pinsRef.current = pins
   }, [])
@@ -281,6 +305,7 @@ export function useStudio(shared?: Tree) {
     faceEdges,
     measure,
     setPins,
+    pinChecks,
   }
 }
 

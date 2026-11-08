@@ -73,7 +73,7 @@ export function useStudioChat(studio: Studio) {
   }, [studio])
   const [initial] = React.useState(loadMessages)
   const [paused, setPaused] = React.useState(false)
-  const [mode, setModeState] = React.useState<ChatMode>(() => (localStorage.getItem(MODE_STORE) === "teach" ? "teach" : "build"))
+  const [mode, setModeState] = React.useState<ChatMode>(() => (localStorage.getItem(MODE_STORE) === "build" ? "build" : "teach"))
   React.useEffect(() => {
     bridge.mode = mode
     localStorage.setItem(MODE_STORE, mode)

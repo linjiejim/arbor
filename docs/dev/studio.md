@@ -82,7 +82,7 @@ STUDIO_MOCK=1 npm run dev:api     # 对话 API，用脚本模型，不需要 key
 真模型（和线上一样走 OpenRouter，或者直连 DeepSeek）：
 
 ```bash
-node --env-file=$HOME/.config/featuretree/openrouter.env node_modules/.bin/tsx server/index.ts
+node --env-file=$HOME/.config/arbor/openrouter.env node_modules/.bin/tsx server/index.ts
 DEEPSEEK_API_KEY=sk-… npm run dev:api
 ```
 
@@ -269,7 +269,7 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
 
 ```bash
 cd app
-node --env-file=$HOME/.config/featuretree/deepseek.env node_modules/.bin/tsx scripts/studio-eval.ts            # 全部 10 题
+node --env-file=$HOME/.config/arbor/deepseek.env node_modules/.bin/tsx scripts/studio-eval.ts            # 全部 10 题
 node --env-file=… node_modules/.bin/tsx scripts/studio-eval.ts flange mug --thinking=disabled
 ```
 
@@ -294,10 +294,10 @@ node --env-file=… node_modules/.bin/tsx scripts/studio-eval.ts flange mug --th
 
 ## 部署
 
-和静态站在同一个工作流里（`.github/workflows/deploy.yml`）：`npm run build:api` 用 esbuild 打成单文件 `dist-server/index.mjs`，上传到 `/root/featuretree/api/releases/<sha7>/`，切换 `current`，`pm2 startOrReload`。
+和静态站在同一个工作流里（`.github/workflows/deploy.yml`）：`npm run build:api` 用 esbuild 打成单文件 `dist-server/index.mjs`，上传到 `/root/arbor/api/releases/<sha7>/`，切换 `current`，`pm2 startOrReload`。
 
-- 进程：PM2 `featuretree-api`，`127.0.0.1:18914`，配置在 `app/server/ecosystem.config.cjs`。
-- 密钥和限额：`/root/featuretree/shared/.env`（权限 600，不进仓库）。
+- 进程：PM2 `arbor-api`，`127.0.0.1:18914`，配置在 `app/server/ecosystem.config.cjs`。
+- 密钥和限额：`/root/arbor/shared/.env`（权限 600，不进仓库）。
 
   ```
   OPENROUTER_API_KEY=…      # 公共额度走 OpenRouter（优先）
@@ -311,9 +311,9 @@ node --env-file=… node_modules/.bin/tsx scripts/studio-eval.ts flange mug --th
 
   学习者自己填的 key 永远直连 DeepSeek。
 
-  改完执行 `pm2 restart featuretree-api --update-env`。
-- 花费：服务端日志每次请求记一行用量和成本（不记内容）。走 OpenRouter 时用它返回的实际花费，直连 DeepSeek 时按价目表估算。`/root/featuretree/api/data/budget.json` 是当天累计。
-- 分享快照：`/root/featuretree/api/data/shares/`（`STUDIO_DATA_DIR` 在 `ecosystem.config.cjs` 里设好，工作流每次发布 `mkdir -p` 这个目录，只切换 `releases/`，不动 `data/`）。不单独备份，丢了只是链接失效。分享相关的日志行带 `"share"` 字段，`grep '"share":"create"'` 就能数出当天新建了几个。
+  改完执行 `pm2 restart arbor-api --update-env`。
+- 花费：服务端日志每次请求记一行用量和成本（不记内容）。走 OpenRouter 时用它返回的实际花费，直连 DeepSeek 时按价目表估算。`/root/arbor/api/data/budget.json` 是当天累计。
+- 分享快照：`/root/arbor/api/data/shares/`（`STUDIO_DATA_DIR` 在 `ecosystem.config.cjs` 里设好，工作流每次发布 `mkdir -p` 这个目录，只切换 `releases/`，不动 `data/`）。不单独备份，丢了只是链接失效。分享相关的日志行带 `"share"` 字段，`grep '"share":"create"'` 就能数出当天新建了几个。
 
 ### OpenRouter 的路由
 
