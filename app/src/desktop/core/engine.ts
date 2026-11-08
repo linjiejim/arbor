@@ -6,8 +6,9 @@ import type { PickInfo } from "../../studio/annotations"
 import { executeTool, moveFeature, treeText, type KernelPort } from "../../studio/apply"
 import { toBuild123d } from "../../studio/codegen"
 import { EMPTY_TREE, Feature, Tree, componentName, displayName } from "../../studio/dsl"
+import { designation } from "../../studio/fasteners"
 import type { BuildReport, ComponentSource, ContextSource, DisplayData } from "../../studio/kernel/build"
-import { num, num as evalNum } from "../../studio/expr"
+import { num as evalNum } from "../../studio/expr"
 import {
   FOCUS_PADDING,
   LOOK_PADDING,
@@ -1090,28 +1091,18 @@ export class Engine {
     if (!parsed.ok) return null
     const shared = parsed.tree.uses ? await loadShared(files, asm, parsed.tree.uses) : null
     const tree = effectiveTree(parsed.tree, shared)
-    let scope: Record<string, number>
     try {
-      scope = resolveParams(tree.params)
+      resolveParams(tree.params)
     } catch {
       return null
     }
     const g = await gather(files, asm, tree, [], read)
-    const comps = tree.features.filter((f): f is Extract<Feature, { op: "component" }> => f.op === "component" && !f.hidden)
+    const comps = tree.features.filter((f): f is Extract<Feature, { op: "component" }> => f.op === "component" && !f.hidden && !!f.file)
     const canon = (f: string) => files.canonical?.(besides(asm, f)) ?? besides(asm, f)
-    const mine = comps.filter((c) => canon(c.file) === doc.path)
+    const mine = comps.filter((c) => canon(c.file!) === doc.path)
     if (!mine.length) return null
-    const placeOf = (c: Extract<Feature, { op: "component" }>) => ({
-      rotate: (c.rotate ?? []).map((r) => ({ axis: r.axis, angle: num(r.angle, scope) })),
-      at: (c.at ?? [0, 0, 0]).map((v) => num(v, scope)) as [number, number, number],
-    })
-    const others = comps
-      .filter((c) => canon(c.file) !== doc.path)
-      .flatMap((c) => {
-        const source = g.components.find((x) => x.file === c.file)
-        return source ? [{ name: c.name ?? partName(c.file).replace(/\.(step|stp)$/i, ""), source, place: placeOf(c) }] : []
-      })
-    const source: ContextSource = { self: placeOf(mine[0]), assembly: partName(asm), others }
+    // The kernel builds the assembly to place everything (mates need the parts' shapes).
+    const source: ContextSource = { assembly: partName(asm), tree, components: g.components, self: mine[0].file! }
     const watch = [asm, ...g.watch, ...(shared ? [shared.path] : [])]
     const note = mine.length > 1 ? `这个零件在装配里用了 ${mine.length} 次，按第一个（${mine[0].name ?? mine[0].id}）的位置显示其他零件` : undefined
     return { source, watch, key: JSON.stringify([text, g.signature, shared?.text ?? null]), note }
@@ -1502,17 +1493,35 @@ function pickResult(answer: PickAnswer): CommandResult {
 /** The parts list: one row per part file (a component used twice counts 2), with volume and size. */
 function bomText(doc: Doc, report: BuildReport) {
   const asm = isAssembly(doc.path)
-  const fileOf = new Map<string, string>()
-  for (const f of doc.tree.features) if (f.op === "component") fileOf.set(f.name ?? partName(f.file).replace(/\.(step|stp)$/i, ""), f.file)
+  // What each component (by the name its parts carry) is: a file, or a standard part by its designation.
+  const what = new Map<string, { file: string; std?: string }>()
+  for (const f of doc.tree.features) {
+    if (f.op !== "component") continue
+    let std: string | undefined
+    if (f.standard) {
+      try {
+        const len = f.standard.length
+        std = designation({ ...f.standard, length: len === undefined ? undefined : evalNum(len, report.params) }).name
+      } catch {
+        std = undefined
+      }
+    }
+    what.set(componentName(f), { file: f.file ?? "标准件", std })
+  }
   const parts = report.parts ?? (report.body ? [{ name: doc.name, volume: report.body.volume, size: report.body.size }] : [])
   const rows = new Map<string, { name: string; file: string; count: number; volume: number; size: number[] }>()
   for (const p of parts) {
+    // 「螺钉#3/垫圈」: component 螺钉, its third copy, the part 垫圈 of it.
     const comp = p.name.split("/")[0]
-    const file = asm ? (fileOf.get(comp) ?? "") : doc.path.split(/[\\/]/).pop()!
-    const key = asm ? `${file}|${p.name.slice(comp.length)}` : p.name
+    const base = comp.replace(/#\d+$/, "")
+    const sub = p.name.slice(comp.length)
+    const w = asm ? what.get(base) : undefined
+    const file = asm ? (w?.file ?? "") : doc.path.split(/[\\/]/).pop()!
+    const key = !asm ? p.name : w?.std ? `std|${w.std}` : `${file}|${sub}`
+    const name = w?.std ?? (asm ? `${base}${sub}` : p.name)
     const row = rows.get(key)
     if (row) row.count += 1
-    else rows.set(key, { name: p.name, file, count: 1, volume: p.volume, size: p.size })
+    else rows.set(key, { name, file, count: 1, volume: p.volume, size: p.size })
   }
   const r1 = (x: number) => Math.round(x * 10) / 10
   const lines = [

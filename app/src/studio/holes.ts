@@ -33,12 +33,32 @@ export const METRIC: Record<ScrewSize, Row> = {
   M12: { pitch: 1.75, close: 13, normal: 13.5, tap: 10.2, cbore: [20, 13], csink: 27.2 },
 }
 
-export type HoleStandard = { size: ScrewSize; fit?: "clearance" | "close" | "tap"; head?: "cbore" | "csink" }
+export type HoleStandard = { size: ScrewSize; fit?: "clearance" | "close" | "tap" | "insert"; head?: "cbore" | "csink" }
 
-/** A standard hole as plain numbers: diameter, optional counterbore / countersink, and the thread if tapped. */
-export function standardHole(s: HoleStandard): { d: number; cbore?: { d: number; depth: number }; csink?: { d: number }; thread?: { major: number; pitch: number }; label: string } {
+/**
+ * Holes for heat-set inserts in 3D prints, the common standard size (Ruthex / CNC Kitchen): the hole to
+ * print and the insert's length (the hole goes 1 mm deeper). Also in fasteners.ts for the part itself.
+ */
+export const INSERT_HOLE: Partial<Record<ScrewSize, { d: number; L: number }>> = {
+  M2: { d: 3.2, L: 4 },
+  "M2.5": { d: 4, L: 5.7 },
+  M3: { d: 4, L: 5.7 },
+  M4: { d: 5.6, L: 8.1 },
+  M5: { d: 6.4, L: 9.5 },
+  M6: { d: 8, L: 12.7 },
+}
+
+/** A standard hole as plain numbers: diameter, optional counterbore / countersink, the thread if tapped, a default depth for blind ones. */
+export function standardHole(s: HoleStandard): { d: number; cbore?: { d: number; depth: number }; csink?: { d: number }; thread?: { major: number; pitch: number }; depth?: number; label: string } {
   const row = METRIC[s.size]
   const fit = s.fit ?? "clearance"
+  if (fit === "insert") {
+    if (s.head) throw new Error("热熔螺母孔不带沉头")
+    const ins = INSERT_HOLE[s.size]
+    if (!ins) throw new Error(`热熔螺母孔只有 ${SCREW_SIZES.filter((x) => INSERT_HOLE[x]).join("、")}`)
+    const depth = Math.round((ins.L + 1) * 10) / 10
+    return { d: ins.d, depth, label: `${s.size} 热熔螺母孔（⌀${ins.d}，螺母长 ${ins.L}）` }
+  }
   if (fit === "tap") {
     if (s.head) throw new Error(`螺纹孔不带沉头：沉头孔、埋头孔用在过孔上（fit 用 clearance 或 close）`)
     const major = Number(s.size.slice(1))

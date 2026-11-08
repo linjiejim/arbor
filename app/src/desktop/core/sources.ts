@@ -107,7 +107,7 @@ export async function gather(files: Files, path: string, tree: Tree, stack: stri
     }),
   )
 
-  const comps = [...new Set(tree.features.flatMap((f: Feature) => (f.op === "component" ? [f.file] : [])))]
+  const comps = [...new Set(tree.features.flatMap((f: Feature) => (f.op === "component" && f.file ? [f.file] : [])))]
   const components: ComponentSource[] = []
   for (const name of comps) {
     const abs = besides(path, name)

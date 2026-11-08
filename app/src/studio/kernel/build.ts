@@ -45,6 +45,9 @@ import { stepAscii, zipStore } from "../zip"
 import { makeDrawing, type DrawingData } from "./drawing"
 import { METRIC, standardHole } from "../holes"
 import { cutThreads, DEPTH, type ThreadJob } from "./thread"
+import { applyMate, applyRigid, axisAngle, FREE, IDENTITY, rotation, type Freedom, type MateGeo, type Rigid } from "./mates"
+import { fastenerShape } from "./fastener-shapes"
+import { designation, type FastenerSpec } from "../fasteners"
 import { classifyFaces, faceSignatures, meshBody, meshEdges, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
   axisDir,
@@ -222,10 +225,16 @@ const BUILT = new Map<string, Built>()
 const MAX_BUILT = 16
 
 /** A placement in an assembly, numbers already worked out. */
-export type Placement = { rotate: { axis: "X" | "Y" | "Z"; angle: number }[]; at: V3 }
+/** A placement in an assembly, numbers already worked out: rotations about axes through the origin (a name or a direction), then a move. */
+export type Placement = { rotate: { axis: "X" | "Y" | "Z" | V3; angle: number }[]; at: V3 }
 
 /** Editing a part inside an assembly: where it sits, and the other components with where they sit. */
-export type ContextSource = { self: Placement; assembly: string; others: { name: string; source: ComponentSource; place: Placement }[] }
+/**
+ * Editing a part inside an assembly: the assembly's tree (parameters worked out) and what its components
+ * read, and which component file is the part being edited. The kernel builds the assembly (components are
+ * cached) to get where everything sits, mates included.
+ */
+export type ContextSource = { assembly: string; tree: Tree; components: ComponentSource[]; self: string }
 
 /** A file `import` reads, as the host handed it over: parsed once per content. */
 type Asset = { hash: string; shape: AnyShape | null; error?: string }
@@ -238,7 +247,17 @@ type Thread = { r: number; major: number }
  * (else carried over, and freed by the step that made it).
  */
 /** `auto`: made by adding material under a new name (or the body that was there): explodes away from the middle. */
-type Part = { name: string; body: Shape3D; explode: V3; owned: boolean; auto?: boolean; hidden?: boolean }
+type Part = {
+  name: string
+  body: Shape3D
+  explode: V3
+  owned: boolean
+  auto?: boolean
+  hidden?: boolean
+  /** An assembly's component: which `component` feature placed it, and where. */
+  component?: string
+  placement?: Placement
+}
 
 /** New faces smaller than this (mm²) are reported as slivers. */
 const SLIVER_AREA = 0.01
@@ -274,27 +293,30 @@ export class Kernel {
    * frame as see-through, read-only reference bodies. Null leaves the assembly.
    */
   setContext(ctx: ContextSource | null) {
-    const key = ctx ? JSON.stringify([ctx.self, ctx.others.map((o) => [o.name, componentKey(o.source), o.place])]) : ""
+    const key = ctx ? JSON.stringify([ctx.self, ctx.tree, ctx.components.map(componentKey)]) : ""
     if (key === this.contextKey) return
     this.context.forEach((r) => r.shape.delete())
     this.context = []
     this.contextKey = key
     if (!ctx) return
-    for (const o of ctx.others) {
-      let built: Built
-      try {
-        built = buildComponent(o.source)
-      } catch {
-        continue
+    // Where everything sits, mates included: the assembly built in a kernel of its own (components cached).
+    const sub = new Kernel()
+    try {
+      sub.setComponents(ctx.components)
+      sub.rebuild(ctx.tree)
+      const parts = sub.lastBuilt(Infinity)?.parts ?? []
+      const comp = (id?: string) => ctx.tree.features.find((x) => x.id === id)
+      const self = parts.find((p) => { const c = comp(p.component); return c?.op === "component" && c.file === ctx.self })
+      if (!self?.placement) return
+      for (const p of parts) {
+        if (p.hidden || (p.component === self.component && p.name.split("/")[0] === self.name.split("/")[0])) continue
+        const shape = unplace(p.body.clone(), self.placement)
+        this.context.push({ id: p.name, name: p.name, shape, ...meshBody(shape), owned: true })
       }
-      for (const p of built.parts) {
-        const shape = unplace(place(p.shape.clone(), o.place), ctx.self)
-        const name = p.name && built.parts.length > 1 ? `${o.name}/${p.name}` : o.name
-        this.context.push({ id: name, name, shape, ...meshBody(shape), owned: true })
-      }
+    } finally {
+      sub.dispose()
     }
   }
-
 
   /**
    * The host (the desktop app) hands over the files `import` features read: the bytes, or why it
@@ -366,7 +388,7 @@ export class Kernel {
         JSON.stringify(f) +
         (off.has(f.id) ? "\noff" : "") +
         (f.op === "import" ? `\n${this.assets.get(f.file)?.hash ?? "-"}` : "") +
-        (f.op === "component" ? `\n${this.components.get(f.file)?.key ?? "-"}` : "")
+        (f.op === "component" ? `\n${(f.file && this.components.get(f.file)?.key) ?? "-"}` : "")
       const cached = this.steps[i]
       if (cached && cached.key === key) {
         if (cached.result.state === "error" || cached.result.state === "skipped") failed = true
@@ -1369,7 +1391,8 @@ export class Kernel {
         if (!std && f.d === undefined) throw new InputError("孔要么给 d（孔径），要么给 standard（标准孔）")
         const d = std ? std.d : n(f.d!)
         if (!(d > 0)) throw new InputError("孔径必须大于 0")
-        const depth = f.depth !== undefined ? n(f.depth) : this.bigLength(body)
+        // A heat-set insert's hole is blind (insert length + 1); every other hole goes through unless told.
+        const depth = f.depth !== undefined ? n(f.depth) : (std?.depth ?? this.bigLength(body))
         const drill = f.reverse ? plane.normal : mul(plane.normal, -1)
         const cbore = f.cbore ? { r: n(f.cbore.d) / 2, depth: n(f.cbore.depth) } : std?.cbore && { r: std.cbore.d / 2, depth: std.cbore.depth }
         const csink = f.csink ? { r: n(f.csink.d) / 2, angle: f.csink.angle !== undefined ? n(f.csink.angle) : 90 } : std?.csink && { r: std.csink.d / 2, angle: 90 }
@@ -1382,7 +1405,7 @@ export class Kernel {
         return {
           body: next,
           tools: [{ tool, mode: "cut" }],
-          summary: `${kind} × ${f.at.length} · ${f.depth !== undefined ? `深 ${fmt(depth)}` : "贯穿"}`,
+          summary: `${kind} × ${f.at.length} · ${f.depth !== undefined || std?.depth !== undefined ? `深 ${fmt(depth)}` : "贯穿"}`,
           threads: std?.thread ? [{ r: d / 2, major: std.thread.major }] : undefined,
           geom: { op: "hole", plane: frameOf(plane), centers, r: d / 2 },
         }
@@ -1611,44 +1634,150 @@ export class Kernel {
     return { body, parts: next, geom: { op: "sketch", plane: frameOf(plane) }, summary: `拆成 ${back}（V=${fmt(vl)}）、${front}（V=${fmt(vu)}）` }
   }
 
-  /** An assembly's component: the part file's final shape (built in a kernel of its own, cached), placed. */
+  /**
+   * An assembly's component: a part file's final shape (built in a kernel of its own, cached) or a standard
+   * part, placed by rotate / at and then by its mates; a mate onto several faces (four holes) places a copy
+   * on each.
+   */
   private component(f: Extract<Feature, { op: "component" }>, prev: Step | null, warnings: string[]): ApplyOut {
     const n = (v: number | string) => num(v, this.scope)
-    const got = this.components.get(f.file)
-    if (!got) throw new InputError(this.componentsGiven ? `没有读到「${f.file}」` : "装配只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
-    const built = buildComponent(got.source)
+    if (!!f.file === !!f.standard) throw new InputError(f.file ? "file 和 standard 只写一个：放零件文件写 file，放标准件写 standard" : "component 要写 file（零件文件）或 standard（标准件）")
+    let built: Built
+    let source: string
+    let fastener: FastenerSpec | null = null
+    if (f.standard) {
+      fastener = { ...f.standard, length: f.standard.length !== undefined ? n(f.standard.length) : undefined }
+      let des: ReturnType<typeof designation>
+      try {
+        des = designation(fastener)
+      } catch (e) {
+        throw new InputError((e as Error).message)
+      }
+      if (des.note) warnings.push(des.note)
+      built = standardPart(fastener)
+      source = `标准件 ${des.name}`
+    } else {
+      const got = this.components.get(f.file!)
+      if (!got) throw new InputError(this.componentsGiven ? `没有读到「${f.file}」` : "装配只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
+      built = buildComponent(got.source)
+      source = f.file!
+    }
     const base = componentName(f)
     if (!built.parts.length) {
       warnings.push(`零件「${base}」还是空的：在装配里编辑它（open_part 加 context）`)
-      return { summary: `零件「${base}」← ${f.file} · 还是空的` }
+      return { summary: `零件「${base}」← ${source} · 还是空的` }
     }
     if (built.failed) warnings.push(`零件「${base}」有 ${built.failed} 个特征失败，用的是失败前的形状`)
-    const placement: Placement = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: n(r.angle) })), at: (f.at ?? [0, 0, 0]).map(n) as V3 }
-    const added: Part[] = built.parts.map((p) => ({
-      name: p.name && built.parts.length > 1 ? `${base}/${p.name}` : base,
-      body: place(p.shape.clone(), placement),
-      explode: [0, 0, 0],
-      owned: true,
-      auto: true,
-      hidden: f.hidden,
-    }))
     const before: Part[] = !prev?.body ? [] : prev.parts?.length ? prev.parts.map((p) => ({ ...p, owned: false })) : [{ name: prev.mainName ?? "主体", body: prev.body, explode: [0, 0, 0], owned: false, auto: true }]
+    const start: Placement = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: n(r.angle) })), at: (f.at ?? [0, 0, 0]).map(n) as V3 }
+    const placements = f.mates?.length ? this.mate(f, built, start, before, warnings) : [start]
+    if (placements.length > MAX_COUNT) throw new InputError(`贴合一次最多放 ${MAX_COUNT} 个，选中了 ${placements.length} 个面`)
+    const added: Part[] = placements.flatMap((pl, i) =>
+      built.parts.map((p) => ({
+        name: `${placements.length > 1 ? `${base}#${i + 1}` : base}${p.name && built.parts.length > 1 ? `/${p.name}` : ""}`,
+        body: place(p.shape.clone(), pl),
+        explode: [0, 0, 0] as V3,
+        owned: true,
+        auto: true,
+        hidden: f.hidden,
+        component: f.id,
+        placement: pl,
+      })),
+    )
+    // A screw or an insert bites into the material it goes in: overlap is the point, not news.
+    const bites = fastener?.type === "screw" || fastener?.type === "insert"
     for (const a of added) {
       if (before.some((p) => p.name === a.name)) {
         added.forEach((x) => x.body.delete())
         throw new InputError(`零件名「${a.name}」重复了：给 component 写不同的 name`)
       }
+      if (bites) continue
       for (const p of before) {
         const r = relation(a.body, p.body, true)
         if (r.overlap > 1e-6) warnings.push(`「${a.name}」和「${p.name}」重叠 ${fmt(r.overlap)} mm³`)
       }
     }
     const parts = [...before, ...added]
-    const all = added.length === 1 ? null : compoundOf(added.map((a) => a.body))
-    const size = sizeOf(all ?? added[0].body)
+    const one = added.filter((a) => a.placement === placements[0])
+    const all = one.length === 1 ? null : compoundOf(one.map((a) => a.body))
+    const size = sizeOf(all ?? one[0].body)
     all?.delete()
+    const copies = placements.length > 1 ? ` × ${placements.length}` : ""
+    const mates = f.mates?.length ? ` · 贴合 ${f.mates.length} 条` : ""
     // Even a single component stays a named part (measure, checks and hiding go by its name).
-    return { body: compoundOf(parts.map((p) => p.body)), parts, summary: `零件「${base}」← ${f.file} · ${size.map(fmt).join(" × ")}` }
+    return { body: compoundOf(parts.map((p) => p.body)), parts, summary: `零件「${base}」← ${source} · ${size.map(fmt).join(" × ")}${copies}${mates}` }
+  }
+
+  /**
+   * Where the mates put a component (mates.ts): one placement, or one per face the first mate onto several
+   * faces picked. Faces on the component are picked in its own frame; faces on the others where they sit.
+   */
+  private mate(f: Extract<Feature, { op: "component" }>, built: Built, start: Placement, before: Part[], warnings: string[]): Placement[] {
+    const own = built.parts.length === 1 ? built.parts[0].shape : compoundOf(built.parts.map((p) => p.shape))
+    let copies: { T: Rigid; free: Freedom }[] = [{ T: rigidOf(start), free: FREE }]
+    let fanned = false
+    try {
+      f.mates!.forEach((m, k) => {
+        const what = `第 ${k + 1} 条贴合`
+        const mine = this.mateFaces(own, m.face, `${what}的 face（这个零件上）`)
+        if (mine.length !== 1) throw new InputError(`${what}的 face 要正好选中这个零件上的一个面，现在选中了 ${mine.length} 个`)
+        const target = before.find((p) => p.name === m.to.part)
+        if (!target) throw new InputError(`${what}：没有叫「${m.to.part}」的零件${before.length ? `（前面放好的有 ${before.map((p) => p.name).join("、")}）` : "（要贴合的零件写在这个 component 前面）"}`)
+        // Faces in one plane (a rim and the posts flush with it) or holes on one axis are one target.
+        const theirs = distinctGeos(this.mateFaces(target.body, m.to.face, `${what}的 to.face（「${m.to.part}」上）`))
+        if (theirs.length > 1 && copies.length === 1 && !fanned) {
+          // A mate onto several faces: one copy per face (a screw in each of four holes).
+          copies = theirs.map(() => ({ ...copies[0] }))
+          fanned = true
+          copies = copies.map((c, i) => this.applyOne(c, m, mine[0], theirs[i], what, warnings))
+          return
+        }
+        copies = copies.map((c) => {
+          // Several faces but one copy each: the one nearest where this copy's face is now.
+          const here = applyRigid(c.T, geoPoint(mine[0]))
+          const pick = theirs.length === 1 ? theirs[0] : theirs.reduce((a, b) => (dist(geoPoint(b), here) < dist(geoPoint(a), here) ? b : a))
+          return this.applyOne(c, m, mine[0], pick, what, warnings)
+        })
+      })
+    } finally {
+      if (own !== built.parts[0].shape) own.delete()
+    }
+    return copies.map((c) => {
+      const { axis, angle } = axisAngle(c.T.R)
+      return { rotate: angle ? [{ axis, angle }] : [], at: c.T.t }
+    })
+  }
+
+  private applyOne(c: { T: Rigid; free: Freedom }, m: NonNullable<Extract<Feature, { op: "component" }>["mates"]>[number], mine: MateGeo, theirs: MateGeo, what: string, warnings: string[]) {
+    try {
+      const r = applyMate(c.T, c.free, { kind: m.type, mine, target: theirs, offset: m.offset !== undefined ? num(m.offset, this.scope) : 0, flip: m.flip })
+      if (r.miss && !warnings.some((w) => w.startsWith(what))) warnings.push(`${what}没有完全做到：${r.miss}。调整顺序（先同轴、再贴合），或者用 rotate 先转到大致方向`)
+      return { T: r.T, free: r.free }
+    } catch (e) {
+      throw new InputError(`${what}：${(e as Error).message}`)
+    }
+  }
+
+  /** The faces a mate names on a shape, as planes or axes. */
+  private mateFaces(shape: Shape3D, sel: FaceSelector, what: string): MateGeo[] {
+    if (sel.of) throw new InputError(`${what}不能写 of：装配里的零件不记特征名，用 normal、kind、extreme、near 选`)
+    const faces = faceInfos(shape, [])
+    try {
+      let got: FaceInfo[]
+      try {
+        got = selectFaces(sel, faces, this.scope)
+      } catch (e) {
+        throw new InputError(`${what}：${(e as Error).message}`)
+      }
+      return got.map((x) => {
+        if (x.kind === "plane" && x.normal) return { kind: "plane" as const, n: x.normal, p: x.center }
+        const ax = x.kind === "cylinder" ? cylinderAxis(x) : x.kind === "cone" ? coneAxis(x) : null
+        if (ax) return { kind: "axis" as const, a: ax.p, d: ax.d }
+        throw new InputError(`${what}选中的${describeFace(x).split(" 来自")[0]}既不是平面，也不是圆柱面或圆锥面`)
+      })
+    } finally {
+      disposeInfos(faces)
+    }
   }
 
   /**
@@ -1861,16 +1990,79 @@ function buildComponent(src: ComponentSource): Built {
 /** Rotate (in order, about the origin) then move: a component's place in its assembly. */
 function place<T extends AnyShape>(shape: T, p: Placement): T {
   let s = shape as AnyShape
-  for (const r of p.rotate) s = s.rotate(r.angle, [0, 0, 0], AXIS[r.axis])
+  for (const r of p.rotate) s = s.rotate(r.angle, [0, 0, 0], typeof r.axis === "string" ? AXIS[r.axis] : r.axis)
   if (p.at.some((x) => x !== 0)) s = s.translate(p.at)
   return s as T
+}
+
+/** A placement as a rigid transform (mates.ts). */
+function rigidOf(p: Placement): Rigid {
+  let R = IDENTITY.R
+  for (const r of p.rotate) R = mulR(rotation(typeof r.axis === "string" ? AXIS[r.axis] : r.axis, (r.angle * Math.PI) / 180), R)
+  return { R, t: p.at }
+}
+
+function mulR(A: number[], B: number[]) {
+  const out = new Array(9).fill(0)
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) out[i * 3 + j] += A[i * 3 + k] * B[k * 3 + j]
+  return out
+}
+
+/** One of each plane (same normal, same offset) and each axis line among `gs`. */
+function distinctGeos(gs: MateGeo[]): MateGeo[] {
+  const same = (a: MateGeo, b: MateGeo) => {
+    if (a.kind === "plane" && b.kind === "plane") return dot(a.n, b.n) > 1 - 1e-9 && Math.abs(dot(sub(b.p, a.p), a.n)) < 1e-6
+    if (a.kind === "axis" && b.kind === "axis") {
+      if (Math.abs(dot(a.d, b.d)) < 1 - 1e-9) return false
+      const g = sub(b.a, a.a)
+      return Math.hypot(...sub(g, mul(a.d, dot(g, a.d)))) < 1e-6
+    }
+    return false
+  }
+  return gs.filter((g, i) => !gs.slice(0, i).some((h) => same(g, h)))
+}
+
+/** Where a mate's plane or axis is (for picking the nearest of several). */
+const geoPoint = (g: MateGeo): V3 => (g.kind === "plane" ? g.p : g.a)
+const dist = (a: V3, b: V3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+/** A cone's axis (a countersink, a flat head). */
+function coneAxis(f: FaceInfo): { p: V3; d: V3 } | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ad: any = (f.face as any)._geomAdaptor()
+  try {
+    const ax = ad.Cone().Axis()
+    const loc = ax.Location()
+    const dir = ax.Direction()
+    return { p: [loc.X(), loc.Y(), loc.Z()], d: [dir.X(), dir.Y(), dir.Z()] }
+  } catch {
+    return null
+  } finally {
+    ad.delete?.()
+  }
+}
+
+/** A standard part's shape (fastener-shapes.ts), built once per size. */
+function standardPart(spec: FastenerSpec): Built {
+  const key = `std:${JSON.stringify(spec)}`
+  const hit = BUILT.get(key)
+  if (hit) return hit
+  let shape: Shape3D
+  try {
+    shape = fastenerShape(spec)
+  } catch (e) {
+    throw new InputError((e as Error).message)
+  }
+  const built: Built = { parts: [{ name: null, shape }], failed: 0 }
+  BUILT.set(key, built)
+  return built
 }
 
 /** The inverse of `place`: from the assembly back into the part's own frame. */
 function unplace<T extends AnyShape>(shape: T, p: Placement): T {
   let s = shape as AnyShape
   if (p.at.some((x) => x !== 0)) s = s.translate(mul(p.at, -1))
-  for (const r of [...p.rotate].reverse()) s = s.rotate(-r.angle, [0, 0, 0], AXIS[r.axis])
+  for (const r of [...p.rotate].reverse()) s = s.rotate(-r.angle, [0, 0, 0], typeof r.axis === "string" ? AXIS[r.axis] : r.axis)
   return s as T
 }
 
