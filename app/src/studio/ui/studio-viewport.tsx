@@ -60,7 +60,7 @@ export function StudioViewport({
   onPointFeature,
   onSelectFeature,
   onPresented,
-  selectedPart,
+  selectedParts = [],
   onLocateStep,
   copy,
 }: {
@@ -77,9 +77,9 @@ export function StudioViewport({
   annotation?: boolean
   onAnnotation?: (on: boolean) => void
   onPointFeature?: (id: string | null, part?: number) => void
-  onSelectFeature?: (id: string | null, part?: number) => void
+  onSelectFeature?: (id: string | null, part?: number, additive?: boolean) => void
   onPresented?: (display: DisplayData) => void
-  selectedPart?: number
+  selectedParts?: number[]
   onLocateStep?: () => void
   readOnly?: boolean
   copy?: ViewportCopy
@@ -179,13 +179,13 @@ export function StudioViewport({
     return () => setViewer(null)
   }, [])
 
+  const [showChanges, setShowChanges] = React.useState(false)
   const paint = React.useMemo<Paint>(() => {
     if (rs) return { status: false, faces: rs.kind === "face" ? rs.hashes : [] }
     if (measuring && picked.length) return { status: false, faces: picked.filter((t) => t.kind === "face").map((t) => t.hash) }
     if (focus) return { status: false, faces: focus.kind === "face" ? focus.hashes : [] }
-    if (hover?.faces?.length || hover?.edges?.length) return { status: false, faces: hover.faces ?? [] }
-    return { status: true, highlight: hover?.ids.length ? hover.ids : undefined }
-  }, [focus, hover, measuring, picked, rs])
+    return { status: showChanges, selected: selectedParts, hovered: hover?.faces ?? display?.groups.filter((g) => hover?.ids.includes(g.origin)).map((g) => g.hash) }
+  }, [focus, hover, measuring, picked, rs, selectedParts, showChanges, display])
   const edgeHashes = React.useMemo(
     () => (rs ? (rs.kind === "edge" ? rs.hashes : []) : hover?.edges?.length ? hover.edges : measuring ? picked.filter((t) => t.kind === "edge").map((t) => t.hash) : focus?.kind === "edge" ? focus.hashes : []),
     [measuring, picked, focus, rs, hover],
@@ -195,7 +195,12 @@ export function StudioViewport({
     paintRef.current = paint
   }, [paint])
 
-  const view = display?.parts && !rs ? parts : NO_PARTS_VIEW
+  const view = React.useMemo(() => {
+    if (!display?.parts || rs) return NO_PARTS_VIEW
+    if (!parts.focus) return parts
+    const names = parts.focus.parts.filter((name) => display.parts!.some((p) => p.name === name))
+    return names.length === parts.focus.parts.length ? parts : { ...parts, focus: names.length ? { ...parts.focus, parts: names } : undefined }
+  }, [display, rs, parts])
   React.useEffect(() => {
     if (!viewer || !display) return
     const g = modelObject(display, viewer.kit, paintRef.current, view)
@@ -399,7 +404,7 @@ export function StudioViewport({
         const meshes = current.current?.children.filter((c) => (c as THREE.Mesh).isMesh && !c.userData.reference) ?? []
         const hit = pickVisible(viewer, e, meshes, cut)
         const group = hit ? groupAt(hit) : null
-        latest.current.onSelectFeature?.(group?.origin ?? null, group?.part)
+        latest.current.onSelectFeature?.(group?.origin ?? null, group?.part, e.shiftKey)
         return
       }
       if (isBusy) return notify(whyBusy)
@@ -457,14 +462,23 @@ export function StudioViewport({
     }
   }, [viewer])
 
+  const selectionNames = selectedParts.flatMap((i) => display?.parts?.[i] ? [display.parts[i].name] : [])
+  const focusMatches = !!view.focus && selectionNames.length === view.focus.parts.length && selectionNames.every((n) => view.focus!.parts.includes(n))
   return (
     <Viewport className="absolute inset-0" onReady={onReady} triadBesideCube>
-      {onParts && display?.parts && (selectedPart !== undefined && selectedPart >= 0 || view.focus) && (
-        <div role="toolbar" aria-label="选中零件" className="absolute bottom-24 left-3 z-20 flex max-w-[calc(100%_-_1.5rem)] items-center gap-1 rounded-md border bg-background/95 p-1 shadow-popover">
-          <span className="max-w-40 truncate px-2 text-caption" title={display.parts[selectedPart ?? -1]?.name ?? view.focus?.part}>{display.parts[selectedPart ?? -1]?.name ?? view.focus?.part}</span>
-          <Button size="sm" variant={view.focus?.mode === "isolate" ? "secondary" : "ghost"} aria-pressed={view.focus?.mode === "isolate"} disabled={selectedPart === undefined || selectedPart < 0} onClick={() => onParts({ ...view, focus: view.focus?.mode === "isolate" ? undefined : { part: display.parts![selectedPart!].name, mode: "isolate" } })}>隔离零件</Button>
-          <Button size="sm" variant={view.focus?.mode === "ghost" ? "secondary" : "ghost"} aria-pressed={view.focus?.mode === "ghost"} disabled={selectedPart === undefined || selectedPart < 0} onClick={() => onParts({ ...view, focus: view.focus?.mode === "ghost" ? undefined : { part: display.parts![selectedPart!].name, mode: "ghost" } })}>其余透明</Button>
+      <div className="absolute top-3 right-44 z-20 flex items-center gap-2 rounded-md border bg-background/95 p-1 text-caption">
+        <Button size="sm" variant={showChanges ? "secondary" : "ghost"} aria-pressed={showChanges} onClick={() => setShowChanges((v) => !v)}>查看变更</Button>
+        {showChanges && <span className="pr-2">新增：绿色 · 修改：橙色</span>}
+      </div>
+      {onParts && display?.parts && (selectedParts.length > 0 || view.focus) && (
+        <div role="toolbar" aria-label="选中零件" className="absolute bottom-24 left-3 z-20 flex max-w-[calc(100%_-_1.5rem)] flex-wrap items-center gap-1 rounded-md border bg-background/95 p-1 shadow-popover">
+          <span className="max-w-40 truncate px-2 text-caption" title={selectionNames.join("、")}>
+            {selectionNames.length > 1 ? `已选 ${selectionNames.length} 个零件` : selectionNames[0] ?? `${view.focus?.mode === "ghost" ? "保留实体" : "已隔离"} ${view.focus?.parts.length ?? 0} 个零件`}
+          </span>
+          <Button size="sm" variant={focusMatches && view.focus?.mode === "isolate" ? "secondary" : "ghost"} aria-pressed={focusMatches && view.focus?.mode === "isolate"} disabled={!selectionNames.length} onClick={() => onParts({ ...view, focus: focusMatches && view.focus?.mode === "isolate" ? undefined : { parts: selectionNames, mode: "isolate" } })}>隔离零件</Button>
+          <Button size="sm" variant={focusMatches && view.focus?.mode === "ghost" ? "secondary" : "ghost"} aria-pressed={focusMatches && view.focus?.mode === "ghost"} disabled={!selectionNames.length} onClick={() => onParts({ ...view, focus: focusMatches && view.focus?.mode === "ghost" ? undefined : { parts: selectionNames, mode: "ghost" } })}>其余透明</Button>
           <Button size="sm" variant="ghost" disabled={!onLocateStep} onClick={onLocateStep}>定位步骤</Button>
+          {selectionNames.length > 0 && <Button size="sm" variant="ghost" onClick={() => onSelectFeature?.(null)}>清除选择</Button>}
           {view.focus && <Button size="sm" variant="ghost" onClick={() => onParts({ ...view, focus: undefined })}>恢复显示</Button>}
         </div>
       )}

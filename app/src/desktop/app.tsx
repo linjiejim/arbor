@@ -5,6 +5,7 @@ import { Button, IconButton } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { notify } from "@/components/ui/toast"
 import { renderShots, renderViews } from "@/studio/look"
+import { selectParts } from "@/studio/part-selection"
 import { NO_PARTS_VIEW, type Hover, type PartsView } from "@/studio/scene"
 import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
 import { DrawingSheet } from "@/studio/ui/drawing-sheet"
@@ -90,24 +91,38 @@ export function DesktopApp() {
 
   const [annotation, setAnnotation] = React.useState(false)
   const [pointed, setPointed] = React.useState<{ path?: string; id: string | null; part?: string } | null>(null)
-  const [selected, setSelected] = React.useState<{ path?: string; id: string | null; part?: string } | null>(null)
+  const [selected, setSelected] = React.useState<{ path?: string; id: string | null; parts: string[] } | null>(null)
   const pointedFeature = pointed?.path === path ? pointed?.id : null
-  const selectedFeature = selected?.path === path ? selected?.id : null
-  const selectedPart = selected?.part && selected.path === path ? studio.display?.parts?.findIndex((p) => p.name === selected.part) : undefined
+  const selectedNames = selected && selected.path === path ? selected.parts : []
+  const selectedParts = selectedNames.map((name) => studio.display?.parts?.findIndex((p) => p.name === name) ?? -1).filter((i) => i >= 0)
+  const selectedFeature = selected && selected.path === path ? (selectedParts.length ? studio.display?.groups.find((g) => g.part === selectedParts.at(-1))?.origin ?? null : selected.parts.length ? null : selected.id) : null
   const pointedPart = pointed?.part && pointed.path === path ? studio.display?.parts?.findIndex((p) => p.name === pointed.part) : undefined
   const [locateStep, setLocateStep] = React.useState<{ id: string; request: number } | null>(null)
   const pointFeature = React.useCallback((id: string | null, part?: number) => {
     const name = part === undefined ? undefined : studio.display?.parts?.[part]?.name
     setPointed((p) => p?.id === id && p.path === path && p.part === name ? p : { path, id, part: name })
   }, [path, studio.display])
-  const selectFeature = React.useCallback((id: string | null, part?: number) => {
+  const selectFeature = React.useCallback((id: string | null, part?: number, additive = false) => {
+    if (!id && additive) return
     const name = part === undefined ? undefined : studio.display?.parts?.[part]?.name
-    setSelected((p) => ({ path, id: p?.path === path && p?.id === id && p.part === name ? null : id, part: name }))
-    if (name) setPartsView((v) => v.focus ? { ...v, focus: { ...v.focus, part: name } } : v)
+    setSelected((p) => {
+      const names = name ? selectParts(p && p.path === path ? p.parts : [], name, additive) : []
+      return { path, id: name ? (names.length ? id : null) : id, parts: names }
+    })
+    if (part !== undefined) setPartsView((v) => {
+      if (!v.hidden.has(part)) return v
+      const hidden = new Set(v.hidden); hidden.delete(part)
+      return { ...v, hidden }
+    })
   }, [path, studio.display])
-  const selectionHover = pointedFeature ?? selectedFeature
-  const hoverPart = pointedFeature ? pointedPart : selectedPart
-  const modelHover: Hover | null = selectionHover ? { ids: [selectionHover], feature: selectionHover, label: "零件或步骤", faces: hoverPart !== undefined && hoverPart >= 0 ? studio.display?.groups.filter((g) => g.part === hoverPart).map((g) => g.hash) : undefined } : agentHover
+  const selectionHover = pointedFeature
+  const hoverParts = pointedFeature ? (pointedPart === undefined ? [] : [pointedPart]) : selectedParts
+  const modelHover: Hover | null = selectionHover ? { ids: [selectionHover], feature: selectionHover, label: "零件或步骤", faces: hoverParts.length ? studio.display?.groups.filter((g) => g.part !== undefined && hoverParts.includes(g.part)).map((g) => g.hash) : undefined } : agentHover
+  const assemblyParts = studio.display?.parts?.map((p, index) => {
+    const id = studio.display?.groups.find((g) => g.part === index)?.origin ?? ""
+    const feature = studio.tree.features.find((f) => f.id === id)
+    return { name: p.name, index, id, file: feature?.op === "component" ? feature.file ?? "" : "" }
+  }) ?? []
   const [presented, setPresented] = React.useState<unknown>(null)
   const assembly = doc?.kind === "assembly" && !doc.context
   const loading = snapshot?.loading ?? (doc && !doc.error && snapshot?.kernel.phase !== "error" && (!studio.display || studio.display.provisional || presented !== studio.display) ? { path: doc.path, name: doc.name, startedAt: 0, progress: { stage: "mesh" as const, completed: 0, total: 1 } } : null)
@@ -117,8 +132,10 @@ export function DesktopApp() {
     <div className="flex h-dvh flex-col bg-background">
       <TitleBar snapshot={snapshot} doc={doc} pick={pick} onSetup={() => setSetupOpen(true)} sheet={sheet && Boolean(doc)} onSheet={setSheet} />
       <div className="flex min-h-0 flex-1">
-        <PartsSidebar snapshot={snapshot} />
-        <main className="relative min-h-0 min-w-0 flex-1" data-testid="model-viewport" data-document={path} data-presented={Boolean(studio.display && presented === studio.display)} data-geometry-state={!studio.display ? "loading" : studio.display.provisional ? "preview" : "ready"}>
+        <PartsSidebar snapshot={snapshot} instances={assembly ? assemblyParts : []} selected={selectedNames}
+          onSelect={(p, additive) => selectFeature(p.id, p.index, additive)}
+          onPoint={(p) => pointFeature(p?.id ?? null, p?.index)} />
+        <main className="relative min-h-0 min-w-0 flex-1" data-testid="model-viewport" data-document={path} data-pointed-part={pointed?.path === path ? pointed?.part ?? "" : ""} data-presented={Boolean(studio.display && presented === studio.display)} data-geometry-state={!studio.display ? "loading" : studio.display.provisional ? "preview" : "ready"}>
           {doc ? (
             <>
               <StudioViewport
@@ -128,7 +145,7 @@ export function DesktopApp() {
                 onPointFeature={pointFeature}
                 onSelectFeature={selectFeature}
                 onPresented={setPresented}
-                selectedPart={selectedPart}
+                selectedParts={selectedParts}
                 onLocateStep={selectedFeature ? () => setLocateStep((r) => ({ id: selectedFeature, request: (r?.request ?? 0) + 1 })) : undefined}
                 hover={treeHover ?? modelHover}
                 annotations={notes}

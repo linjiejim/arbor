@@ -23,6 +23,7 @@
   --scene-edge-soft: #8f8f8f;
   --scene-ghost: #9a9a9a;
   --scene-plane: #8a8a8a;
+  --scene-hover: #78c9d8;
   --scene-highlight: var(--primary);
   /* Faces a feature changed but did not create (trimmed, split, offset). */
   --scene-modified: #d9761c;

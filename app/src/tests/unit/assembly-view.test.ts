@@ -4,6 +4,7 @@ import { modelObject, repaint, groupAt, faceTarget, NO_PARTS_VIEW } from "@/stud
 import type { DisplayData } from "@/studio/kernel/build"
 import type { MaterialKit } from "@/three/materials"
 import { newNote, parseNotes } from "@/desktop/core/notes"
+import { matchesPart, selectParts } from "@/studio/part-selection"
 
 const data: DisplayData = {
   index: 1, mesh: { vertices: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0, 0, 3, 0, 0, 2, 1, 0]), normals: new Float32Array(18), triangles: new Uint32Array([0, 1, 2, 3, 4, 5]) },
@@ -15,10 +16,10 @@ const kit = { model: solid, modelDark: solid, highlight: solid, modified: solid,
 
 it("isolates one instance, ghosts the others, and restores the complete assembly without changing source geometry", () => {
   const before = structuredClone(data)
-  const isolated = modelObject(data, kit, { status: false }, { ...NO_PARTS_VIEW, focus: { part: "second", mode: "isolate" } })
+  const isolated = modelObject(data, kit, { status: false }, { ...NO_PARTS_VIEW, focus: { parts: ["second"], mode: "isolate" } })
   expect(isolated.children).toHaveLength(1)
   expect(isolated.children[0].userData.part).toBe(1)
-  const context = modelObject(data, kit, { status: false }, { ...NO_PARTS_VIEW, focus: { part: "second", mode: "ghost" } })
+  const context = modelObject(data, kit, { status: false }, { ...NO_PARTS_VIEW, focus: { parts: ["second"], mode: "ghost" } })
   expect((context.children[0] as THREE.Mesh).material).toBe(ghost)
   expect(context.children[1].userData.contextGhost).toBe(false)
   repaint(context, { status: false, highlight: "repeat" })
@@ -42,4 +43,40 @@ it("raycasts an exploded internal instance precisely and stores annotations in n
   const restored = parseNotes(JSON.stringify({ next: 2, notes: [note] })).notes[0]
   expect(restored.part).toBe("second")
   expect(restored.point).toEqual(target.point)
+})
+
+it("keeps multiple isolated instances at their exploded positions and respects manual hiding", () => {
+  const view = { ...NO_PARTS_VIEW, explode: 1, focus: { parts: ["first", "second"], mode: "isolate" as const } }
+  const model = modelObject(data, kit, { status: false }, view)
+  expect(model.children.map((c) => c.userData.part)).toEqual([0, 1])
+  expect(model.children.map((c) => c.position.toArray())).toEqual([[100, 0, 0], [0, 100, 0]])
+  const hidden = modelObject(data, kit, { status: false }, { ...view, hidden: new Set([0]) })
+  expect(hidden.children.map((c) => c.userData.part)).toEqual([1])
+  const restored = modelObject(data, kit, { status: false }, { ...view, focus: undefined })
+  expect(restored.children.map((c) => c.position.toArray())).toEqual([[100, 0, 0], [0, 100, 0]])
+})
+
+it("searches names, source files and step IDs without changing a multi-selection", () => {
+  const selected = selectParts(selectParts([], "外壳", true), "内部件", true)
+  expect(selected).toEqual(["外壳", "内部件"])
+  expect(selectParts(selected, "外壳", true)).toEqual(["内部件"])
+  expect(selectParts(selected, "右侧件", false)).toEqual(["右侧件"])
+  expect(selectParts(["右侧件"], "右侧件", false)).toEqual([])
+  expect(matchesPart(" 内部 INNER ", "内部件", "parts/inner.arbor.json", "motor_core")).toBe(true)
+  expect(matchesPart("ＭＯＴＯＲ", "内部件", "parts/inner.arbor.json", "motor_core")).toBe(true)
+  expect(matchesPart("outer", "内部件", "parts/inner.arbor.json", "motor_core")).toBe(false)
+  expect(matchesPart("   ", "内部件")).toBe(true)
+  expect(selected).toEqual(["外壳", "内部件"])
+})
+
+it("separates hover, selection and opt-in change colors in assembled and exploded views", () => {
+  for (const explode of [0, 1]) {
+    const model = modelObject(data, kit, { status: false }, { ...NO_PARTS_VIEW, explode })
+    const indices = () => model.children.flatMap((o) => (o as THREE.Mesh).geometry.groups.map((g) => g.materialIndex))
+    expect(indices()).toEqual([0, 0])
+    repaint(model, { status: false, selected: [0], hovered: [12] })
+    expect(indices()).toEqual([1, 5])
+    repaint(model, { status: true })
+    expect(indices()).toEqual([0, 6])
+  }
 })

@@ -16,6 +16,7 @@ const NAMES = {
   edgeSoft: "--scene-edge-soft",
   ghost: "--scene-ghost",
   plane: "--scene-plane",
+  hover: "--scene-hover",
   highlight: "--scene-highlight",
   modified: "--scene-modified",
   sketch: "--scene-sketch",
