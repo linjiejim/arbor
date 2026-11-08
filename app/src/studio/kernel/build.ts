@@ -1719,8 +1719,9 @@ export class Kernel {
     try {
       f.mates!.forEach((m, k) => {
         const what = `第 ${k + 1} 条贴合`
-        const mine = this.mateFaces(own, m.face, `${what}的 face（这个零件上）`)
-        if (mine.length !== 1) throw new InputError(`${what}的 face 要正好选中这个零件上的一个面，现在选中了 ${mine.length} 个`)
+        // Coplanar faces (a lid's underside around its lip) are one plane, as on the other side.
+        const mine = distinctGeos(this.mateFaces(own, m.face, `${what}的 face（这个零件上）`))
+        if (mine.length !== 1) throw new InputError(`${what}的 face 要正好选中这个零件上的一个平面或一根轴，现在选中了 ${mine.length} 个（加 extreme、radius 或 near 缩小）`)
         const target = before.find((p) => p.name === m.to.part)
         if (!target) throw new InputError(`${what}：没有叫「${m.to.part}」的零件${before.length ? `（前面放好的有 ${before.map((p) => p.name).join("、")}）` : "（要贴合的零件写在这个 component 前面）"}`)
         // Faces in one plane (a rim and the posts flush with it) or holes on one axis are one target.

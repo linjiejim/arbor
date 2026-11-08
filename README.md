@@ -25,7 +25,7 @@ Arbor 有两部分，用的是同一个建模内核、同一种特征树文件�
 | 术语表 `/glossary` | 命令对照表和 28 张概念卡。 |
 | 工作台 `/studio` | 用中文描述零件，AI 助教（默认 DeepSeek `deepseek-flash`）调用 13 种建模特征和查询工具，一步步建出参数化特征树，并讲清每一步的设计意图。几何在浏览器里由 OpenCascade（replicad）算出：每一步可以回滚，面按「新生成 / 被修改」着色并能看出来自哪个特征，参数直接改，导出 STEP、STL 和等价的 build123d 代码。可以附参考图，也有「边做边学」模式（关键步骤先让你预测）。不用 AI 也能从现成的特征树开始。默认「边做边学」，回复里的术语可以点开看解释。界面上的说明收在灰色 ⓘ 里，第一次进来按顺序走一遍导览。 |
 | 练习 `/studio?practice=<id>` | 8 道，挂在对应课程的最后一步：课程讲完一个概念，到工作台上自己做一个零件。要求就是需求核对表，随着模型变化实时打勾，全部做到记进学习进度。 |
-| 桌面版（`desktop/`，介绍页 `/desktop`） | 让本机的 coding agent（Claude Code、Codex……）通过 MCP 或命令行建模：39 个建模、观测、核对和协作工具，同一套特征树和内核；一个文件夹就是一个项目，几个零件文件可以共用参数、组成装配一起看和核对，窗口里能新建项目、往装配里加零件、出工程图；能导入开发板、元件的 STEP 模型，围着它建外壳并核对间隙和干涉。你在窗口里实时看每一步、拖参数、改特征，在面或边上留备注给 agent；agent 也能请你在模型上点一下。零件是可以进 git 的 `.arbor.json` 文件。macOS 版从 [Releases](https://github.com/linjiejim/arbor/releases/latest) 下载，装好后会自动更新。见 [`desktop/README.md`](desktop/README.md)。 |
+| 桌面版（`desktop/`，介绍页 `/desktop`） | 让本机的 coding agent（Claude Code、Codex……）通过 MCP 或命令行建模：40 个建模、观测、核对和协作工具，同一套特征树和内核；一个文件夹就是一个项目，几个零件文件可以共用参数、组成装配一起看和核对，用贴合摆放零件、放标准件（螺钉、螺母、垫圈、热熔螺母）、做真实螺纹，窗口里能新建项目、往装配里加零件、出工程图；能导入开发板、元件的 STEP 模型，围着它建外壳并核对间隙和干涉。你在窗口里实时看每一步、拖参数、改特征，在面或边上留备注给 agent；agent 也能请你在模型上点一下。零件是可以进 git 的 `.arbor.json` 文件。macOS 版从 [Releases](https://github.com/linjiejim/arbor/releases/latest) 下载，装好后会自动更新。见 [`desktop/README.md`](desktop/README.md)。 |
 
 当前进度、验证结果、已知局限和开源前清单见 [`docs/report.md`](docs/report.md)。
 
