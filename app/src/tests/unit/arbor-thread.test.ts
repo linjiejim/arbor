@@ -61,6 +61,43 @@ describe("threads", () => {
     k.dispose()
   }, 60_000)
 
+  it("refuses a thread that would add material outside the part (a tube too thin for it)", () => {
+    const k = new Kernel()
+    // ⌀8.2 outside, ⌀6.8 bore: an M8 internal thread needs material out to ⌀8.6.
+    const rep = k.rebuild({
+      params: {},
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "circle", d: 8.2 }] },
+        { id: "e", op: "extrude", sketch: "s", distance: 4 },
+        { id: "h", op: "hole", on: { plane: "XY", offset: 4 }, at: [[0, 0]], d: 6.8 },
+        { id: "t", op: "thread", faces: { kind: "cylinder", of: "h" }, size: "M8" },
+      ],
+    })
+    expect(rep.features[3].state).toBe("error")
+    expect(rep.features[3].message).toMatch(/孔壁太薄或有缺口/)
+    // The body is left as it was.
+    expect(rep.body!.size).toEqual([8.2, 8.2, 4])
+    k.dispose()
+  }, 60_000)
+
+  it("refuses a shaft thread with a shoulder in its way", () => {
+    const k = new Kernel()
+    const rep = k.rebuild({
+      params: {},
+      features: [
+        { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "circle", d: 8 }] },
+        { id: "e", op: "extrude", sketch: "s", distance: 20 },
+        // A rib sticking out of the shaft within the threaded stretch (z 12–20).
+        { id: "fs", op: "sketch", on: { plane: "XY", offset: 14 }, shapes: [{ type: "rect", w: 4, h: 1, center: [4.3, 0] }] },
+        { id: "f", op: "extrude", sketch: "fs", distance: 2 },
+        { id: "t", op: "thread", faces: { kind: "cylinder", radius: 4 }, size: "M8", length: 8, from: "+Z" },
+      ],
+    })
+    expect(rep.features[4].state).toBe("error")
+    expect(rep.features[4].message).toMatch(/外螺纹外面 .* 以内还有别的料/)
+    k.dispose()
+  }, 60_000)
+
   it("says what's wrong instead of guessing", () => {
     const k = new Kernel()
     const base: Tree["features"] = [

@@ -71,16 +71,28 @@ export const FREE: Freedom = { turn: "any", slide: [[1, 0, 0], [0, 1, 0], [0, 0,
 /** The part of `v` in the span of the orthonormal `basis`. */
 const project = (v: V3, basis: V3[]): V3 => basis.reduce<V3>((acc, b) => add(acc, mul(b, dot(v, b))), [0, 0, 0])
 
-/** An orthonormal basis of span(basis) ∩ (plane ⊥ n). */
+/**
+ * An orthonormal basis of span(basis) ∩ (plane ⊥ n): the directions v = Σ cᵢ·bᵢ with v·n = 0. In the
+ * coordinates c that is the null space of a = (b₁·n, b₂·n, …), which may hold combinations no single
+ * bᵢ does (sliding along (1, -1, 0) is left after flush mates on z = 0 and on x + y + z = 0).
+ */
 function withoutDir(basis: V3[], n: V3): V3[] {
-  const kept: V3[] = []
-  for (const b of basis) {
-    let v = sub(b, mul(n, dot(b, n)))
-    for (const k of kept) v = sub(v, mul(k, dot(v, k)))
-    if (len(v) > 1e-6) kept.push(unit(v))
+  const k = basis.length
+  const a = basis.map((b) => dot(b, n))
+  const aa = a.reduce((s, x) => s + x * x, 0)
+  if (aa < 1e-18) return basis
+  // Each unit coordinate with its component along a taken out, then orthonormalised: k - 1 survive.
+  const coords: number[][] = []
+  for (let j = 0; j < k; j++) {
+    let c = a.map((x, i) => (i === j ? 1 : 0) - (a[j] * x) / aa)
+    for (const q of coords) {
+      const d = c.reduce((s, x, i) => s + x * q[i], 0)
+      c = c.map((x, i) => x - d * q[i])
+    }
+    const l = Math.hypot(...c)
+    if (l > 1e-9) coords.push(c.map((x) => x / l))
   }
-  // Gram-Schmidt of the projections spans the projection of the space; keep only what stays inside it.
-  return kept.filter((k) => len(sub(project(k, basis), k)) < 1e-6)
+  return coords.slice(0, k - 1).map((c) => unit(c.reduce<V3>((v, x, i) => add(v, mul(basis[i], x)), [0, 0, 0])))
 }
 
 /** span(basis) ∩ line along d. */

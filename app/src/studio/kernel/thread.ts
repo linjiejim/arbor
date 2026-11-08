@@ -11,7 +11,7 @@
 //    These booleans only meet the helical faces at the end planes.
 // 3. The body gives up the same ring-shaped space (plain coaxial cylinders) and takes the ring in, glued
 //    on faces that coincide exactly.
-import { cast, draw, getOC, makeCompound, makeCylinder, twistExtrude, type Shape3D } from "replicad"
+import { cast, draw, getOC, makeCompound, makeCylinder, measureShapeVolumeProperties, twistExtrude, type Shape3D } from "replicad"
 import { InputError } from "./errors"
 
 type V3 = [number, number, number]
@@ -32,6 +32,8 @@ export type ThreadJob = {
   /** Radial allowance for printing: an external thread made this much thinner, an internal one this much wider. */
   clearance: number
   left: boolean
+  /** Radius of the selected cylinder (the shaft's, or the bore's). */
+  faceR: number
 }
 
 /** The outline of a threaded rod at height 0: outer radius `R`, groove centred on +X. */
@@ -138,6 +140,56 @@ function ring(job: ThreadJob, L: number): { ring: Shape3D; inner: number; outer:
   return { ring: out, inner: 0, outer }
 }
 
+const vol = (s: Shape3D) => measureShapeVolumeProperties(s).volume
+const fmt = (x: number) => String(Math.round(x * 100) / 100)
+
+/** A ring from radius `a` to `b`, 0 to L along +Z. */
+function annulus(a: number, b: number, L: number): Shape3D {
+  const o = cyl(b, 0, L)
+  if (a <= 0) return o
+  const i = cyl(a, -1, L + 1)
+  const out = bop("cut", o, i)
+  o.delete()
+  i.delete()
+  return out
+}
+
+/**
+ * The ring the thread replaces has to be solid material in the body, and a shaft's thread needs room
+ * around it: else replacing it would add material outside the part (a thin tube's wall grows) or fill a
+ * slot across the thread. Refuse instead, saying where.
+ */
+function checkRoom(body: Shape3D, job: ThreadJob, inner: number, outer: number) {
+  const L = job.t1 - job.t0
+  const at: V3 = [job.p[0] + job.d[0] * job.t0, job.p[1] + job.d[1] * job.t0, job.p[2] + job.d[2] * job.t0]
+  const needed = place(annulus(job.internal ? job.faceR : inner, job.internal ? outer : job.faceR, L), job.d, at)
+  try {
+    const missing = bop("cut", needed, body)
+    const gone = vol(missing)
+    missing.delete()
+    if (gone > 1e-3 * vol(needed) + 1e-6) {
+      throw new InputError(
+        job.internal
+          ? `内螺纹要用到孔外 ⌀${fmt(2 * job.faceR)}–⌀${fmt(2 * outer)} 这一圈，这里的料不完整（孔壁太薄或有缺口，缺 ${fmt(gone)} mm³）：孔周围至少要留 ${fmt(outer - job.faceR)} mm 实心`
+          : `外螺纹要用到 ⌀${fmt(2 * inner)}–⌀${fmt(2 * job.faceR)} 这一圈，这里的料不完整（轴是空心的、太薄，或有槽，缺 ${fmt(gone)} mm³）`,
+      )
+    }
+  } finally {
+    needed.delete()
+  }
+  if (job.internal) return
+  // Around a shaft's thread the groove's cutter reaches out to `outer`: nothing else may be there.
+  const around = place(annulus(job.faceR + 1e-3, outer, L), job.d, at)
+  try {
+    const hit = bop("cut", around, body)
+    const extra = vol(around) - vol(hit)
+    hit.delete()
+    if (extra > 1e-6 + 1e-3 * vol(around)) throw new InputError(`外螺纹外面 ${fmt(outer - job.faceR)} mm 以内还有别的料（台阶、凸台，${fmt(extra)} mm³）：用 length + from 只做没挡着的那一段`)
+  } finally {
+    around.delete()
+  }
+}
+
 /** Put real threads into `body` (each job one cylinder); the same size is built once and copied. */
 export function cutThreads(body: Shape3D, jobs: ThreadJob[]): Shape3D {
   const made = new Map<string, { ring: Shape3D; inner: number; outer: number }>()
@@ -149,6 +201,7 @@ export function cutThreads(body: Shape3D, jobs: ThreadJob[]): Shape3D {
       const key = JSON.stringify([job.major, job.pitch, job.internal, job.clearance, job.left, Math.round(L * 1e6)])
       let r = made.get(key)
       if (!r) made.set(key, (r = ring(job, L)))
+      checkRoom(body, job, r.inner, r.outer)
       const at: V3 = [job.p[0] + job.d[0] * job.t0, job.p[1] + job.d[1] * job.t0, job.p[2] + job.d[2] * job.t0]
       rings.push(place(r.ring.clone(), job.d, at))
       const space = r.inner > 0 ? bop("cut", cyl(r.outer, 0, L), cyl(r.inner, -1, L + 1)) : cyl(r.outer, 0, L)

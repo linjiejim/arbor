@@ -31,6 +31,18 @@ describe("mates as math", () => {
     expect(r3.miss).toMatch(/还差 5 mm/)
   })
 
+  it("keeps sliding along the line two slanted flush mates leave free", () => {
+    const n2: [number, number, number] = [1 / Math.sqrt(3), 1 / Math.sqrt(3), 1 / Math.sqrt(3)]
+    let r = applyMate(IDENTITY, FREE, { kind: "flush", mine: { kind: "plane", n: [0, 0, 1], p: [0, 0, 0] }, target: { kind: "plane", n: [0, 0, 1], p: [0, 0, 0] } })
+    r = applyMate(r.T, r.free, { kind: "flush", mine: { kind: "plane", n: n2, p: [0, 0, 0] }, target: { kind: "plane", n: n2, p: [0, 0, 0] } })
+    // Left: sliding along (1, -1, 0). A third mate that needs exactly that is met.
+    expect(r.free.slide).toHaveLength(1)
+    expect(Math.abs(r.free.slide[0][0] + r.free.slide[0][1])).toBeLessThan(1e-9)
+    const u: [number, number, number] = [1 / Math.sqrt(2), -1 / Math.sqrt(2), 0]
+    const r3 = applyMate(r.T, r.free, { kind: "flush", mine: { kind: "plane", n: u, p: [0, 0, 0] }, target: { kind: "plane", n: u, p: [3, -3, 0] } })
+    expect(r3.miss).toBeUndefined()
+  })
+
   it("turns a part over to put a face against another", () => {
     // The part's top (normal +Z) goes down onto a floor facing +Z: it has to turn upside down.
     const r = applyMate(IDENTITY, FREE, { kind: "contact", mine: { kind: "plane", n: [0, 0, 1], p: [0, 0, 5] }, target: { kind: "plane", n: [0, 0, 1], p: [0, 0, 0] } })
@@ -161,6 +173,21 @@ describe("standard parts and mates in an assembly", () => {
     // In the lid's own frame: the washers sit on its top (z = 3), the box below it.
     const g = await run("check", { items: [{ id: "w", said: "垫圈压在盖子上", kind: "gap", a: { part: "垫圈#3" }, b: { face: { normal: "+Z", extreme: "+Z" } }, max: 0 }] })
     expect(g.text).toMatch(/✓ w/)
+  }, 120_000)
+
+  it("shows the assembly around a part that has nothing in it yet", async () => {
+    const { run } = await enclosure()
+    const add = await run("component", { id: "knob", name: "旋钮", file: "parts/knob.arbor.json", at: [0, 0, 30] })
+    expect(add.text).toMatch(/读不到|没有读到|找不到/)
+    await run("delete_feature", { id: "knob" })
+    // A new empty part file, placed on top of the box, edited in place: the box shows below it.
+    await run("open_part", { path: "parts/knob.arbor.json", create: true })
+    await run("open_part", { path: "box.arbor-asm.json" })
+    await run("component", { id: "knob", name: "旋钮", file: "parts/knob.arbor.json", at: [0, 0, 30] })
+    const open = await run("open_part", { path: "parts/knob.arbor.json", context: "box.arbor-asm.json" })
+    expect(open.ok, open.text).toBe(true)
+    const st = await run("get_state", {})
+    expect(st.text).toMatch(/盒体/)
   }, 120_000)
 
   it("refuses what it can't make sense of", async () => {

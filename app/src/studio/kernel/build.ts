@@ -307,10 +307,24 @@ export class Kernel {
       const parts = sub.lastBuilt(Infinity)?.parts ?? []
       const comp = (id?: string) => ctx.tree.features.find((x) => x.id === id)
       const self = parts.find((p) => { const c = comp(p.component); return c?.op === "component" && c.file === ctx.self })
-      if (!self?.placement) return
+      // A part with nothing in it yet has no shape to place: it sits where its own rotate / at put it.
+      let where = self?.placement
+      let selfId = self?.component
+      if (!where) {
+        const f = ctx.tree.features.find((x): x is Extract<Feature, { op: "component" }> => x.op === "component" && x.file === ctx.self)
+        if (!f) return
+        let scope: Scope
+        try {
+          scope = resolveParams(ctx.tree.params)
+        } catch {
+          return
+        }
+        where = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: num(r.angle, scope) })), at: (f.at ?? [0, 0, 0]).map((v) => num(v, scope)) as V3 }
+        selfId = f.id
+      }
       for (const p of parts) {
-        if (p.hidden || (p.component === self.component && p.name.split("/")[0] === self.name.split("/")[0])) continue
-        const shape = unplace(p.body.clone(), self.placement)
+        if (p.hidden || (p.component === selfId && (!self || p.name.split("/")[0] === self.name.split("/")[0]))) continue
+        const shape = unplace(p.body.clone(), where)
         this.context.push({ id: p.name, name: p.name, shape, ...meshBody(shape), owned: true })
       }
     } finally {
@@ -1574,7 +1588,7 @@ export class Kernel {
           if (towards > 0) t0 = t1 - len
           else t1 = t0 + len
         }
-        jobs.push({ p: ax.p, d: ax.d, t0, t1, major, pitch, internal: inside, clearance, left: !!f.left })
+        jobs.push({ p: ax.p, d: ax.d, t0, t1, major, pitch, internal: inside, clearance, left: !!f.left, faceR: r })
       }
       const next = cutThreads(body, jobs)
       const name = row && f.d === undefined && f.pitch === undefined ? f.size! : `M${fmt(major)}×${fmt(pitch)}`
