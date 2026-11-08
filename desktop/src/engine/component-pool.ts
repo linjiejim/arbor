@@ -8,10 +8,11 @@ import { serialize, deserialize } from "node:v8"
 import { Worker } from "node:worker_threads"
 import type { ComponentSource, CompiledComponent } from "../../../app/src/studio/kernel/build"
 import type { KernelReply, KernelRequest } from "./kernel-thread"
+import { contentKey } from "./content-key"
 import { HOME } from "./home"
 
 const hash = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex")
-const sourceKey = (s: ComponentSource) => hash(JSON.stringify(s, (key, value) => key === "compiled" ? undefined : value))
+export const sourceKey = (s: ComponentSource) => contentKey(s)
 
 /** A disposable cache: corrupt, stale or unwritable entries behave as misses. */
 export class ComponentCache {

@@ -2,7 +2,7 @@ import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it } from "vitest"
-import { ComponentCache, ComponentPool } from "../../../../desktop/src/engine/component-pool"
+import { ComponentCache, ComponentPool, sourceKey } from "../../../../desktop/src/engine/component-pool"
 import { AssemblyCache, assemblyKey } from "../../../../desktop/src/engine/assembly-cache"
 
 describe("desktop content caches", () => {
@@ -14,9 +14,9 @@ describe("desktop content caches", () => {
   })
 
   it("invalidates geometry for params, nested dependencies, STEP bytes and placements, ignoring derived compiled data", () => {
-    const source = { tree: { params: { L: 10 }, features: [{ at: [0, 0, 0] }] }, components: [{ tree: { params: { D: 2 } }, bytes: new Uint8Array([1, 2]) }] }
+    const source = { file: "part.arbor.json", tree: { params: { L: 10 }, features: [{ at: [0, 0, 0] }] }, components: [{ tree: { params: { D: 2 } }, bytes: new Uint8Array([1, 2]) }] }
     const key = assemblyKey(source)
-    expect(assemblyKey({ ...source, compiled: { ignored: true } })).toBe(key)
+    expect(assemblyKey({ ...source, compiled: { parts: [], failed: 0 } })).toBe(key)
     for (const mutate of [
       (s: typeof source) => { s.tree.params.L = 11 },
       (s: typeof source) => { s.tree.features[0].at[0] = 1 },
@@ -27,6 +27,16 @@ describe("desktop content caches", () => {
       mutate(changed)
       expect(assemblyKey(changed)).not.toBe(key)
     }
+  })
+
+  it("retains user parameters named compiled while stripping native payloads on nested sources", () => {
+    const source = { file: "part.arbor.json", tree: { params: { compiled: 10 }, features: [] }, compiled: { parts: [], failed: 0 } }
+    const changed = { ...source, tree: { ...source.tree, params: { compiled: 20 } } }
+    expect(sourceKey(source)).not.toBe(sourceKey(changed))
+    expect(assemblyKey([source])).not.toBe(assemblyKey([changed]))
+    const nested = { file: "assembly.arbor-asm.json", components: [source] }
+    expect(sourceKey(nested)).not.toBe(sourceKey({ ...nested, components: [changed] }))
+    expect(assemblyKey(nested)).toBe(assemblyKey({ ...nested, components: [{ ...source, compiled: { parts: [{ name: null, brep: "different derived payload" }], failed: 0 } }] }))
   })
 
   it("round-trips native data and typed previews; corruption becomes a cache miss", async () => {

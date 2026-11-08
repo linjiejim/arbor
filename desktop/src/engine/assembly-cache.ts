@@ -3,13 +3,14 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import path from "node:path"
 import { serialize, deserialize } from "node:v8"
 import type { BuildReport, DisplayData } from "../../../app/src/studio/kernel/build"
+import { contentKey } from "./content-key"
 import { ComponentCache } from "./component-pool"
 
 export type AssemblySnapshot = { display: DisplayData; interferences: BuildReport["interferences"] }
 const hash = (b: Uint8Array | string) => createHash("sha256").update(b).digest("hex")
 
 /** The complete dependency content, including shared params and STEP bytes. */
-export const assemblyKey = (inputs: unknown) => hash(JSON.stringify(inputs, (key, value) => key === "compiled" ? undefined : value))
+export const assemblyKey = contentKey
 
 /** Binary typed-array previews; never used for picking until fresh B-reps are ready. */
 export class AssemblyCache {
