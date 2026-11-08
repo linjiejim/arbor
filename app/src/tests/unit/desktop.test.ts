@@ -65,6 +65,36 @@ describe("arbor: paths and catalog", () => {
     expect(names).not.toContain("look-in-browser")
   })
 
+  it("keeps the tool list small: selectors once per tool under $defs, every $ref resolving", () => {
+    let total = 0
+    for (const c of agentCommands()) {
+      const s = inputJsonSchema(c)
+      const text = JSON.stringify(s)
+      total += text.length
+      const defs = (s.$defs ?? {}) as Record<string, unknown>
+      for (const m of text.matchAll(/"\$ref":"#\/\$defs\/(\w+)"/g)) expect(defs[m[1]], `${c.name} → ${m[1]}`).toBeTruthy()
+    }
+    // Was ~236 000 characters with every selector inlined; set_tree alone was ~100 000.
+    expect(total).toBeLessThan(90_000)
+    const byName = (n: string) => JSON.stringify(inputJsonSchema(agentCommands().find((c) => c.name === n)!)).length
+    expect(byName("set_tree")).toBeLessThan(4_000)
+    expect(byName("check")).toBeLessThan(15_000)
+    // Field descriptions survive (they are the agent's documentation).
+    const fillet = JSON.stringify(inputJsonSchema(agentCommands().find((c) => c.name === "fillet")!))
+    expect(fillet).toContain("沿这个方向最靠外的边")
+    expect(fillet).toContain('"$ref":"#/$defs/EdgeSelector"')
+  })
+
+  it("still validates a whole tree strictly behind the short set_tree schema", async () => {
+    const mem = memFiles()
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files })
+    const ctx: CallContext = { actor: "agent", session: "s", cwd: "/w" }
+    await engine.run("open_part", { path: "t", create: true }, ctx)
+    const bad = await engine.run("set_tree", { tree: { params: {}, features: [{ id: "e", op: "extrude", sketch: 3 }] } }, ctx)
+    expect(bad.ok).toBe(false)
+    expect(bad.text).toMatch(/tree\.features\.0/)
+  })
+
   it("says how a tree changed in one line", () => {
     const a = { params: { W: 40 }, features: [{ id: "f1", op: "fillet" as const, name: "圆角", edges: {}, r: 2 }] }
     const b = { params: { W: 45, t: 2 }, features: [{ ...a.features[0], r: 3 }] }

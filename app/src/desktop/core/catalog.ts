@@ -2,7 +2,7 @@
 // input. The MCP server lists the agent's ones as tools, the CLI exposes them
 // as `arbor call <name>`, and the window uses the user's ones over IPC.
 import { z } from "zod"
-import { EdgeSelector, FaceSelector, Num, Tree } from "../../studio/dsl"
+import { EdgeSelector, FaceSelector, Num, PlaneRef, Tree } from "../../studio/dsl"
 import { SYSTEM_PROMPT } from "../../studio/prompt"
 import { STARTERS } from "../../studio/starters"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
@@ -231,11 +231,92 @@ export const COMMAND = new Map(COMMANDS.map((c) => [c.name, c]))
 
 export const agentCommands = () => COMMANDS.filter((c) => c.audience !== "user")
 
-/** JSON Schema of a command's input, for MCP `tools/list`. */
-export function inputJsonSchema(spec: CommandSpec): Record<string, unknown> {
-  const s = z.toJSONSchema(spec.input, { io: "input", unrepresentable: "any" }) as Record<string, unknown>
+type Json = Record<string, unknown>
+const toJson = (schema: z.ZodType): Json => {
+  const s = z.toJSONSchema(schema, { io: "input", unrepresentable: "any" }) as Json
   delete s.$schema
   return s
+}
+
+/**
+ * Sub-schemas written once per tool under `$defs` and referred to by `$ref`: a selector is inlined at
+ * every place it's used (a check item has a dozen), which made the tool list ~240 KB. Largest first, so
+ * a plane reference is matched whole before the face selector inside it.
+ */
+const SHARED_DEFS: [string, z.ZodType][] = [
+  ["PlaneRef", PlaneRef],
+  ["EdgeSelector", EdgeSelector],
+  ["FaceSelector", FaceSelector],
+]
+
+/** Equal as JSON, ignoring the description at the top (the same schema described for one use). */
+function sameShape(a: unknown, b: Json): boolean {
+  if (!a || typeof a !== "object" || Array.isArray(a)) return false
+  const { description: _a, ...ra } = a as Json
+  const { description: _b, ...rb } = b
+  void _a
+  void _b
+  return JSON.stringify(ra) === JSON.stringify(rb)
+}
+
+/** Replace every copy of a shared sub-schema below `node` with a `$ref`; returns the names it used. */
+function refShared(node: unknown, defs: [string, Json][], used: Set<string>): unknown {
+  if (Array.isArray(node)) return node.map((x) => refShared(x, defs, used))
+  if (!node || typeof node !== "object") return node
+  for (const [name, def] of defs) {
+    if (!sameShape(node, def)) continue
+    used.add(name)
+    const desc = (node as Json).description
+    return desc && desc !== def.description ? { $ref: `#/$defs/${name}`, description: desc } : { $ref: `#/$defs/${name}` }
+  }
+  return Object.fromEntries(Object.entries(node as Json).map(([k, v]) => [k, refShared(v, defs, used)]))
+}
+
+let defsCache: { raw: [string, Json][]; out: Map<string, Json> } | null = null
+/** The shared schemas as generated (to match against) and as written out (smaller ones inside referenced). */
+function sharedDefs() {
+  if (defsCache) return defsCache
+  const raw = SHARED_DEFS.map(([name, s]) => [name, toJson(s)] as [string, Json])
+  const out = new Map(
+    raw.map(([name, def], i) => {
+      const { description, ...body } = def
+      const inner = refShared(body, raw.slice(i + 1), new Set()) as Json
+      return [name, description ? { ...inner, description } : inner]
+    }),
+  )
+  defsCache = { raw, out }
+  return defsCache
+}
+
+/**
+ * `set_tree` takes a whole feature tree: its full schema is every feature tool's schema at once (~100 KB).
+ * The agent writes features exactly as it calls the feature tools; the engine validates the tree.
+ */
+const TREE_JSON: Json = {
+  type: "object",
+  description:
+    "完整的特征树 { uses?, params, paramNotes?, features, checks? }。features 里每一项写 op（特征工具的名字，如 sketch、extrude、fillet）加上和那个工具一样的字段；checks 的每一项和 check 工具的 items 一样。整棵树按特征工具的参数校验，有错会说明是哪一项。",
+  properties: {
+    uses: { type: "string", description: "共享参数文件（share_params 写的）" },
+    params: { type: "object", additionalProperties: { type: ["number", "string"] } },
+    paramNotes: { type: "object", additionalProperties: { type: "string" } },
+    features: { type: "array", items: { type: "object", properties: { op: { type: "string" }, id: { type: "string" } }, required: ["op", "id"] } },
+    checks: { type: "array", items: { type: "object" } },
+  },
+  required: ["params", "features"],
+}
+
+/** JSON Schema of a command's input, for MCP `tools/list`: shared selectors under `$defs`. */
+export function inputJsonSchema(spec: CommandSpec): Record<string, unknown> {
+  const s = toJson(spec.input)
+  if (spec.name === "set_tree") (s.properties as Json).tree = TREE_JSON
+  const { raw, out: defs } = sharedDefs()
+  const used = new Set<string>()
+  const result = refShared(s, raw, used) as Json
+  // A shared schema may refer to a smaller one (a plane reference holds a face selector).
+  for (const name of [...used]) for (const m of JSON.stringify(defs.get(name)).matchAll(/#\/\$defs\/(\w+)/g)) used.add(m[1])
+  if (used.size) result.$defs = Object.fromEntries(SHARED_DEFS.filter(([n]) => used.has(n)).map(([n]) => [n, defs.get(n)]))
+  return result
 }
 
 /** Inputs that name files: resolved against the caller's directory before they reach the engine. */
