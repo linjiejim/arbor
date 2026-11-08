@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { FASTENER_TYPES, SCREW_HEADS } from "./fasteners"
 import { SCREW_SIZES } from "./holes"
 
 /**
@@ -47,6 +48,7 @@ export const FaceSelector = z
 const edgeFields = {
   of: z.string().optional().describe("只选这个特征生成的面上的边（特征 id）"),
   faces: FaceSelector.optional().describe("只选这些面的边界边"),
+  outer: z.boolean().optional().describe("和 faces 一起写：只要这些面的外轮廓边，不要面上孔口的边（盖面外缘倒圆角时用）"),
   parallel: Axis.optional().describe("平行于这个轴的直线边"),
   kind: CurveKind.optional(),
   extreme: Dir.optional().describe('沿这个方向最靠外的边，例如 "+Z" = 最上面一圈边'),
@@ -209,7 +211,10 @@ export const Feature = z.discriminatedUnion("op", [
     standard: z
       .object({
         size: z.enum(SCREW_SIZES).describe("公制螺纹规格"),
-        fit: z.enum(["clearance", "close", "tap"]).optional().describe("clearance = 普通过孔（缺省），close = 精配过孔，tap = 螺纹孔：钻攻丝底孔并标出装饰螺纹"),
+        fit: z
+          .enum(["clearance", "close", "tap", "insert"])
+          .optional()
+          .describe("clearance = 普通过孔（缺省），close = 精配过孔，tap = 螺纹孔：钻攻丝底孔并标出装饰螺纹，insert = 热熔螺母孔（3D 打印件用：按常见标准款开孔，深度缺省为螺母长 + 1）"),
         head: z.enum(["cbore", "csink"]).optional().describe("过孔加沉头：cbore = 内六角圆柱头螺钉的沉孔，csink = 沉头螺钉的锥口"),
       })
       .optional()
@@ -302,13 +307,36 @@ export const Feature = z.discriminatedUnion("op", [
       .string()
       .min(1)
       .max(200)
-      .describe("零件文件（.arbor.json）、子装配（.arbor-asm.json）或外购件（.step），相对装配文件所在的文件夹"),
+      .optional()
+      .describe("零件文件（.arbor.json）、子装配（.arbor-asm.json）或外购件（.step），相对装配文件所在的文件夹；放标准件时不写，写 standard"),
+    standard: z
+      .object({
+        type: z.enum(FASTENER_TYPES).describe("screw 螺钉、nut 六角螺母（ISO 4032）、washer 平垫圈（ISO 7089）、insert 热熔螺母（3D 打印件用）"),
+        size: z.enum(SCREW_SIZES),
+        head: z.enum(SCREW_HEADS).optional().describe("螺钉头：socket 内六角圆柱头（ISO 4762，缺省）、button 内六角半圆头（ISO 7380）、flat 内六角沉头（ISO 10642）、pan 十字盘头（ISO 7045）"),
+        length: Num.optional().describe("螺钉长度 mm（沉头螺钉含头，其余从头的底面算）"),
+      })
+      .optional()
+      .describe("标准件：不用零件文件，按 ISO 尺寸生成，零件清单里写规格。轴线沿 Z：螺钉头的底面（支承面）在 z=0、螺杆朝 -Z（沉头螺钉头顶在 z=0），螺母、垫圈从 z=0 往上，热熔螺母顶面在 z=0 往下"),
     rotate: z
       .array(z.object({ axis: Axis, angle: Num }))
       .max(3)
       .optional()
       .describe("依次绕过原点的坐标轴旋转，角度用度；先旋转、后平移"),
     at: Vec3.optional().describe("平移 [x, y, z]，零件自己的原点放到这里"),
+    mates: z
+      .array(
+        z.object({
+          type: z.enum(["contact", "flush", "coaxial"]).describe("contact = 面贴面（两个平面法向相反、贴住）；flush = 平齐（法向相同、在同一平面）；coaxial = 同轴（圆柱面或圆锥面的轴线对齐，例如螺钉进孔）"),
+          face: FaceSelector.describe("这个零件上的面，按它自己文件里的坐标选（不写 of）"),
+          to: z.object({ part: z.string().describe("前面已经放好的零件的名字"), face: FaceSelector.describe("那个零件上的面，按它在装配里的位置选（不写 of）") }),
+          offset: Num.optional().describe("contact / flush：沿法向留出的距离，正值 = 离开"),
+          flip: z.boolean().optional().describe("coaxial：零件朝向反了时写 true"),
+        }),
+      )
+      .max(3)
+      .optional()
+      .describe("贴合摆放：先按 rotate、at 放，再按顺序一条条满足（后一条只在前面留下的自由度里移动、转动），不用自己算坐标。to.face 选中几个面（例如 4 个孔）就放几个，零件清单里数量照算"),
     hidden: z.boolean().optional().describe("先不显示（还在装配里，导出、核对照常）"),
   }),
   z.object({
@@ -317,6 +345,18 @@ export const Feature = z.discriminatedUnion("op", [
     sketch: z.string().describe("只含一条开放的线（path）的草图，画在筋所在的平面上；线的两端可以不碰到实体，会自动延长到墙"),
     t: Num.describe("筋厚，在草图平面两侧各一半"),
     flip: z.boolean().optional().describe("材料长在线的另一侧（两侧都被实体围住、自动判断不明确时才用）"),
+  }),
+  z.object({
+    ...Base,
+    op: z.literal("thread"),
+    faces: FaceSelector.describe("要做螺纹的圆柱面：轴的外圆是外螺纹，孔壁是内螺纹；可以一次选几个一样大的孔"),
+    size: z.enum(SCREW_SIZES).optional().describe("公制粗牙螺纹，按它定大径和螺距"),
+    d: Num.optional().describe("不用 size 时：螺纹大径"),
+    pitch: Num.optional().describe("螺距；用 size 时缺省是粗牙螺距"),
+    length: Num.optional().describe("螺纹长度，缺省整个圆柱面"),
+    from: Dir.optional().describe('写了 length 时从圆柱面的哪一端量起，例如 "+Z" = 从上端往下'),
+    clearance: Num.optional().describe("打印用的间隙（mm，缺省 0）：外螺纹做细、内螺纹做大这么多；FDM 打印常用 0.1–0.2"),
+    left: z.boolean().optional().describe("左旋"),
   }),
   z.object({
     ...Base,
@@ -420,6 +460,7 @@ export const OP_NAMES: Record<FeatureOp, string> = {
   split: "拆件",
   import: "导入",
   component: "零件",
+  thread: "螺纹",
 }
 
 /** Display name: the model's own name, else 「拉伸2」 style numbering. */
@@ -433,6 +474,8 @@ export function displayName(tree: Tree, f: Feature) {
 export const TOOL_OPS: FeatureOp[] = ["extrude", "revolve", "hole", "sweep", "loft"]
 
 /** The name a component shows as (and its parts are called): its `name`, else the file's name without the ending. */
-export function componentName(f: { name?: string; file: string }) {
-  return f.name ?? (f.file.split(/[\\/]/).pop() ?? f.file).replace(/\.(arbor-asm\.json|arbor\.json|json|step|stp)$/i, "")
+export function componentName(f: { name?: string; file?: string; standard?: { type: string; size: string } }) {
+  if (f.name) return f.name
+  if (!f.file) return f.standard ? `${f.standard.size} ${{ screw: "螺钉", nut: "螺母", washer: "垫圈", insert: "热熔螺母" }[f.standard.type] ?? ""}`.trim() : "零件"
+  return (f.file.split(/[\\/]/).pop() ?? f.file).replace(/\.(arbor-asm\.json|arbor\.json|json|step|stp)$/i, "")
 }

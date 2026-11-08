@@ -32,6 +32,19 @@ export function referencesOf(f: Feature): string[] {
   return [...out]
 }
 
+/** A sketch with text in it, or a feature made from one: lettering. */
+export function isLettering(tree: Tree, f: Feature): boolean {
+  const sk = f.op === "sketch" ? f : "sketch" in f && typeof f.sketch === "string" ? tree.features.find((x) => x.id === f.sketch) : undefined
+  return sk?.op === "sketch" && sk.shapes.some((x) => x.type === "text")
+}
+
+/** Where the run of lettering at the end of the tree starts (the tree's length: none). */
+export function letteringTail(tree: Tree): number {
+  let i = tree.features.length
+  while (i > 0 && isLettering(tree, tree.features[i - 1])) i--
+  return i
+}
+
 /** Put `f` in place of the feature with its id, as a whole (fields left out are removed). */
 export function replaceFeature(tree: Tree, f: unknown): Tree {
   const parsed = Feature.safeParse(f)
@@ -109,6 +122,17 @@ export function applyEdit(tree: Tree, name: string, input: Record<string, unknow
     const uses = referencesOf(f).map((id) => features.findIndex((x) => x.id === id)).filter((i) => i >= 0)
     const latest = uses.length ? Math.max(...uses) : -1
     let note: string | undefined
+    // Lettering stays last: a text has thousands of edges, and everything after it rebuilds on them.
+    // Without `after`, a new feature goes in before the lettering at the end (unless it is lettering itself).
+    const tail = letteringTail(tree)
+    if (!after && tail < features.length && !isLettering(tree, f) && Math.max(latest, tail - 1) < at) {
+      at = Math.max(latest, tail - 1)
+      note = `已放在文字特征（${features
+        .slice(tail)
+        .filter((x) => x.op !== "sketch")
+        .map((x) => `「${displayName(tree, x)}」`)
+        .join("、")}）前面：文字的边很多，放在最后重建最快。要放在文字后面就写 after。`
+    }
     if (latest > at) {
       note = `after「${after}」会排在它用到的「${displayName(tree, features[latest])}」前面，已改为放在「${displayName(tree, features[latest])}」后面。after 只在要插到中间时才写。`
       at = latest

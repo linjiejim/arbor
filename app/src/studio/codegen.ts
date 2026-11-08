@@ -232,7 +232,11 @@ function edges(sel: EdgeSelector): string {
 }
 
 function edgeFilter(sel: Omit<EdgeSelector, "not" | "expect">) {
-  let e = sel.faces ? `${faces(sel.faces)}.edges()` : "part.edges()"
+  let e = sel.faces
+    ? sel.outer
+      ? `ShapeList([e for f in ${faces(sel.faces)} for e in f.outer_wire().edges()])`
+      : `${faces(sel.faces)}.edges()`
+    : "part.edges()"
   if (sel.of) e = `on_feature(${e}, ${ref("tool", sel.of)})`
   if (sel.kind) e += `.filter_by(GeomType.${KIND_EDGE[sel.kind]})`
   if (sel.parallel) e += `.filter_by(${AXIS[sel.parallel]})`
@@ -322,6 +326,9 @@ function feature(f: Feature, tree: Tree): string[] {
       return [...head, `${ref("tool", f.id)} = rib(part, ${ref("plane", f.sketch)}, ${ref("pts", f.sketch)}, ${py(f.t)}${f.flip ? ", flip=True" : ""})`, combine(f.id, "add")]
     case "component":
       return [...head, `# 装配里的零件 ${f.file}：装配不能导出成 build123d 代码，请分别导出每个零件`]
+    case "thread":
+      // build123d's core has no threads (bd_warehouse does): the export keeps the plain cylinder.
+      return [...head, `# 螺纹：build123d 本身没有螺纹命令，导出时省略（可以用 bd_warehouse.thread 补上）`]
     case "import": {
       const v = ref("tool", f.id)
       const out = [...head, `${v} = import_step(${JSON.stringify(f.file)})  # 相对零件文件所在的文件夹`]
@@ -345,7 +352,6 @@ function feature(f: Feature, tree: Tree): string[] {
     case "hole": {
       const n = { XY: "Vector(0, 0, 1)", XZ: "Vector(0, -1, 0)", YZ: "Vector(1, 0, 0)" }[f.on.plane]
       const out = f.reverse ? `-${n}` : n
-      const depth = f.depth !== undefined ? py(f.depth) : "1000"
       // A standard hole is written out as the numbers the table gives.
       let std: ReturnType<typeof standardHole> | null = null
       try {
@@ -353,6 +359,7 @@ function feature(f: Feature, tree: Tree): string[] {
       } catch {
         /* the kernel reports it */
       }
+      const depth = f.depth !== undefined ? py(f.depth) : std?.depth !== undefined ? String(std.depth) : "1000"
       const r = `${std ? std.d : py(f.d ?? 0)} / 2`
       const cbore = f.cbore ? { d: py(f.cbore.d), depth: py(f.cbore.depth) } : std?.cbore && { d: String(std.cbore.d), depth: String(std.cbore.depth) }
       const csink = f.csink ? { d: py(f.csink.d), angle: f.csink.angle !== undefined ? py(f.csink.angle) : "90" } : std?.csink && { d: String(std.csink.d), angle: "90" }

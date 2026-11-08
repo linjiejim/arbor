@@ -15,9 +15,9 @@ import { besides } from "../core/sources"
 
 const isStep = (file: string) => /\.(step|stp)$/i.test(file)
 
-/** The parts a component shows as: its own name, or `name/sub` for each part of a split part. */
+/** The parts a component shows as: its own name, `name/sub` for each part of a split part, `name#2` for each copy. */
 function partsOf(studio: Studio, name: string) {
-  return (studio.display?.parts ?? []).flatMap((p, k) => (p.name === name || p.name.startsWith(`${name}/`) ? [k] : []))
+  return (studio.display?.parts ?? []).flatMap((p, k) => (p.name === name || p.name.startsWith(`${name}/`) || p.name.startsWith(`${name}#`) ? [k] : []))
 }
 
 /**
@@ -50,15 +50,16 @@ export function ComponentActions({ f, doc, studio, view, onView }: { f: Feature;
             {hidden ? <EyeOff /> : <Eye />}
           </IconButton>
         )}
-        {!isStep(f.file) && (
+        {f.file && !isStep(f.file) && (
           <Button
             size="sm"
             variant="ghost"
             className={cn("h-6 px-1.5 text-caption text-muted-foreground", reveal)}
             onClick={async () => {
               // A sub-assembly opens as itself; a part opens inside this assembly.
-              const nested = /\.arbor-asm\.json$/i.test(f.file)
-              const r = await arbor.call("open_part", nested ? { path: besides(doc.path, f.file) } : { path: besides(doc.path, f.file), context: doc.path })
+              const file = f.file!
+              const nested = /\.arbor-asm\.json$/i.test(file)
+              const r = await arbor.call("open_part", nested ? { path: besides(doc.path, file) } : { path: besides(doc.path, file), context: doc.path })
               if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
             }}
           >

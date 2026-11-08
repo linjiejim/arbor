@@ -15,9 +15,34 @@ export function wasmHeapMB() {
   return (oc?.wasmMemory?.buffer?.byteLength ?? oc?.HEAPU8?.length ?? 0) / 1048576
 }
 
+/** Parts whose last build stays in memory: switching between them doesn't rebuild. */
+export const KERNEL_SLOTS = 4
+
 export class DirectKernel implements KernelHost {
   readonly phase: KernelPhase = { phase: "ready" }
   private k = new Kernel()
+  /** One kernel per part (by path), most recently used last. */
+  private slots = new Map<string, Kernel>([["", this.k]])
+
+  /**
+   * Make `slot`'s kernel the one the next calls go to. True when it starts empty (never used, or
+   * dropped to make room): the caller hands over files and the tree again.
+   */
+  async use(slot: string) {
+    let k = this.slots.get(slot)
+    const fresh = !k
+    if (k) this.slots.delete(slot)
+    else k = new Kernel()
+    this.slots.set(slot, k)
+    for (const [name, old] of this.slots) {
+      if (this.slots.size <= KERNEL_SLOTS) break
+      if (old === k) continue
+      old.dispose()
+      this.slots.delete(name)
+    }
+    this.k = k
+    return fresh
+  }
 
   async rebuild(tree: Tree) {
     return this.k.rebuild(tree)
@@ -63,6 +88,7 @@ export class DirectKernel implements KernelHost {
     return blob ? new Uint8Array(await blob.arrayBuffer()) : null
   }
   dispose() {
-    this.k.dispose()
+    for (const k of this.slots.values()) k.dispose()
+    this.slots.clear()
   }
 }

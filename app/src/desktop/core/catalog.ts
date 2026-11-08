@@ -2,7 +2,7 @@
 // input. The MCP server lists the agent's ones as tools, the CLI exposes them
 // as `arbor call <name>`, and the window uses the user's ones over IPC.
 import { z } from "zod"
-import { EdgeSelector, FaceSelector, Num, Tree } from "../../studio/dsl"
+import { EdgeSelector, FaceSelector, Num, PlaneRef, Tree } from "../../studio/dsl"
 import { SYSTEM_PROMPT } from "../../studio/prompt"
 import { STARTERS } from "../../studio/starters"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
@@ -231,11 +231,92 @@ export const COMMAND = new Map(COMMANDS.map((c) => [c.name, c]))
 
 export const agentCommands = () => COMMANDS.filter((c) => c.audience !== "user")
 
-/** JSON Schema of a command's input, for MCP `tools/list`. */
-export function inputJsonSchema(spec: CommandSpec): Record<string, unknown> {
-  const s = z.toJSONSchema(spec.input, { io: "input", unrepresentable: "any" }) as Record<string, unknown>
+type Json = Record<string, unknown>
+const toJson = (schema: z.ZodType): Json => {
+  const s = z.toJSONSchema(schema, { io: "input", unrepresentable: "any" }) as Json
   delete s.$schema
   return s
+}
+
+/**
+ * Sub-schemas written once per tool under `$defs` and referred to by `$ref`: a selector is inlined at
+ * every place it's used (a check item has a dozen), which made the tool list ~240 KB. Largest first, so
+ * a plane reference is matched whole before the face selector inside it.
+ */
+const SHARED_DEFS: [string, z.ZodType][] = [
+  ["PlaneRef", PlaneRef],
+  ["EdgeSelector", EdgeSelector],
+  ["FaceSelector", FaceSelector],
+]
+
+/** Equal as JSON, ignoring the description at the top (the same schema described for one use). */
+function sameShape(a: unknown, b: Json): boolean {
+  if (!a || typeof a !== "object" || Array.isArray(a)) return false
+  const { description: _a, ...ra } = a as Json
+  const { description: _b, ...rb } = b
+  void _a
+  void _b
+  return JSON.stringify(ra) === JSON.stringify(rb)
+}
+
+/** Replace every copy of a shared sub-schema below `node` with a `$ref`; returns the names it used. */
+function refShared(node: unknown, defs: [string, Json][], used: Set<string>): unknown {
+  if (Array.isArray(node)) return node.map((x) => refShared(x, defs, used))
+  if (!node || typeof node !== "object") return node
+  for (const [name, def] of defs) {
+    if (!sameShape(node, def)) continue
+    used.add(name)
+    const desc = (node as Json).description
+    return desc && desc !== def.description ? { $ref: `#/$defs/${name}`, description: desc } : { $ref: `#/$defs/${name}` }
+  }
+  return Object.fromEntries(Object.entries(node as Json).map(([k, v]) => [k, refShared(v, defs, used)]))
+}
+
+let defsCache: { raw: [string, Json][]; out: Map<string, Json> } | null = null
+/** The shared schemas as generated (to match against) and as written out (smaller ones inside referenced). */
+function sharedDefs() {
+  if (defsCache) return defsCache
+  const raw = SHARED_DEFS.map(([name, s]) => [name, toJson(s)] as [string, Json])
+  const out = new Map(
+    raw.map(([name, def], i) => {
+      const { description, ...body } = def
+      const inner = refShared(body, raw.slice(i + 1), new Set()) as Json
+      return [name, description ? { ...inner, description } : inner]
+    }),
+  )
+  defsCache = { raw, out }
+  return defsCache
+}
+
+/**
+ * `set_tree` takes a whole feature tree: its full schema is every feature tool's schema at once (~100 KB).
+ * The agent writes features exactly as it calls the feature tools; the engine validates the tree.
+ */
+const TREE_JSON: Json = {
+  type: "object",
+  description:
+    "完整的特征树 { uses?, params, paramNotes?, features, checks? }。features 里每一项写 op（特征工具的名字，如 sketch、extrude、fillet）加上和那个工具一样的字段；checks 的每一项和 check 工具的 items 一样。整棵树按特征工具的参数校验，有错会说明是哪一项。",
+  properties: {
+    uses: { type: "string", description: "共享参数文件（share_params 写的）" },
+    params: { type: "object", additionalProperties: { type: ["number", "string"] } },
+    paramNotes: { type: "object", additionalProperties: { type: "string" } },
+    features: { type: "array", items: { type: "object", properties: { op: { type: "string" }, id: { type: "string" } }, required: ["op", "id"] } },
+    checks: { type: "array", items: { type: "object" } },
+  },
+  required: ["params", "features"],
+}
+
+/** JSON Schema of a command's input, for MCP `tools/list`: shared selectors under `$defs`. */
+export function inputJsonSchema(spec: CommandSpec): Record<string, unknown> {
+  const s = toJson(spec.input)
+  if (spec.name === "set_tree") (s.properties as Json).tree = TREE_JSON
+  const { raw, out: defs } = sharedDefs()
+  const used = new Set<string>()
+  const result = refShared(s, raw, used) as Json
+  // A shared schema may refer to a smaller one (a plane reference holds a face selector).
+  for (const name of [...used]) for (const m of JSON.stringify(defs.get(name)).matchAll(/#\/\$defs\/(\w+)/g)) used.add(m[1])
+  if (used.size) result.$defs = Object.fromEntries(SHARED_DEFS.filter(([n]) => used.has(n)).map(([n]) => [n, defs.get(n)]))
+  return result
 }
 
 /** Inputs that name files: resolved against the caller's directory before they reach the engine. */
@@ -264,7 +345,8 @@ export const AGENT_GUIDE = `# Arbor：用工具建参数化零件
    - 用 look 看外形和方向。结果里写着每张图 1 px 多少 mm：小于几个像素的细节看不清，用 focus（特征 id、{ part }、{ faces }）放大，用 section 剖开看里面（间隙、壁厚、内腔），用 hide 藏起挡住的零件。最后一步改动很小时会自动加一张特写，看它。不要说「请到窗口里放大看」就收尾。
    - 应该贴在一起的地方（笔尖压在笔舌上、盖子落在止口上），加一条 gap（a、b 写 face / edge / feature / part，max: 0 = 必须贴上；min = 至少隔多远）。
    - 两处之间的距离、某个面或孔在哪，用 measure（也能量两个特征或两个零件之间），不要自己算。
-   - 每步结果里的 ⚠（没接上、只碰到边、极小碎面、零件重叠）要处理或说明。
+   - 每步结果里的 ⚠（没接上、只碰到边、极小碎面、窄缝、薄壁、零件重叠）要处理或说明。窄缝多半是该贴上的没贴上（凸台差一点碰到墙）；薄壁是孔、槽离边太近。
+   - of 选不到时，报错会说满足其余条件的面记在哪个特征名下：共面的面合并后记在先生成它的特征名下，去掉 of 改用 normal、extreme、near。
 6. 用户在窗口里留的备注用 get_notes 读，处理完用 resolve_note 写一句回复。说不清用户指的是哪个面时，用 request_pick 请用户在窗口里点一下；要指给用户看时用 show。
 7. 结果开头写着「自你上次调用以来……」时，说明用户或文件改过模型：以最新状态为准，不要把用户的改动改回去。
 8. 交付用 export（step / stl / py / json）。特征树文件也可以直接读写，保存后窗口会自动重建；改完文件用 get_state 看重建结果。
@@ -279,10 +361,24 @@ ${promptSections(["数值", "坐标与基准面", "扫掠、放样、拔模", "�
 | 要复用的零件、标准件、外购件（STEP）、超过 3 件，或者体积大、要分开维护 | 多文件装配 |
 - 单文件新建零件：加料（拉伸、旋转、扫掠、放样）写 part: "笔尖"，名字还不存在就新建一个零件，不和别的料合并（重叠会给 ⚠）。第一次加料写的 part 就是主体的名字；没写的话，主体叫「主体」。之后写 part 只改那个零件；修形、刻字只切它自己。
 - 项目：多个零件组成的东西，先 open_project（path 写文件夹名，create: true），会建好同名的空装配和共享参数文件并打开装配。零件放在 parts/ 下（open_part path: "pen/parts/笔杆.arbor.json" create: true），再在装配里用 component 放进来。list_parts 列出项目里的全部文件。
-- 装配：每个零件一个文件（*.arbor.json），装配是 *.arbor-asm.json（open_part create: true 新建）。装配里只放 component：file 写零件文件、子装配或 .step 外购件，name 是它在装配里的名字，rotate、at 摆位置（先转后移，可以写参数）。装配不能放几何特征：要改形状就 open_part 打开那个零件。
+- 装配：每个零件一个文件（*.arbor.json），装配是 *.arbor-asm.json（open_part create: true 新建）。装配里只放 component：file 写零件文件、子装配或 .step 外购件，name 是它在装配里的名字，rotate、at 摆位置（先转后移，可以写参数），或者用 mates 贴合（见下一节）。装配不能放几何特征：要改形状就 open_part 打开那个零件。
 - 共用尺寸：share_params 让零件和装配用同一个共享参数文件（*.params.json，move 把已有参数移进去）。共享参数以文件为准，set_params 改到它们会写回文件，用到它的零件一起重建。
 - 在装配里改零件：open_part 带 context: "pen.arbor-asm.json"，装配里的其他零件按相对位置半透明地显示在旁边；look 能看到它们，measure 的 part、check 的 gap / clearance / interference 能写它们的名字。不带 context 再打开一次就退出。
 - 装配建好后：check 用 gap 核对该贴上的地方、interference 核对不该相交的地方；look 用 hide 和 section 看里面；export 出 step、stl（多零件打包成 zip）和 bom（零件清单）。
+
+## 标准件和贴合摆放
+- 螺钉、螺母、垫圈、热熔螺母不用建零件文件：component 写 standard（不写 file），例如 {"type":"screw","size":"M3","head":"socket","length":10}；head：socket 内六角圆柱头（缺省）、button 半圆头、flat 沉头、pan 盘头。零件清单（export bom）按规格合并计数。
+- 标准件自己的坐标：轴线沿 Z；螺钉头的底面（支承面）在 z=0、螺杆朝 -Z（沉头螺钉头顶在 z=0）；螺母、垫圈从 z=0 往上；热熔螺母顶面在 z=0 往下。
+- 贴合摆放（mates）代替手算坐标：按顺序满足，后一条只在前面留下的自由度里移动、转动。contact = 面贴面（例如盖子底面贴盒口），flush = 平齐（两个侧面在同一平面），coaxial = 同轴（螺钉进孔）。face 选这个零件上的面（按它自己文件里的坐标），to 写前面放好的零件名和它上面的面（按装配里的位置）；都不写 of。
+- 一次放一排：to.face 选中几个不同轴（或不共面）的面，就放几个，零件名带 #1、#2…。例如 M3 内六角螺钉进盖子的 4 个过孔：mates = [{type:"coaxial", face:{kind:"cylinder"}, to:{part:"盖子", face:{kind:"cylinder", radius:1.7}}}, {type:"contact", face:{normal:"-Z", extreme:"+Z"}, to:{part:"盖子", face:{normal:"+Z", extreme:"+Z"}}}]（先同轴、再贴合）。
+- 盖子：contact 底面贴盒口，再用两条 flush 把两个侧面对齐，位置就定了。
+- 结果里写「没有完全做到」时，说明前面的贴合不让它这样动：换顺序，或用 rotate 先转到大致方向。
+- 3D 打印件拧螺丝：塑料上打 hole 的 standard（fit: "insert"）热熔螺母孔，装配里放 standard type: "insert"；或者 fit: "tap" 让螺丝自攻。
+
+## 螺纹
+- 真实螺纹几何用 thread：faces 选圆柱面，轴的外圆做外螺纹、孔壁做内螺纹（孔先打成小径或攻丝底孔）；size（M2–M12 粗牙）或 d + pitch；length + from 只做一段；clearance 是打印间隙（FDM 常用 0.1–0.2）。
+- 适合螺纹盖、瓶口、M8 以上的螺栓螺母；一般的螺丝孔用 hole 的 standard（fit: "tap" 只标装饰螺纹）或热熔螺母，更快也更好打印。
+- 螺纹面很多，一个螺纹要几秒：放在最后，改前面的尺寸时会重建它。
 
 ## 曲面和精细形状
 - 求交：拉伸、旋转、扫掠、放样写 mode: "intersect"，只留下和工具体重叠的部分（例如笔尖 = 半圆锥薄壳 ∩ 盾形轮廓）。有多个零件时写 part。
@@ -298,4 +394,4 @@ ${promptSections(["数值", "坐标与基准面", "扫掠、放样、拔模", "�
 - 文件换了新版本，窗口会自动重建。
 
 ## 做不到的
-目前不支持真实的螺纹几何（螺纹孔只标装饰螺纹）、钣金、曲面加厚。装配只能用平移和旋转摆放，没有约束和运动。做不到就直说，并给出最接近的做法。不要编造工具没有的参数。`
+目前不支持钣金、曲面加厚。装配的贴合只用来摆放（按顺序算一次），不是约束求解，也没有运动。标准件只有公制粗牙 M2–M12，螺钉上的螺纹只画成光杆（装饰）。做不到就直说，并给出最接近的做法。不要编造工具没有的参数。`
