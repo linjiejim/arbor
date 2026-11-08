@@ -10,8 +10,8 @@ const RELEASES = `${REPO_URL}/releases/latest`
 const ADD_CLAUDE = "claude mcp add --scope user arbor -- /Applications/Arbor.app/Contents/Resources/bin/arbor mcp"
 
 const ABILITIES = [
-  { icon: <Terminal />, title: "agent 来建模", text: "Claude Code、Codex 等通过 MCP 调用 39 个建模、观测和核对工具。你在窗口里看每一步，拖参数，在面上给它留备注。" },
-  { icon: <Boxes />, title: "项目和装配", text: "一个文件夹就是一个项目。零件各是一个文件，组成装配一起看，共用一份参数；能在装配里对着别的零件改一个零件。" },
+  { icon: <Terminal />, title: "agent 来建模", text: "Claude Code、Codex 等通过 MCP 调用 40 个建模、观测和核对工具。你在窗口里看每一步，拖参数，在面上给它留备注。" },
+  { icon: <Boxes />, title: "项目和装配", text: "一个文件夹就是一个项目。零件各是一个文件，组成装配一起看，共用一份参数；用贴合摆放零件，螺钉、螺母、热熔螺母直接从标准件里放，零件清单按规格计数。" },
   { icon: <Ruler />, title: "STEP 和核对", text: "导入开发板、元件的官方 STEP，围着它建外壳；尺寸、间隙、干涉写成要求，每次重建自动核对。" },
 ]
 

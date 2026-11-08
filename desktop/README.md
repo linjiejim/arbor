@@ -74,24 +74,26 @@ Claude Code / Codex ──MCP (stdio)──► arbor mcp ──HTTP 127.0.0.1─
 ```
 
 - **引擎**（`app/src/desktop/core/engine.ts`）管打开的零件、撤销、备注和全部命令；和平台无关，Electron 主进程和命令行用的是同一份。
-- **内核**在 Node 的 worker 线程里跑（`desktop/src/engine/kernel-thread.ts`），wasm 堆超过 1.4 GB 就换一个线程重建，引擎感觉不到。
+- **内核**在 Node 的 worker 线程里跑（`desktop/src/engine/kernel-thread.ts`），每个零件一个内核（最近用的 4 个），切回一个零件时直接用上次的结果，不重建；wasm 堆超过 1.4 GB 就换一个线程，只重放当前零件，其余零件下次用到时再建。
 - **`arbor mcp`** 每次调用都转给正在运行的 App，所以窗口里能看到每一步；App 没开时会自动启动它（不抢焦点）；启动不了就在自己进程里起一个无窗口的引擎（这时 `look` 和 `request_pick` 不可用）。
 - **谁改的都算**：agent、窗口里的你、直接改文件（编辑器、git），每次改动都记在「动态」里、都能撤销。agent 下一次调用时，结果开头会写「自你上次调用以来，用户改了：W 40 → 45」，避免它把你的改动改回去。
 - **发现**：App 启动时把端口和随机 token 写进 `~/.arbor/engine.json`（权限 600），把怎么启动自己写进 `~/.arbor/app.json`；只监听 127.0.0.1，并检查 Host 头。
 
-## 给 agent 的工具（39 个）
+## 给 agent 的工具（40 个）
 
 | 类 | 工具 |
 | --- | --- |
 | 零件和装配 | `guide`、`open_project`（一个文件夹作为项目，`create` 建出空装配和参数文件）、`open_part`（零件 `.arbor.json` 或装配 `.arbor-asm.json`；带 `context` 就是在装配里改这个零件，其他零件半透明显示在旁边）、`list_parts`（项目里的全部装配和零件）、`get_state`、`share_params`（几个零件共用一个参数文件 `*.params.json`） |
 | 建模（和网页工作台同一套） | `set_params`、`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`split`、`rib`、`edit_feature`、`delete_feature` |
-| 只有桌面版的建模 | `import`：读一个 STEP 文件（开发板、元件的官方模型），缺省作参考体；`component`：装配里放一个零件文件、子装配或 STEP。建模工具还多几个写法：加料时 `part` 写新名字就新建零件、`mode: "intersect"` 求交、`revolve.start` / `symmetric`、草图点的 `spline` 和拐角圆角 `r`、`extrude.onto` 沿平面或圆柱面等深刻字 |
+| 只有桌面版的建模 | `import`：读一个 STEP 文件（开发板、元件的官方模型），缺省作参考体；`component`：装配里放一个零件文件、子装配、STEP 或标准件（`standard`：ISO 螺钉、螺母、垫圈、热熔螺母），用 `rotate` / `at` 或 `mates` 贴合摆放（面贴面、平齐、同轴；选中几个孔就放几个）；`thread`：真实螺纹几何（外螺纹、内螺纹，M2–M12 粗牙或自定螺距，可加打印间隙）。建模工具还多几个写法：加料时 `part` 写新名字就新建零件、`mode: "intersect"` 求交、`revolve.start` / `symmetric`、草图点的 `spline` 和拐角圆角 `r`、`extrude.onto` 沿平面或圆柱面等深刻字、`hole` 的 `fit: "insert"` 热熔螺母孔、选边的 `outer`（只要面的外轮廓） |
 | 整体改 | `set_tree`（可带 `base_rev` 防止覆盖）、`move_feature`、`undo`、`redo` |
 | 观测 | `inspect`、`look`（窗口渲染的视图图片；`focus` 特写、`section` 剖视、`dir` 任意方向、`hide` 藏零件，最后一步改动很小时自动加一张特写，结果写比例尺）、`measure`（面、边、特征、零件之间；给出坐标） |
-| 核对与交付 | `check`（和网页工作台同一张需求核对表：存进零件，每次重建自动重算；桌面版多几项：`position` 坐标、`gap` 两处之间的距离（`max: 0` = 必须贴上）、`clearance` 间隙、`interference` 不干涉，后两项可以对参考体或零件）、`export`（step / stl（多零件打包成 zip）/ py / json / bom 零件清单） |
+| 核对与交付 | `check`（和网页工作台同一张需求核对表：存进零件，每次重建自动重算；桌面版多几项：`position` 坐标、`gap` 两处之间的距离（`max: 0` = 必须贴上）、`clearance` 间隙、`interference` 不干涉，后两项可以对参考体或零件）、`export`（step / stl（多零件打包成 zip）/ py / json / bom 零件清单，标准件按规格合并计数） |
 | 和人协作 | `get_notes`、`resolve_note`、`request_pick`（请你在窗口里点一个面或边，等你点完）、`show`（在窗口里高亮给你看） |
 
-每一步的结果会提示几种常见问题：新加的料没接上（写出距离）、只碰到边或点、极小的碎面、新零件和别的零件重叠。
+每一步的结果会提示几种常见问题：新加的料没接上（写出距离）、只碰到边或点、极小的碎面、窄缝（对面的两个面不到 1 mm、中间是空的）、薄壁（不到 0.8 mm）、新零件和别的零件重叠。不写 `after` 加的特征会自动排在末尾的文字特征前面。
+
+工具列表（MCP `tools/list`）里，选面、选边、基准面的写法每个工具只写一次（`$defs` + `$ref`），`set_tree` 只说明写法、由引擎校验：整个列表约 8 万字符（原来约 24 万）。
 
 装配的写法和规则见 `docs/specs/2026-11-07-arbor-agent-modeling.md`。
 
@@ -140,6 +142,7 @@ python3 -I scripts/make-icons.py                           # 从标志生成 App
 
 - 只有 macOS 包（arm64 和 x64），没有 Apple 签名和公证，第一次打开要在系统设置里放行。
 - 没有「代码特征」：特征树表达不了的形状还做不了（规划见 `docs/specs/2026-11-07-arbor-desktop.md`）。
+- 贴合只用来摆放（按顺序算一次），不是约束求解，也没有运动；标准件只有公制粗牙 M2–M12，螺钉上的螺纹画成光杆。
+- 真实螺纹一个要几秒，面也多，放在最后；build123d 导出里省略螺纹（build123d 本身没有螺纹命令）。
 - 导入的 STEP 是一个整体：选择器选不到它的面，核对只能对整个参考体量间隙和干涉；`mode: "cut"` 减去的是元件本身的外形，要留间隙得先在别处把它放大。
-- 一个内核同一时间只装一个零件：agent 和窗口在不同零件之间来回切换时，每次切换要重建一次。
 - `request_pick` 一次最多等 280 秒；没等到就返回，agent 用同一句 prompt 再调用会接着等，期间你点的也不会丢。

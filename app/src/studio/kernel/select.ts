@@ -2,7 +2,7 @@
 // face, the vertical edges of the pocket…) and are re-resolved on every
 // rebuild, so they survive upstream parameter changes — the opposite of
 // "edge #7", which is exactly the topological naming problem.
-import { makeVertex, measureDistanceBetween, type Edge, type Face, type Shape3D } from "replicad"
+import { getOC, makeVertex, measureDistanceBetween, Wire, type Edge, type Face, type Shape3D } from "replicad"
 import type { EdgeSelector, FaceSelector } from "../dsl"
 import { num, type Scope } from "../expr"
 import { InputError } from "./errors"
@@ -121,6 +121,22 @@ export function edgeInfos(shape: Shape3D, faces: FaceInfo[]): EdgeInfo[] {
   })
 }
 
+/** The edges of a face's outer boundary (its outer wire), not of the holes in it. */
+function outerEdges(face: Face): Edge[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const oc: any = getOC()
+  try {
+    const wire = oc.BRepTools.OuterWire(face.wrapped)
+    if (!wire || wire.IsNull()) return []
+    const w = new Wire(wire)
+    const edges = w.edges as Edge[]
+    w.delete()
+    return edges
+  } catch {
+    return []
+  }
+}
+
 export function disposeInfos(faces: FaceInfo[], edges: EdgeInfo[] = []) {
   faces.forEach((f) => f.face.delete())
   edges.forEach((e) => e.edge.delete())
@@ -172,12 +188,23 @@ function dirName(v: V3) {
   return axisDir(v) ?? `(${v.map(r2).join(", ")})`
 }
 
-function checkCount<T>(found: T[], expect: number | undefined, what: string, all: T[], describe: (t: T) => string) {
+function checkCount<T>(found: T[], expect: number | undefined, what: string, all: T[], describe: (t: T) => string, hint?: string) {
   if (found.length && (expect === undefined || found.length === expect)) return found
   const list = all.slice(0, 16).map(describe).join("\n")
   const more = all.length > 16 ? `\n…共 ${all.length} 个` : ""
   const head = found.length ? `选中了 ${found.length} 个${what}，预期 ${expect} 个` : `没有${what}满足这个选择条件`
-  throw new InputError(`${head}。候选：\n${list}${more}`)
+  throw new InputError(`${head}${!found.length && hint ? `。${hint}` : ""}。候选：\n${list}${more}`)
+}
+
+/**
+ * Why `of` found nothing although the rest of the selector matches: a face the feature made merged into a
+ * coplanar one made earlier (a post flush with the rim becomes part of the rim face, which keeps the older
+ * feature's name), or a later feature replaced it.
+ */
+function ofHint(of: string | undefined, without: FaceInfo[]) {
+  if (!of || !without.length) return undefined
+  const names = [...new Set(without.map((f) => f.origin))].map((o) => `「${o}」`).join("、")
+  return `满足其余条件的面记在${names}名下，不在「${of}」名下：「${of}」生成的面可能和先有的共面的面合成了一个（合并后的面记在先生成它的特征名下），或者被后面的特征改掉了。去掉 of，用 normal、extreme、at 或 near 来选`
 }
 
 export function selectFaces(sel: FaceSelector, faces: FaceInfo[], scope: Scope): FaceInfo[] {
@@ -186,7 +213,8 @@ export function selectFaces(sel: FaceSelector, faces: FaceInfo[], scope: Scope):
     const drop = new Set(filterFaces(sel.not, faces, scope).map((f) => f.index))
     out = out.filter((f) => !drop.has(f.index))
   }
-  return checkCount(out, sel.expect, "面", faces, describeFace)
+  const hint = !out.length && sel.of ? ofHint(sel.of, filterFaces({ ...sel, of: undefined }, faces, scope)) : undefined
+  return checkCount(out, sel.expect, "面", faces, describeFace, hint)
 }
 
 function filterFaces(sel: Omit<FaceSelector, "not" | "expect">, faces: FaceInfo[], scope: Scope): FaceInfo[] {
@@ -224,7 +252,13 @@ export function selectEdges(sel: EdgeSelector, edges: EdgeInfo[], faces: FaceInf
     const drop = new Set(filterEdges(sel.not, edges, faces, scope).map((e) => e.index))
     out = out.filter((e) => !drop.has(e.index))
   }
-  return checkCount(out, sel.expect, "边", edges, describeEdge)
+  const hint =
+    !out.length && sel.outer && !sel.faces
+      ? "outer 要和 faces 一起写：选这些面的外轮廓边"
+      : !out.length && sel.of && filterEdges({ ...sel, of: undefined }, edges, faces, scope).length
+        ? `满足其余条件的边不在「${sel.of}」生成的面上：它的面可能和先有的共面的面合成了一个，或者被后面的特征改掉了。去掉 of 再选`
+        : undefined
+  return checkCount(out, sel.expect, "边", edges, describeEdge, hint)
 }
 
 function filterEdges(sel: Omit<EdgeSelector, "not" | "expect">, edges: EdgeInfo[], faces: FaceInfo[], scope: Scope): EdgeInfo[] {
@@ -235,9 +269,17 @@ function filterEdges(sel: Omit<EdgeSelector, "not" | "expect">, edges: EdgeInfo[
     out = out.filter((e) => e.faces.some((i) => ids.has(i)))
   }
   if (sel.faces) {
-    const ids = new Set(selectFaces(sel.faces, faces, scope).map((f) => f.index))
-    out = out.filter((e) => e.faces.some((i) => ids.has(i)))
-  }
+    const picked = selectFaces(sel.faces, faces, scope)
+    if (sel.outer) {
+      // The outer boundary of each picked face, worked out only when asked for.
+      const rims = picked.flatMap((f) => outerEdges(f.face))
+      out = out.filter((e) => rims.some((r) => r.hashCode === e.edge.hashCode && r.isSame(e.edge)))
+      rims.forEach((r) => r.delete())
+    } else {
+      const ids = new Set(picked.map((f) => f.index))
+      out = out.filter((e) => e.faces.some((i) => ids.has(i)))
+    }
+  } else if (sel.outer) out = []
   if (sel.kind) out = out.filter((e) => e.kind === sel.kind)
   if (sel.parallel) {
     const a = AXES[sel.parallel]

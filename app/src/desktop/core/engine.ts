@@ -6,8 +6,9 @@ import type { PickInfo } from "../../studio/annotations"
 import { executeTool, moveFeature, treeText, type KernelPort } from "../../studio/apply"
 import { toBuild123d } from "../../studio/codegen"
 import { EMPTY_TREE, Feature, Tree, componentName, displayName } from "../../studio/dsl"
+import { designation } from "../../studio/fasteners"
 import type { BuildReport, ComponentSource, ContextSource, DisplayData } from "../../studio/kernel/build"
-import { num, num as evalNum } from "../../studio/expr"
+import { num as evalNum } from "../../studio/expr"
 import {
   FOCUS_PADDING,
   LOOK_PADDING,
@@ -16,6 +17,8 @@ import {
   VIEW_LABEL,
   autoFocus,
   boxOfGroups,
+  facingOf,
+  padFlat,
   mmPerPixel,
   modelBox,
   scaleText,
@@ -79,6 +82,11 @@ export interface KernelHost {
   setComponents?(list: ComponentSource[]): Promise<void>
   /** Editing a part inside an assembly: the other parts around it (null: none). */
   setContext?(ctx: ContextSource | null): Promise<void>
+  /**
+   * Hosts that keep several parts built (one kernel per part): make `slot` current. Resolves true when
+   * that kernel starts empty, so files and the tree must be handed over again.
+   */
+  use?(slot: string): Promise<boolean>
 }
 
 export interface Files {
@@ -131,6 +139,8 @@ type Doc = {
   unwatch: () => void
   /** Watchers on the files the part reads (STEP imports, components, shared parameters), by absolute path. */
   assetWatch: Map<string, () => void>
+  /** What each watched file held when last looked at (text, or size and time for binary files): a save that changes nothing isn't news. */
+  assetSeen: Map<string, string>
   /** The shared parameter file (`uses`), loaded. */
   shared: Shared | null
   /** Editing inside an assembly: the assembly file (absolute), else null. */
@@ -204,12 +214,16 @@ export class Engine {
   private chain: Promise<unknown> = Promise.resolve()
   /** After dispose: changes on disk are no longer followed (the CLI exits as soon as its command is done). */
   private disposed = false
-  private kernelDoc: Doc | null = null
-  private kernelTree: Tree | null = null
+  /** The tree each part's kernel last built (absent: it must build again). */
+  private built = new Map<string, Tree>()
+  /** The part whose kernel the next kernel calls go to. */
+  private slot: string | null = null
   /** Which part's files (and versions) the kernel holds for `import`. */
-  private assetsKey = ""
+  /** Per part: what its kernel was last handed (files, components, context), to skip handing it again. */
+  private assetsKeys = new Map<string, string>()
   /** Shared parameter files written by this engine, as written (their watchers then see no change). */
-  private sharedWritten = new Map<string, string>()
+  /** What the engine itself last wrote to a path, and for whom: a watcher seeing it again is that change, not someone else's. */
+  private wrote = new Map<string, { text: string; actor: CallContext["actor"] }>()
   private agent: AgentActivity = { busy: false, tool: null, at: null }
   private pending: { request: PickRequest; waiters: ((a: PickAnswer | null) => void)[] } | null = null
   /** A pick the person answered after the agent stopped waiting: handed over on the next identical request. */
@@ -567,16 +581,16 @@ export class Engine {
       throw new InputError(`共享参数不对，没有写入 ${sh.file}：${(e as Error).message}`)
     }
     const text = sharedText({ params, notes })
-    this.sharedWritten.set(sh.path, text)
+    this.wrote.set(sh.path, { text, actor: ctx.actor })
     await this.opts.files.write(sh.path, text)
     const users = [...this.docs.values()].filter((d) => d.shared?.path === sh.path || d.context)
     for (const d of users) {
       if (d.shared?.path === sh.path) await this.refreshShared(d)
       d.rev += 1
       d.changes = [{ rev: d.rev, actor: ctx.actor, at: Date.now(), summary: `改了共享参数 ${sh.file}`, seq: ++d.seq }, ...d.changes].slice(0, MAX_CHANGES)
-      if (this.kernelDoc === d) this.kernelDoc = null
+      this.built.delete(d.path)
     }
-    this.assetsKey = ""
+    this.assetsKeys.clear()
     const active = users.find((d) => d.path === this.active) ?? users[0]
     if (active) {
       await this.ensureKernel(active, true)
@@ -681,7 +695,7 @@ export class Engine {
         }
         contextNote = found.note ? `\n${found.note}。` : ""
       } else doc.context = null
-      this.assetsKey = ""
+      this.assetsKeys.delete(path)
       await this.ensureKernel(doc, true)
     }
     this.active = path
@@ -828,7 +842,8 @@ export class Engine {
     doc.unwatch()
     for (const stop of doc.assetWatch.values()) stop()
     this.docs.delete(path)
-    if (this.kernelDoc === doc) this.kernelDoc = null
+    this.built.delete(path)
+    this.assetsKeys.delete(path)
     for (const [s, p] of this.sessions) if (p === path) this.sessions.delete(s)
     if (this.active === path) this.active = [...this.docs.keys()].pop() ?? null
     const next = this.active ? this.docs.get(this.active) : null
@@ -884,6 +899,7 @@ export class Engine {
       written: text,
       unwatch: () => {},
       assetWatch: new Map(),
+      assetSeen: new Map(),
       shared: null,
       context: null,
       seq: 0,
@@ -892,7 +908,7 @@ export class Engine {
     }
     this.docs.set(path, doc)
     await this.refreshShared(doc)
-    if (text === null) await this.save(doc)
+    if (text === null) await this.save(doc, "agent")
     doc.unwatch = this.opts.files.watch(path, () => this.onDisk(() => this.fileChanged(doc)))
     await this.ensureKernel(doc)
     this.recent = [path, ...this.recent.filter((p) => p !== path)].slice(0, 20)
@@ -935,10 +951,10 @@ export class Engine {
     doc.rev += 1
     doc.error = undefined
     if (usesChanged) await this.refreshShared(doc)
-    if (opts.report && this.kernelDoc === doc && this.kernelTree === tree) doc.report = opts.report
+    if (opts.report && this.slot === doc.path && this.built.get(doc.path) === tree) doc.report = opts.report
     else await this.ensureKernel(doc, true)
     doc.changes = [{ rev: doc.rev, actor, at: Date.now(), summary, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
-    if (opts.save !== false && !(await this.save(doc))) {
+    if (opts.save !== false && !(await this.save(doc, actor))) {
       // Someone saved the file while this ran: theirs wins, ours stays one undo away.
       doc.conflict = true
       await this.fileChanged(doc)
@@ -972,11 +988,13 @@ export class Engine {
   }
 
   /** Write the tree, unless the file changed since we last read or wrote it (returns false: don't overwrite). */
-  private async save(doc: Doc) {
+  private async save(doc: Doc, actor: CallContext["actor"]) {
     const disk = await this.opts.files.read(doc.path)
     if (disk !== null && doc.written !== null && disk !== doc.written) return false
     const text = `${JSON.stringify(doc.tree, null, 2)}\n`
     doc.written = text
+    // An assembly watching this part file sees the change as made by `actor`, not by "the file".
+    this.wrote.set(doc.path, { text, actor })
     await this.opts.files.write(doc.path, text)
     return true
   }
@@ -987,14 +1005,34 @@ export class Engine {
 
   // ------------------------------------------------------------------ kernel
 
-  /** The kernel holds one tree at a time: make it this part's current one (with its shared parameters). */
+  /**
+   * Point the kernel at this part. A host with one kernel per part keeps each part's last build, so
+   * switching back is a lookup, not a rebuild; a plain host holds one tree, rebuilt on every switch.
+   */
+  private async select(doc: Doc) {
+    if (this.slot === doc.path) return
+    if (this.opts.kernel.use) {
+      // That part's kernel came back empty (first use, or dropped to make room): hand everything over again.
+      if (await this.opts.kernel.use(doc.path)) {
+        this.built.delete(doc.path)
+        this.assetsKeys.delete(doc.path)
+      }
+    } else {
+      // One kernel for every part: it now holds another part's tree and files.
+      this.built.clear()
+      this.assetsKeys.clear()
+    }
+    this.slot = doc.path
+  }
+
+  /** Make the kernel hold this part's current tree (with its shared parameters). */
   private async ensureKernel(doc: Doc, force = false) {
+    await this.select(doc)
     const sourcesChanged = await this.syncAssets(doc, doc.tree)
-    if (force || sourcesChanged || this.kernelDoc !== doc || this.kernelTree !== doc.tree) {
+    if (force || sourcesChanged || this.built.get(doc.path) !== doc.tree) {
       const tree = doc.tree
       doc.report = await this.opts.kernel.rebuild(this.effective(doc, tree))
-      this.kernelDoc = doc
-      this.kernelTree = tree
+      this.built.set(doc.path, tree)
     }
     return doc.report!
   }
@@ -1031,12 +1069,12 @@ export class Engine {
     const ctx = doc.context ? await this.contextOf(doc, false) : null
     this.watchAssets(doc, [...probe.watch, ...(doc.shared ? [doc.shared.path] : []), ...(ctx?.watch ?? [])])
     const key = JSON.stringify([doc.path, probe.signature, ctx?.key ?? null])
-    if (key === this.assetsKey) return false
+    if (key === this.assetsKeys.get(doc.path)) return false
     const full = await gather(files, doc.path, tree, [], true)
     await this.opts.kernel.setAssets?.(full.assets)
     await this.opts.kernel.setComponents?.(full.components)
     await this.opts.kernel.setContext?.(doc.context ? ((await this.contextOf(doc, true))?.source ?? null) : null)
-    this.assetsKey = key
+    this.assetsKeys.set(doc.path, key)
     return true
   }
 
@@ -1053,28 +1091,18 @@ export class Engine {
     if (!parsed.ok) return null
     const shared = parsed.tree.uses ? await loadShared(files, asm, parsed.tree.uses) : null
     const tree = effectiveTree(parsed.tree, shared)
-    let scope: Record<string, number>
     try {
-      scope = resolveParams(tree.params)
+      resolveParams(tree.params)
     } catch {
       return null
     }
     const g = await gather(files, asm, tree, [], read)
-    const comps = tree.features.filter((f): f is Extract<Feature, { op: "component" }> => f.op === "component" && !f.hidden)
+    const comps = tree.features.filter((f): f is Extract<Feature, { op: "component" }> => f.op === "component" && !f.hidden && !!f.file)
     const canon = (f: string) => files.canonical?.(besides(asm, f)) ?? besides(asm, f)
-    const mine = comps.filter((c) => canon(c.file) === doc.path)
+    const mine = comps.filter((c) => canon(c.file!) === doc.path)
     if (!mine.length) return null
-    const placeOf = (c: Extract<Feature, { op: "component" }>) => ({
-      rotate: (c.rotate ?? []).map((r) => ({ axis: r.axis, angle: num(r.angle, scope) })),
-      at: (c.at ?? [0, 0, 0]).map((v) => num(v, scope)) as [number, number, number],
-    })
-    const others = comps
-      .filter((c) => canon(c.file) !== doc.path)
-      .flatMap((c) => {
-        const source = g.components.find((x) => x.file === c.file)
-        return source ? [{ name: c.name ?? partName(c.file).replace(/\.(step|stp)$/i, ""), source, place: placeOf(c) }] : []
-      })
-    const source: ContextSource = { self: placeOf(mine[0]), assembly: partName(asm), others }
+    // The kernel builds the assembly to place everything (mates need the parts' shapes).
+    const source: ContextSource = { assembly: partName(asm), tree, components: g.components, self: mine[0].file! }
     const watch = [asm, ...g.watch, ...(shared ? [shared.path] : [])]
     const note = mine.length > 1 ? `这个零件在装配里用了 ${mine.length} 次，按第一个（${mine[0].name ?? mine[0].id}）的位置显示其他零件` : undefined
     return { source, watch, key: JSON.stringify([text, g.signature, shared?.text ?? null]), note }
@@ -1086,22 +1114,30 @@ export class Engine {
       if (paths.includes(p)) continue
       stop()
       doc.assetWatch.delete(p)
+      doc.assetSeen.delete(p)
     }
     for (const p of paths) {
       if (doc.assetWatch.has(p)) continue
+      void this.assetState(p).then((st) => doc.assetSeen.set(p, st))
       doc.assetWatch.set(
         p,
         this.opts.files.watch(p, () =>
           this.onDisk(async () => {
             if (this.docs.get(doc.path) !== doc) return
+            // Saved again with the same content (an editor, another engine's check): nothing to rebuild.
+            const st = await this.assetState(p)
+            if (st === doc.assetSeen.get(p)) return
+            doc.assetSeen.set(p, st)
+            const ours = this.wrote.get(p)
+            const mine = ours !== undefined && st === `text:${ours.text}`
             if (doc.shared?.path === p) {
-              const text = await this.opts.files.read(p)
-              if (text !== null && text === this.sharedWritten.get(p)) return
               await this.refreshShared(doc)
+              // writeShared already rebuilt every part using it and logged who changed what.
+              if (mine) return
             }
-            this.assetsKey = ""
+            this.assetsKeys.delete(doc.path)
             doc.rev += 1
-            doc.changes = [{ rev: doc.rev, actor: "file" as const, at: Date.now(), summary: `${p.split(/[\\/]/).pop()} 更新了，已重建`, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
+            doc.changes = [{ rev: doc.rev, actor: mine ? ours.actor : ("file" as const), at: Date.now(), summary: `${p.split(/[\\/]/).pop()} 更新了，已重建`, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
             await this.ensureKernel(doc, true)
             this.emitDoc(doc)
           }),
@@ -1110,15 +1146,22 @@ export class Engine {
     }
   }
 
+  /** A watched file's content as a string to compare: the text of a part or parameter file, size and time of a STEP file. */
+  private async assetState(p: string): Promise<string> {
+    if (/\.json$/i.test(p)) return `text:${(await this.opts.files.read(p)) ?? ""}`
+    const st = (await this.opts.files.stat?.(p)) ?? null
+    return st ? `stat:${st.size}:${st.mtimeMs}` : "missing"
+  }
+
   private port(doc: Doc): KernelPort {
     return {
       rebuild: async (t) => {
-        this.kernelTree = null
+        await this.select(doc)
+        this.built.delete(doc.path)
         if (t.uses !== doc.shared?.file) doc.shared = t.uses ? await loadShared(this.opts.files, doc.path, t.uses) : null
         await this.syncAssets(doc, t)
         const r = await this.opts.kernel.rebuild(this.effective(doc, t))
-        this.kernelDoc = doc
-        this.kernelTree = t
+        this.built.set(doc.path, t)
         return r
       },
       inspect: (what, selector) => this.opts.kernel.inspect(what, selector),
@@ -1217,7 +1260,7 @@ export class Engine {
 
     // Framing: an explicit focus frames every view on it; otherwise a small last change gets a close-up of its own.
     const focusIn = input.focus as string | { part: string } | { faces: Record<string, unknown> } | undefined
-    let focus: { box: Box; name: string } | null = null
+    let focus: { box: Box; name: string; facing?: V3 } | null = null
     if (focusIn !== undefined) {
       const res = await this.focusBox(doc, display, focusIn)
       if ("error" in res) return fail(res.error)
@@ -1228,14 +1271,23 @@ export class Engine {
       ? (input.views as string[])
       : sectionView
         ? [sectionView, "iso"]
-        : focus
-          ? ["iso", "front"]
-          : ["iso", "front", "top", "right"]
+        : focus?.facing
+          ? ["iso"]
+          : focus
+            ? ["iso", "front"]
+            : ["iso", "front", "top", "right"]
     const shots: LookShot[] = views.map((v) =>
       focus
         ? { label: `特写：${focus.name} · ${VIEW_LABEL[v] ?? v}`, dir: VIEW_DIR[v] ?? VIEW_DIR.iso, box: focus.box, padding: FOCUS_PADDING }
         : { label: VIEW_LABEL[v] ?? v, dir: VIEW_DIR[v] ?? VIEW_DIR.iso },
     )
+    // Faces that all face one way: one more picture straight at them (a front view would show a side wall edge-on).
+    if (focus?.facing && !(input.views as string[] | undefined)?.length) {
+      const f = focus.facing
+      // Never exactly along Z: the snapshotter's up vector is +Z.
+      const dir: V3 = Math.abs(f[2]) > 0.9999 ? [0, -1e-4 * Math.sign(f[2] || 1), f[2]] : f
+      shots.push({ label: `特写：${focus.name} · 正对着看`, dir, box: focus.box, padding: FOCUS_PADDING })
+    }
     const dir = input.dir as number[] | undefined
     if (dir) {
       const l = Math.hypot(...dir)
@@ -1264,7 +1316,7 @@ export class Engine {
   }
 
   /** The box `look` frames for a feature id, a part (or reference body) by name, or a face selector. */
-  private async focusBox(doc: Doc, d: DisplayData, focus: string | { part: string } | { faces: Record<string, unknown> }): Promise<{ box: Box; name: string } | { error: string }> {
+  private async focusBox(doc: Doc, d: DisplayData, focus: string | { part: string } | { faces: Record<string, unknown> }): Promise<{ box: Box; name: string; facing?: V3 } | { error: string }> {
     if (typeof focus === "string") {
       const f = doc.tree.features.find((x) => x.id === focus)
       if (!f) return { error: `找不到特征「${focus}」` }
@@ -1283,7 +1335,9 @@ export class Engine {
     if (!hashes?.length) return { error: `选择器什么都没选中：${JSON.stringify(focus.faces)}` }
     const set = new Set(hashes)
     const box = boxOfGroups(d, (g) => set.has(g.hash))
-    return box ? { box, name: `${hashes.length} 个面` } : { error: "选中的面不在显示的这一步里（用了 at 时，focus.faces 按最新一步选）" }
+    // A flat face is framed with some of what is around it, and looked at straight on.
+    const facing = facingOf(d, (g) => set.has(g.hash)) ?? undefined
+    return box ? { box: padFlat(box), name: `${hashes.length} 个面`, facing } : { error: "选中的面不在显示的这一步里（用了 at 时，focus.faces 按最新一步选）" }
   }
 
   private async show(doc: Doc, input: Record<string, unknown>): Promise<CommandResult> {
@@ -1439,17 +1493,35 @@ function pickResult(answer: PickAnswer): CommandResult {
 /** The parts list: one row per part file (a component used twice counts 2), with volume and size. */
 function bomText(doc: Doc, report: BuildReport) {
   const asm = isAssembly(doc.path)
-  const fileOf = new Map<string, string>()
-  for (const f of doc.tree.features) if (f.op === "component") fileOf.set(f.name ?? partName(f.file).replace(/\.(step|stp)$/i, ""), f.file)
+  // What each component (by the name its parts carry) is: a file, or a standard part by its designation.
+  const what = new Map<string, { file: string; std?: string }>()
+  for (const f of doc.tree.features) {
+    if (f.op !== "component") continue
+    let std: string | undefined
+    if (f.standard) {
+      try {
+        const len = f.standard.length
+        std = designation({ ...f.standard, length: len === undefined ? undefined : evalNum(len, report.params) }).name
+      } catch {
+        std = undefined
+      }
+    }
+    what.set(componentName(f), { file: f.file ?? "标准件", std })
+  }
   const parts = report.parts ?? (report.body ? [{ name: doc.name, volume: report.body.volume, size: report.body.size }] : [])
   const rows = new Map<string, { name: string; file: string; count: number; volume: number; size: number[] }>()
   for (const p of parts) {
+    // 「螺钉#3/垫圈」: component 螺钉, its third copy, the part 垫圈 of it.
     const comp = p.name.split("/")[0]
-    const file = asm ? (fileOf.get(comp) ?? "") : doc.path.split(/[\\/]/).pop()!
-    const key = asm ? `${file}|${p.name.slice(comp.length)}` : p.name
+    const base = comp.replace(/#\d+$/, "")
+    const sub = p.name.slice(comp.length)
+    const w = asm ? what.get(base) : undefined
+    const file = asm ? (w?.file ?? "") : doc.path.split(/[\\/]/).pop()!
+    const key = !asm ? p.name : w?.std ? `std|${w.std}` : `${file}|${sub}`
+    const name = w?.std ?? (asm ? `${base}${sub}` : p.name)
     const row = rows.get(key)
     if (row) row.count += 1
-    else rows.set(key, { name: p.name, file, count: 1, volume: p.volume, size: p.size })
+    else rows.set(key, { name, file, count: 1, volume: p.volume, size: p.size })
   }
   const r1 = (x: number) => Math.round(x * 10) / 10
   const lines = [

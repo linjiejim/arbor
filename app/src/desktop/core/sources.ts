@@ -22,10 +22,27 @@ export type Shared = { path: string; file: string; params: SharedFile["params"];
 
 const dirOf = (p: string) => p.replace(/[\\/][^\\/]*$/, "")
 
-/** A file named in a part (an import, a component, `uses`), relative to the part's folder (or absolute). */
+/**
+ * A file named in a part (an import, a component, `uses`), relative to the part's folder (or absolute),
+ * with `.` and `..` worked out: `parts/../p.params.json` is the same file as `p.params.json`, and the
+ * engine tells its own writes apart by path.
+ */
 export function besides(partPath: string, file: string) {
   const f = file.trim().replace(/\\/g, "/")
-  return /^([A-Za-z]:)?\//.test(f) ? f : `${dirOf(partPath).replace(/[\\/]+$/, "")}/${f.replace(/^\.\//, "")}`
+  return normalizePath(/^([A-Za-z]:)?\//.test(f) ? f : `${dirOf(partPath).replace(/[\\/]+$/, "")}/${f}`)
+}
+
+/** `/a/b/../c/./d` → `/a/c/d` (forward slashes; a leading drive letter or slash kept). */
+export function normalizePath(p: string) {
+  const s = p.replace(/\\/g, "/")
+  const head = s.match(/^([A-Za-z]:)?\//)?.[0] ?? ""
+  const out: string[] = []
+  for (const seg of s.slice(head.length).split("/")) {
+    if (seg === "" || seg === ".") continue
+    if (seg === ".." && out.length && out[out.length - 1] !== "..") out.pop()
+    else if (seg !== ".." || !head) out.push(seg)
+  }
+  return head + out.join("/")
 }
 
 export async function loadShared(files: Files, partPath: string, uses: string): Promise<Shared> {
@@ -90,7 +107,7 @@ export async function gather(files: Files, path: string, tree: Tree, stack: stri
     }),
   )
 
-  const comps = [...new Set(tree.features.flatMap((f: Feature) => (f.op === "component" ? [f.file] : [])))]
+  const comps = [...new Set(tree.features.flatMap((f: Feature) => (f.op === "component" && f.file ? [f.file] : [])))]
   const components: ComponentSource[] = []
   for (const name of comps) {
     const abs = besides(path, name)

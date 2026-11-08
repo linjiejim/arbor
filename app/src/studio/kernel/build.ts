@@ -36,15 +36,19 @@ import { referencesOf } from "../apply"
 import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
 import { measure, type MeasureResult, type MeasureSpec, type MeasureTarget } from "./measure"
-import { closest, relation, TOUCH } from "./proximity"
+import { closest, narrowSpot, relation, TOUCH } from "./proximity"
 import { compoundOf, countOf, edgesOf, facesOf, solidsOf } from "./topo"
 import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
 import { cylinderAxis, runChecks, type CheckBodies, type CheckResult } from "./check"
 import { pathPoints, planeFace, ribTool, tapered, thinProfile, untilNext } from "./features2"
 import { stepAscii, zipStore } from "../zip"
 import { makeDrawing, type DrawingData } from "./drawing"
-import { standardHole } from "../holes"
-import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
+import { METRIC, standardHole } from "../holes"
+import { cutThreads, DEPTH, type ThreadJob } from "./thread"
+import { applyMate, applyRigid, axisAngle, FREE, IDENTITY, rotation, type Freedom, type MateGeo, type Rigid } from "./mates"
+import { fastenerShape } from "./fastener-shapes"
+import { designation, type FastenerSpec } from "../fasteners"
+import { classifyFaces, faceSignatures, meshBody, meshEdges, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
   axisDir,
   DIRS,
@@ -221,10 +225,16 @@ const BUILT = new Map<string, Built>()
 const MAX_BUILT = 16
 
 /** A placement in an assembly, numbers already worked out. */
-export type Placement = { rotate: { axis: "X" | "Y" | "Z"; angle: number }[]; at: V3 }
+/** A placement in an assembly, numbers already worked out: rotations about axes through the origin (a name or a direction), then a move. */
+export type Placement = { rotate: { axis: "X" | "Y" | "Z" | V3; angle: number }[]; at: V3 }
 
 /** Editing a part inside an assembly: where it sits, and the other components with where they sit. */
-export type ContextSource = { self: Placement; assembly: string; others: { name: string; source: ComponentSource; place: Placement }[] }
+/**
+ * Editing a part inside an assembly: the assembly's tree (parameters worked out) and what its components
+ * read, and which component file is the part being edited. The kernel builds the assembly (components are
+ * cached) to get where everything sits, mates included.
+ */
+export type ContextSource = { assembly: string; tree: Tree; components: ComponentSource[]; self: string }
 
 /** A file `import` reads, as the host handed it over: parsed once per content. */
 type Asset = { hash: string; shape: AnyShape | null; error?: string }
@@ -237,13 +247,23 @@ type Thread = { r: number; major: number }
  * (else carried over, and freed by the step that made it).
  */
 /** `auto`: made by adding material under a new name (or the body that was there): explodes away from the middle. */
-type Part = { name: string; body: Shape3D; explode: V3; owned: boolean; auto?: boolean; hidden?: boolean }
+type Part = {
+  name: string
+  body: Shape3D
+  explode: V3
+  owned: boolean
+  auto?: boolean
+  hidden?: boolean
+  /** An assembly's component: which `component` feature placed it, and where. */
+  component?: string
+  placement?: Placement
+}
 
 /** New faces smaller than this (mm²) are reported as slivers. */
 const SLIVER_AREA = 0.01
 
 /** Features that change the body; after a split they run on each part (see `onParts`). */
-const BODY_OPS = new Set<FeatureOp>(["extrude", "revolve", "fillet", "chamfer", "shell", "hole", "linear_pattern", "circular_pattern", "mirror", "sweep", "loft", "draft", "rib"])
+const BODY_OPS = new Set<FeatureOp>(["extrude", "revolve", "fillet", "chamfer", "shell", "hole", "linear_pattern", "circular_pattern", "mirror", "sweep", "loft", "draft", "rib", "thread"])
 
 export class Kernel {
   private steps: Step[] = []
@@ -273,27 +293,44 @@ export class Kernel {
    * frame as see-through, read-only reference bodies. Null leaves the assembly.
    */
   setContext(ctx: ContextSource | null) {
-    const key = ctx ? JSON.stringify([ctx.self, ctx.others.map((o) => [o.name, componentKey(o.source), o.place])]) : ""
+    const key = ctx ? JSON.stringify([ctx.self, ctx.tree, ctx.components.map(componentKey)]) : ""
     if (key === this.contextKey) return
     this.context.forEach((r) => r.shape.delete())
     this.context = []
     this.contextKey = key
     if (!ctx) return
-    for (const o of ctx.others) {
-      let built: Built
-      try {
-        built = buildComponent(o.source)
-      } catch {
-        continue
+    // Where everything sits, mates included: the assembly built in a kernel of its own (components cached).
+    const sub = new Kernel()
+    try {
+      sub.setComponents(ctx.components)
+      sub.rebuild(ctx.tree)
+      const parts = sub.lastBuilt(Infinity)?.parts ?? []
+      const comp = (id?: string) => ctx.tree.features.find((x) => x.id === id)
+      const self = parts.find((p) => { const c = comp(p.component); return c?.op === "component" && c.file === ctx.self })
+      // A part with nothing in it yet has no shape to place: it sits where its own rotate / at put it.
+      let where = self?.placement
+      let selfId = self?.component
+      if (!where) {
+        const f = ctx.tree.features.find((x): x is Extract<Feature, { op: "component" }> => x.op === "component" && x.file === ctx.self)
+        if (!f) return
+        // A placement that doesn't work out (an unknown parameter) just leaves the context empty.
+        try {
+          const scope = resolveParams(ctx.tree.params)
+          where = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: num(r.angle, scope) })), at: (f.at ?? [0, 0, 0]).map((v) => num(v, scope)) as V3 }
+        } catch {
+          return
+        }
+        selfId = f.id
       }
-      for (const p of built.parts) {
-        const shape = unplace(place(p.shape.clone(), o.place), ctx.self)
-        const name = p.name && built.parts.length > 1 ? `${o.name}/${p.name}` : o.name
-        this.context.push({ id: name, name, shape, mesh: meshShape(shape), edges: meshEdges(shape), owned: true })
+      for (const p of parts) {
+        if (p.hidden || (p.component === selfId && (!self || p.name.split("/")[0] === self.name.split("/")[0]))) continue
+        const shape = unplace(p.body.clone(), where)
+        this.context.push({ id: p.name, name: p.name, shape, ...meshBody(shape), owned: true })
       }
+    } finally {
+      sub.dispose()
     }
   }
-
 
   /**
    * The host (the desktop app) hands over the files `import` features read: the bytes, or why it
@@ -365,7 +402,7 @@ export class Kernel {
         JSON.stringify(f) +
         (off.has(f.id) ? "\noff" : "") +
         (f.op === "import" ? `\n${this.assets.get(f.file)?.hash ?? "-"}` : "") +
-        (f.op === "component" ? `\n${this.components.get(f.file)?.key ?? "-"}` : "")
+        (f.op === "component" ? `\n${(f.file && this.components.get(f.file)?.key) ?? "-"}` : "")
       const cached = this.steps[i]
       if (cached && cached.key === key) {
         if (cached.result.state === "error" || cached.result.state === "skipped") failed = true
@@ -771,11 +808,7 @@ export class Kernel {
    * from the body before the first lettering feature.
    */
   drawing(withIso: boolean): DrawingData | null {
-    const usesText = (f: Feature) => {
-      const sk = "sketch" in f && typeof f.sketch === "string" ? this.tree.features.find((x) => x.id === f.sketch) : undefined
-      return sk?.op === "sketch" && sk.shapes.some((x) => x.type === "text")
-    }
-    const cut = this.tree.features.findIndex(usesText)
+    const cut = this.tree.features.findIndex((f) => this.lettering(f))
     const until = cut >= 0 ? cut : this.steps.length
     const step = this.lastBuilt(until)
     if (!step?.body) return null
@@ -942,7 +975,7 @@ export class Kernel {
       // The first addition may name the body: it is that part until a second one comes.
       if (!prev?.body && g.part && addsMaterial(g)) step.mainName = g.part
       if (out.parts) step.parts = out.parts
-      if (out.ref) step.refs = [...(step.refs ?? []), { id: f.id, name: displayName(tree, f), shape: out.ref, mesh: meshShape(out.ref as Shape3D), edges: meshEdges(out.ref as Shape3D), owned: true }]
+      if (out.ref) step.refs = [...(step.refs ?? []), { id: f.id, name: displayName(tree, f), shape: out.ref, ...meshBody(out.ref as Shape3D), owned: true }]
       Object.assign(step.result, { summary: out.summary, selected: out.selected })
       if (out.sketch) step.sketch = out.sketch
       if (out.tools) step.tools = out.tools
@@ -953,6 +986,8 @@ export class Kernel {
         // A component's faces are its part file's: its slivers are reported there, not in the assembly.
         const sliver = f.op === "sketch" || f.op === "import" || f.op === "component" ? null : this.slivers(step)
         if (sliver) warnings.push(sliver)
+        const narrow = BODY_OPS.has(f.op) && !this.lettering(f) ? this.narrows(step) : null
+        if (narrow) warnings.push(narrow)
       }
       // Each part's faces are a run of the compound's, in part order.
       if (out.body && step.parts) {
@@ -975,7 +1010,7 @@ export class Kernel {
 
   /** Mesh the new body, classify its faces against the previous one, carry provenance forward. */
   private commitBody(step: Step, prev: Step | null, body: Shape3D, id: string) {
-    const mesh = meshShape(body)
+    const { mesh, edges } = meshBody(body)
     const faces = facesOf(body)
     const sigs = faceSignatures(faces, mesh)
     const prevFaces = prev?.body ? facesOf(prev.body) : null
@@ -985,7 +1020,7 @@ export class Kernel {
     step.body = body
     step.ownsBody = true
     step.mesh = mesh
-    step.edges = meshEdges(body)
+    step.edges = edges
     step.sigs = sigs
     step.status = cls.map((c) => c.status)
     step.origins = cls.map((c) => (c.match >= 0 && prev ? prev.origins[c.match] : id))
@@ -1002,12 +1037,66 @@ export class Kernel {
     try {
       const areas = faces.map((f) => measureArea(f))
       const total = areas.reduce((a, b) => a + b, 0)
-      const tiny = areas.filter((a, i) => step.status[i] === "new" && a < SLIVER_AREA && a < 1e-5 * total)
+      let tiny = areas.filter((a, i) => step.status[i] === "new" && a < SLIVER_AREA && a < 1e-5 * total)
       if (!tiny.length) return null
+      // Lettering: where a glyph's strokes cross (the leg of an R into its bowl) the
+      // fused strokes keep a wall a few µm wide. It is the font's shape, already in
+      // the tool before any boolean; only slivers the boolean made are reported.
+      if (this.lettering(step.feature)) {
+        const own = (step.tools ?? []).flatMap((t) => toolSlivers(t.tool))
+        tiny = tiny.filter((a) => {
+          const k = own.findIndex((b) => Math.abs(a - b) <= 1e-3 * b + 1e-9)
+          if (k < 0) return true
+          own.splice(k, 1)
+          return false
+        })
+        if (!tiny.length) return null
+      }
       return `生成了 ${tiny.length} 个极小的面（最小 ${Math.min(...tiny).toPrecision(2)} mm²）：多半是两个面几乎重合，或者切除擦着面切过去`
     } finally {
       faces.forEach((f) => f.delete())
     }
+  }
+
+  /**
+   * A slit or a thin wall this step left: faces of the same solid facing each other closer than a
+   * 3D printer can make (proximity.ts). Skipped on big bodies (it's a hint, not worth seconds).
+   */
+  private narrows(step: Step): string | null {
+    if (!step.body) return null
+    const fresh = step.status.filter((s) => s === "new").length
+    if (!fresh || fresh > 150 || step.status.length > 3000) return null
+    const faces = facesOf(step.body)
+    const solids = solidsOf(step.body)
+    try {
+      // Which solid each face is on: parts and pieces that are apart on purpose aren't compared.
+      const group = faces.map(() => 0)
+      if (solids.length > 1) {
+        const byHash = new Map<number, number[]>()
+        faces.forEach((f, i) => byHash.set(f.hashCode, [...(byHash.get(f.hashCode) ?? []), i]))
+        solids.forEach((so, k) => {
+          for (const sf of facesOf(so)) {
+            for (const i of byHash.get(sf.hashCode) ?? []) if (faces[i].isSame(sf)) group[i] = k
+            sf.delete()
+          }
+        })
+      }
+      const spot = narrowSpot(faces, step.status.map((s) => s === "new"), group)
+      if (!spot) return null
+      const at = `(${spot.at.map((x) => fmt(x)).join(", ")}) 附近`
+      return spot.kind === "slit"
+        ? `留下了一条只有 ${fmt(spot.d)} mm 的窄缝（${at}）：两个面对面的面隔得这么近，多半是没对齐、本来要贴上；有意留缝的话，3D 打印一般至少要 0.4 mm`
+        : `留下了只有 ${fmt(spot.d)} mm 的薄壁（${at}）：3D 打印一般至少要 0.8 mm（两圈线宽），注塑约 1 mm；有意这么薄就可以不管`
+    } finally {
+      faces.forEach((f) => f.delete())
+      solids.forEach((so) => so.delete())
+    }
+  }
+
+  /** Does this feature make its shape from a sketch with text in it? */
+  private lettering(f: Feature): boolean {
+    const sk = "sketch" in f && typeof f.sketch === "string" ? this.tree.features.find((x) => x.id === f.sketch) : undefined
+    return sk?.op === "sketch" && sk.shapes.some((x) => x.type === "text")
   }
 
   private plane(ref: PlaneRef, prev: Step | null): ResolvedPlane {
@@ -1316,7 +1405,8 @@ export class Kernel {
         if (!std && f.d === undefined) throw new InputError("孔要么给 d（孔径），要么给 standard（标准孔）")
         const d = std ? std.d : n(f.d!)
         if (!(d > 0)) throw new InputError("孔径必须大于 0")
-        const depth = f.depth !== undefined ? n(f.depth) : this.bigLength(body)
+        // A heat-set insert's hole is blind (insert length + 1); every other hole goes through unless told.
+        const depth = f.depth !== undefined ? n(f.depth) : (std?.depth ?? this.bigLength(body))
         const drill = f.reverse ? plane.normal : mul(plane.normal, -1)
         const cbore = f.cbore ? { r: n(f.cbore.d) / 2, depth: n(f.cbore.depth) } : std?.cbore && { r: std.cbore.d / 2, depth: std.cbore.depth }
         const csink = f.csink ? { r: n(f.csink.d) / 2, angle: f.csink.angle !== undefined ? n(f.csink.angle) : 90 } : std?.csink && { r: std.csink.d / 2, angle: 90 }
@@ -1329,7 +1419,7 @@ export class Kernel {
         return {
           body: next,
           tools: [{ tool, mode: "cut" }],
-          summary: `${kind} × ${f.at.length} · ${f.depth !== undefined ? `深 ${fmt(depth)}` : "贯穿"}`,
+          summary: `${kind} × ${f.at.length} · ${f.depth !== undefined || std?.depth !== undefined ? `深 ${fmt(depth)}` : "贯穿"}`,
           threads: std?.thread ? [{ r: d / 2, major: std.thread.major }] : undefined,
           geom: { op: "hole", plane: frameOf(plane), centers, r: d / 2 },
         }
@@ -1452,6 +1542,63 @@ export class Kernel {
       case "component":
         // Routed by `run` (it changes the parts, not one body).
         throw new InputError("装配里的零件不在这里处理")
+      case "thread": {
+        if (!body || !prev) throw new InputError("还没有实体，没有圆柱面可以做螺纹")
+        return this.thread(f, body, prev.origins)
+      }
+    }
+  }
+
+  /** Real threads on the selected cylinders (thread.ts): external on a shaft, internal in a bore. */
+  private thread(f: Extract<Feature, { op: "thread" }>, body: Shape3D, origins: string[]): ApplyOut {
+    const n = (v: number | string) => num(v, this.scope)
+    const row = f.size ? METRIC[f.size] : null
+    if (!row && f.d === undefined) throw new InputError("螺纹要么写 size（如 M8），要么写 d（大径）和 pitch（螺距）")
+    const major = row && f.d === undefined ? Number(f.size!.slice(1)) : n(f.d!)
+    const pitch = f.pitch !== undefined ? n(f.pitch) : row ? row.pitch : NaN
+    if (!(pitch > 0)) throw new InputError("不用 size 时要写 pitch（螺距）")
+    if (!(major > 2 * DEPTH * pitch)) throw new InputError(`螺距 ${fmt(pitch)} 对 ⌀${fmt(major)} 太粗了`)
+    const clearance = f.clearance !== undefined ? n(f.clearance) : 0
+    if (clearance < 0 || clearance > 0.25 * pitch) throw new InputError(`clearance 要在 0 到 ${fmt(0.25 * pitch)} 之间（螺距的四分之一）`)
+    const faces = faceInfos(body, origins)
+    try {
+      const sel = selectFaces(f.faces, faces, this.scope)
+      const jobs: ThreadJob[] = []
+      let internal: boolean | null = null
+      for (const face of sel) {
+        if (face.kind !== "cylinder" || face.radius === undefined) throw new InputError(`螺纹只能做在圆柱面上，选中的有${describeFace(face).split(" 来自")[0]}`)
+        const ax = cylinderAxis(face)
+        if (!ax) throw new InputError("读不出这个圆柱面的轴线")
+        const inside = !isConvexCylinder(face, ax)
+        if (internal !== null && internal !== inside) throw new InputError("一次只能都是外螺纹（轴）或都是内螺纹（孔）")
+        internal = inside
+        const r = face.radius
+        const depth = DEPTH * pitch
+        if (!inside && r < major / 2 - depth) throw new InputError(`圆柱 ⌀${fmt(2 * r)} 比 ${fmt(major)} 螺纹的小径（⌀${fmt(major - 2 * depth)}）还细：先把轴做成 ⌀${fmt(major)}`)
+        if (!inside && r > major / 2 + 0.4 * pitch) throw new InputError(`圆柱 ⌀${fmt(2 * r)} 比螺纹大径 ⌀${fmt(major)} 粗太多：先把轴做成 ⌀${fmt(major)}`)
+        if (inside && r > major / 2) throw new InputError(`孔 ⌀${fmt(2 * r)} 比螺纹大径 ⌀${fmt(major)} 还大：内螺纹的孔先打成 ⌀${fmt(major - 2 * depth)} 左右（小径），或者用 hole 的 standard（fit: tap）打攻丝底孔`)
+        // Along the axis: the face's parameter range is where it starts and ends.
+        const { vMin, vMax } = face.face.UVBounds
+        let [t0, t1] = [vMin, vMax]
+        if (f.length !== undefined) {
+          const len = n(f.length)
+          if (!(len > 0) || len > t1 - t0 + 1e-6) throw new InputError(`螺纹长度要在 0 到 ${fmt(t1 - t0)}（圆柱面的长度）之间`)
+          const towards = f.from ? dot(DIRS[f.from], ax.d) : 1
+          if (f.from && Math.abs(towards) < 1e-6) throw new InputError(`from 要沿圆柱的轴线方向，${f.from} 和轴线垂直`)
+          if (towards > 0) t0 = t1 - len
+          else t1 = t0 + len
+        }
+        jobs.push({ p: ax.p, d: ax.d, t0, t1, major, pitch, internal: inside, clearance, left: !!f.left, faceR: r })
+      }
+      const next = cutThreads(body, jobs)
+      const name = row && f.d === undefined && f.pitch === undefined ? f.size! : `M${fmt(major)}×${fmt(pitch)}`
+      const len = jobs[0].t1 - jobs[0].t0
+      return {
+        body: next,
+        summary: `${name} ${internal ? "内" : "外"}螺纹${f.left ? "（左旋）" : ""} × ${jobs.length} · 长 ${fmt(len)} · 螺距 ${fmt(pitch)}${clearance ? ` · 间隙 ${fmt(clearance)}` : ""}`,
+      }
+    } finally {
+      disposeInfos(faces)
     }
   }
 
@@ -1501,44 +1648,151 @@ export class Kernel {
     return { body, parts: next, geom: { op: "sketch", plane: frameOf(plane) }, summary: `拆成 ${back}（V=${fmt(vl)}）、${front}（V=${fmt(vu)}）` }
   }
 
-  /** An assembly's component: the part file's final shape (built in a kernel of its own, cached), placed. */
+  /**
+   * An assembly's component: a part file's final shape (built in a kernel of its own, cached) or a standard
+   * part, placed by rotate / at and then by its mates; a mate onto several faces (four holes) places a copy
+   * on each.
+   */
   private component(f: Extract<Feature, { op: "component" }>, prev: Step | null, warnings: string[]): ApplyOut {
     const n = (v: number | string) => num(v, this.scope)
-    const got = this.components.get(f.file)
-    if (!got) throw new InputError(this.componentsGiven ? `没有读到「${f.file}」` : "装配只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
-    const built = buildComponent(got.source)
+    if (!!f.file === !!f.standard) throw new InputError(f.file ? "file 和 standard 只写一个：放零件文件写 file，放标准件写 standard" : "component 要写 file（零件文件）或 standard（标准件）")
+    let built: Built
+    let source: string
+    let fastener: FastenerSpec | null = null
+    if (f.standard) {
+      fastener = { ...f.standard, length: f.standard.length !== undefined ? n(f.standard.length) : undefined }
+      let des: ReturnType<typeof designation>
+      try {
+        des = designation(fastener)
+      } catch (e) {
+        throw new InputError((e as Error).message)
+      }
+      if (des.note) warnings.push(des.note)
+      built = standardPart(fastener)
+      source = `标准件 ${des.name}`
+    } else {
+      const got = this.components.get(f.file!)
+      if (!got) throw new InputError(this.componentsGiven ? `没有读到「${f.file}」` : "装配只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
+      built = buildComponent(got.source)
+      source = f.file!
+    }
     const base = componentName(f)
     if (!built.parts.length) {
       warnings.push(`零件「${base}」还是空的：在装配里编辑它（open_part 加 context）`)
-      return { summary: `零件「${base}」← ${f.file} · 还是空的` }
+      return { summary: `零件「${base}」← ${source} · 还是空的` }
     }
     if (built.failed) warnings.push(`零件「${base}」有 ${built.failed} 个特征失败，用的是失败前的形状`)
-    const placement: Placement = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: n(r.angle) })), at: (f.at ?? [0, 0, 0]).map(n) as V3 }
-    const added: Part[] = built.parts.map((p) => ({
-      name: p.name && built.parts.length > 1 ? `${base}/${p.name}` : base,
-      body: place(p.shape.clone(), placement),
-      explode: [0, 0, 0],
-      owned: true,
-      auto: true,
-      hidden: f.hidden,
-    }))
     const before: Part[] = !prev?.body ? [] : prev.parts?.length ? prev.parts.map((p) => ({ ...p, owned: false })) : [{ name: prev.mainName ?? "主体", body: prev.body, explode: [0, 0, 0], owned: false, auto: true }]
+    const start: Placement = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: n(r.angle) })), at: (f.at ?? [0, 0, 0]).map(n) as V3 }
+    const placements = f.mates?.length ? this.mate(f, built, start, before, warnings) : [start]
+    if (placements.length > MAX_COUNT) throw new InputError(`贴合一次最多放 ${MAX_COUNT} 个，选中了 ${placements.length} 个面`)
+    const added: Part[] = placements.flatMap((pl, i) =>
+      built.parts.map((p) => ({
+        name: `${placements.length > 1 ? `${base}#${i + 1}` : base}${p.name && built.parts.length > 1 ? `/${p.name}` : ""}`,
+        body: place(p.shape.clone(), pl),
+        explode: [0, 0, 0] as V3,
+        owned: true,
+        auto: true,
+        hidden: f.hidden,
+        component: f.id,
+        placement: pl,
+      })),
+    )
+    // A screw or an insert bites into the material it goes in: overlap is the point, not news.
+    const bites = fastener?.type === "screw" || fastener?.type === "insert"
     for (const a of added) {
       if (before.some((p) => p.name === a.name)) {
         added.forEach((x) => x.body.delete())
         throw new InputError(`零件名「${a.name}」重复了：给 component 写不同的 name`)
       }
+      if (bites) continue
       for (const p of before) {
         const r = relation(a.body, p.body, true)
         if (r.overlap > 1e-6) warnings.push(`「${a.name}」和「${p.name}」重叠 ${fmt(r.overlap)} mm³`)
       }
     }
     const parts = [...before, ...added]
-    const all = added.length === 1 ? null : compoundOf(added.map((a) => a.body))
-    const size = sizeOf(all ?? added[0].body)
+    const one = added.filter((a) => a.placement === placements[0])
+    const all = one.length === 1 ? null : compoundOf(one.map((a) => a.body))
+    const size = sizeOf(all ?? one[0].body)
     all?.delete()
+    const copies = placements.length > 1 ? ` × ${placements.length}` : ""
+    const mates = f.mates?.length ? ` · 贴合 ${f.mates.length} 条` : ""
     // Even a single component stays a named part (measure, checks and hiding go by its name).
-    return { body: compoundOf(parts.map((p) => p.body)), parts, summary: `零件「${base}」← ${f.file} · ${size.map(fmt).join(" × ")}` }
+    return { body: compoundOf(parts.map((p) => p.body)), parts, summary: `零件「${base}」← ${source} · ${size.map(fmt).join(" × ")}${copies}${mates}` }
+  }
+
+  /**
+   * Where the mates put a component (mates.ts): one placement, or one per face the first mate onto several
+   * faces picked. Faces on the component are picked in its own frame; faces on the others where they sit.
+   */
+  private mate(f: Extract<Feature, { op: "component" }>, built: Built, start: Placement, before: Part[], warnings: string[]): Placement[] {
+    const own = built.parts.length === 1 ? built.parts[0].shape : compoundOf(built.parts.map((p) => p.shape))
+    let copies: { T: Rigid; free: Freedom }[] = [{ T: rigidOf(start), free: FREE }]
+    let fanned = false
+    try {
+      f.mates!.forEach((m, k) => {
+        const what = `第 ${k + 1} 条贴合`
+        // Coplanar faces (a lid's underside around its lip) are one plane, as on the other side.
+        const mine = distinctGeos(this.mateFaces(own, m.face, `${what}的 face（这个零件上）`))
+        if (mine.length !== 1) throw new InputError(`${what}的 face 要正好选中这个零件上的一个平面或一根轴，现在选中了 ${mine.length} 个（加 extreme、radius 或 near 缩小）`)
+        const target = before.find((p) => p.name === m.to.part)
+        if (!target) throw new InputError(`${what}：没有叫「${m.to.part}」的零件${before.length ? `（前面放好的有 ${before.map((p) => p.name).join("、")}）` : "（要贴合的零件写在这个 component 前面）"}`)
+        // Faces in one plane (a rim and the posts flush with it) or holes on one axis are one target.
+        const theirs = distinctGeos(this.mateFaces(target.body, m.to.face, `${what}的 to.face（「${m.to.part}」上）`))
+        if (theirs.length > 1 && copies.length === 1 && !fanned) {
+          // A mate onto several faces: one copy per face (a screw in each of four holes).
+          copies = theirs.map(() => ({ ...copies[0] }))
+          fanned = true
+          copies = copies.map((c, i) => this.applyOne(c, m, mine[0], theirs[i], what, warnings))
+          return
+        }
+        copies = copies.map((c) => {
+          // Several faces but one copy each: the one nearest where this copy's face is now.
+          const here = applyRigid(c.T, geoPoint(mine[0]))
+          const pick = theirs.length === 1 ? theirs[0] : theirs.reduce((a, b) => (dist(geoPoint(b), here) < dist(geoPoint(a), here) ? b : a))
+          return this.applyOne(c, m, mine[0], pick, what, warnings)
+        })
+      })
+    } finally {
+      if (own !== built.parts[0].shape) own.delete()
+    }
+    return copies.map((c) => {
+      const { axis, angle } = axisAngle(c.T.R)
+      return { rotate: angle ? [{ axis, angle }] : [], at: c.T.t }
+    })
+  }
+
+  private applyOne(c: { T: Rigid; free: Freedom }, m: NonNullable<Extract<Feature, { op: "component" }>["mates"]>[number], mine: MateGeo, theirs: MateGeo, what: string, warnings: string[]) {
+    try {
+      const r = applyMate(c.T, c.free, { kind: m.type, mine, target: theirs, offset: m.offset !== undefined ? num(m.offset, this.scope) : 0, flip: m.flip })
+      if (r.miss && !warnings.some((w) => w.startsWith(what))) warnings.push(`${what}没有完全做到：${r.miss}。调整顺序（先同轴、再贴合），或者用 rotate 先转到大致方向`)
+      return { T: r.T, free: r.free }
+    } catch (e) {
+      throw new InputError(`${what}：${(e as Error).message}`)
+    }
+  }
+
+  /** The faces a mate names on a shape, as planes or axes. */
+  private mateFaces(shape: Shape3D, sel: FaceSelector, what: string): MateGeo[] {
+    if (sel.of) throw new InputError(`${what}不能写 of：装配里的零件不记特征名，用 normal、kind、extreme、near 选`)
+    const faces = faceInfos(shape, [])
+    try {
+      let got: FaceInfo[]
+      try {
+        got = selectFaces(sel, faces, this.scope)
+      } catch (e) {
+        throw new InputError(`${what}：${(e as Error).message}`)
+      }
+      return got.map((x) => {
+        if (x.kind === "plane" && x.normal) return { kind: "plane" as const, n: x.normal, p: x.center }
+        const ax = x.kind === "cylinder" ? cylinderAxis(x) : x.kind === "cone" ? coneAxis(x) : null
+        if (ax) return { kind: "axis" as const, a: ax.p, d: ax.d }
+        throw new InputError(`${what}选中的${describeFace(x).split(" 来自")[0]}既不是平面，也不是圆柱面或圆锥面`)
+      })
+    } finally {
+      disposeInfos(faces)
+    }
   }
 
   /**
@@ -1751,16 +2005,79 @@ function buildComponent(src: ComponentSource): Built {
 /** Rotate (in order, about the origin) then move: a component's place in its assembly. */
 function place<T extends AnyShape>(shape: T, p: Placement): T {
   let s = shape as AnyShape
-  for (const r of p.rotate) s = s.rotate(r.angle, [0, 0, 0], AXIS[r.axis])
+  for (const r of p.rotate) s = s.rotate(r.angle, [0, 0, 0], typeof r.axis === "string" ? AXIS[r.axis] : r.axis)
   if (p.at.some((x) => x !== 0)) s = s.translate(p.at)
   return s as T
+}
+
+/** A placement as a rigid transform (mates.ts). */
+function rigidOf(p: Placement): Rigid {
+  let R = IDENTITY.R
+  for (const r of p.rotate) R = mulR(rotation(typeof r.axis === "string" ? AXIS[r.axis] : r.axis, (r.angle * Math.PI) / 180), R)
+  return { R, t: p.at }
+}
+
+function mulR(A: number[], B: number[]) {
+  const out = new Array(9).fill(0)
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let k = 0; k < 3; k++) out[i * 3 + j] += A[i * 3 + k] * B[k * 3 + j]
+  return out
+}
+
+/** One of each plane (same normal, same offset) and each axis line among `gs`. */
+function distinctGeos(gs: MateGeo[]): MateGeo[] {
+  const same = (a: MateGeo, b: MateGeo) => {
+    if (a.kind === "plane" && b.kind === "plane") return dot(a.n, b.n) > 1 - 1e-9 && Math.abs(dot(sub(b.p, a.p), a.n)) < 1e-6
+    if (a.kind === "axis" && b.kind === "axis") {
+      if (Math.abs(dot(a.d, b.d)) < 1 - 1e-9) return false
+      const g = sub(b.a, a.a)
+      return Math.hypot(...sub(g, mul(a.d, dot(g, a.d)))) < 1e-6
+    }
+    return false
+  }
+  return gs.filter((g, i) => !gs.slice(0, i).some((h) => same(g, h)))
+}
+
+/** Where a mate's plane or axis is (for picking the nearest of several). */
+const geoPoint = (g: MateGeo): V3 => (g.kind === "plane" ? g.p : g.a)
+const dist = (a: V3, b: V3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+/** A cone's axis (a countersink, a flat head). */
+function coneAxis(f: FaceInfo): { p: V3; d: V3 } | null {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ad: any = (f.face as any)._geomAdaptor()
+  try {
+    const ax = ad.Cone().Axis()
+    const loc = ax.Location()
+    const dir = ax.Direction()
+    return { p: [loc.X(), loc.Y(), loc.Z()], d: [dir.X(), dir.Y(), dir.Z()] }
+  } catch {
+    return null
+  } finally {
+    ad.delete?.()
+  }
+}
+
+/** A standard part's shape (fastener-shapes.ts), built once per size. */
+function standardPart(spec: FastenerSpec): Built {
+  const key = `std:${JSON.stringify(spec)}`
+  const hit = BUILT.get(key)
+  if (hit) return hit
+  let shape: Shape3D
+  try {
+    shape = fastenerShape(spec)
+  } catch (e) {
+    throw new InputError((e as Error).message)
+  }
+  const built: Built = { parts: [{ name: null, shape }], failed: 0 }
+  BUILT.set(key, built)
+  return built
 }
 
 /** The inverse of `place`: from the assembly back into the part's own frame. */
 function unplace<T extends AnyShape>(shape: T, p: Placement): T {
   let s = shape as AnyShape
   if (p.at.some((x) => x !== 0)) s = s.translate(mul(p.at, -1))
-  for (const r of [...p.rotate].reverse()) s = s.rotate(-r.angle, [0, 0, 0], AXIS[r.axis])
+  for (const r of [...p.rotate].reverse()) s = s.rotate(-r.angle, [0, 0, 0], typeof r.axis === "string" ? AXIS[r.axis] : r.axis)
   return s as T
 }
 
@@ -2125,6 +2442,16 @@ export function mergeOverlaps(shape: Shape3D): Shape3D {
     return cast(fuse.Shape() as never) as Shape3D
   } finally {
     for (const x of [fuse, progress, args, tools, ...solids, shape]) x.delete()
+  }
+}
+
+/** Areas of the tool's own faces small enough to count as slivers. */
+function toolSlivers(tool: Shape3D): number[] {
+  const faces = facesOf(tool)
+  try {
+    return faces.map((f) => measureArea(f)).filter((a) => a < SLIVER_AREA)
+  } finally {
+    faces.forEach((f) => f.delete())
   }
 }
 

@@ -142,6 +142,26 @@ describe("shared parameters and assemblies", () => {
     expect(chk2.text).toMatch(/✗[^\n]*总长 80[^\n]*12 × 12 × 90/)
   })
 
+  it("doesn't tell the agent its own shared-parameter write, or a save that changed nothing, came from the file", async () => {
+    const { run, touch, disk } = await penWorkspace()
+    await run("get_state", {})
+    const set = await run("set_params", { set: { L: 70 } })
+    expect(set.ok, set.text).toBe(true)
+    // The file system reports the write back (the components reach it as parts/../pen.params.json).
+    await touch("/work/pen.params.json", disk.get("/work/pen.params.json") as string)
+    // Someone (another engine's headless check) saves a part file again without changing it.
+    await touch("/work/parts/cap.arbor.json", disk.get("/work/parts/cap.arbor.json") as string)
+    const st = await run("get_state", {})
+    expect(st.text).not.toMatch(/文件被直接修改/)
+    expect(st.text).toMatch(/笔杆（10×10×70）/)
+    // A real change by someone else still shows.
+    const cap = JSON.parse(disk.get("/work/parts/cap.arbor.json") as string) as Tree
+    cap.features[1] = { ...cap.features[1], distance: 22 } as Tree["features"][number]
+    await touch("/work/parts/cap.arbor.json", JSON.stringify(cap))
+    const st2 = await run("get_state", {})
+    expect(st2.text).toMatch(/文件被直接修改：cap\.arbor\.json 更新了/)
+  })
+
   it("rebuilds when a part file changes on disk, and exports a BOM, a STEP and a zip of STLs", async () => {
     const { run, touch, disk } = await penWorkspace()
     const cap = JSON.parse(disk.get("/work/parts/cap.arbor.json") as string) as Tree
