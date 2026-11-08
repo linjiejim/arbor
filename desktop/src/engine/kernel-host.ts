@@ -25,6 +25,8 @@ export class ThreadKernel implements KernelHost {
   private pending = new Map<number, Pending>()
   private lastTree: Tree | null = null
   private stale = false
+  /** Disposed: a late call (a file change already on its way) must not start a new thread. */
+  private closed = false
 
   constructor(
     private readonly file: URL,
@@ -83,6 +85,7 @@ export class ThreadKernel implements KernelHost {
   }
 
   private async call<T>(op: KernelRequest["op"], args: unknown[]): Promise<T> {
+    if (this.closed) throw new Error("建模内核已关闭")
     if (this.stale || !this.worker) await this.restart()
     else await this.start()
     const id = ++this.seq
@@ -174,6 +177,7 @@ export class ThreadKernel implements KernelHost {
   }
 
   async dispose() {
+    this.closed = true
     const w = this.worker
     this.worker = null
     if (w) {

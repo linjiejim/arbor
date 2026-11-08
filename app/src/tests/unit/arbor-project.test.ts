@@ -99,6 +99,28 @@ describe("projects in the engine", () => {
     expect(JSON.parse(mem.disk.get("/home/jim/work/pen/pen.params.json") as string).params.L).toBe(140)
   })
 
+  it("a change reported after dispose rebuilds nothing (else the CLI can't exit)", async () => {
+    const mem = memFiles()
+    // A watcher's call can already be on its way when the engine is disposed: keep them to call late.
+    const late: (() => void)[] = []
+    const files = { ...mem.files, watch: (p: string, cb: () => void) => (late.push(cb), mem.files.watch(p, cb)) }
+    const kernel = new DirectKernel()
+    const engine = new Engine({ kernel, files, home: HOME })
+    expect((await engine.run("open_project", { path: "lamp", create: true }, AGENT)).ok).toBe(true)
+    const rebuild = vi.spyOn(kernel, "rebuild")
+    const change = async (L: number) => {
+      mem.disk.set("/home/jim/work/lamp/lamp.params.json", JSON.stringify({ params: { L } }))
+      for (const cb of late) cb()
+      await engine.run("list_parts", {}, AGENT) // after the queued work
+    }
+    await change(1)
+    expect(rebuild).toHaveBeenCalled()
+    rebuild.mockClear()
+    engine.dispose()
+    await change(2)
+    expect(rebuild).not.toHaveBeenCalled()
+  })
+
   it("create keeps a parameter file that is already there", async () => {
     const mem = memFiles()
     mem.disk.set("/home/jim/work/p/p.params.json", JSON.stringify({ params: { L: 140 } }))
