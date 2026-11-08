@@ -1,12 +1,12 @@
 import * as React from "react"
-import { ArrowDown, ArrowUp, Ellipsis, Eye, EyeOff, Trash2, X } from "lucide-react"
+import { Trash2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
+import { OpIcon } from "@/components/op-icon"
 import { Input } from "@/components/ui/input"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select } from "@/components/ui/select"
 import { notify } from "@/components/ui/toast"
-import { applyEdit, moveFeature, replaceFeature, setFieldAt } from "../apply"
+import { applyEdit, setFieldAt } from "../apply"
 import { displayName, OP_NAMES, type Feature, type Tree } from "../dsl"
 import { applyDimEdit } from "../dim-edit"
 import { fmtDim } from "../dim-source"
@@ -18,6 +18,7 @@ import type { Annotations } from "../use-annotations"
 import type { Reselect } from "../use-reselect"
 import type { Studio } from "../use-studio"
 import { useWords } from "./host-words"
+import { iconOf } from "../feature-icon"
 
 /** The face / edge selector a feature carries, if any: where it lives and what it picks. */
 function selectionOf(f: Feature): { field: (string | number)[]; kind: "face" | "edge"; value: unknown; title: string } | null {
@@ -31,26 +32,32 @@ function selectionOf(f: Feature): { field: (string | number)[]; kind: "face" | "
 const FIT: Record<string, string> = { clearance: "过孔", close: "精配过孔", tap: "螺纹孔" }
 
 /**
- * One step of the tree in plain words: what it did, its dimensions (edit in
- * place), what it picked (re-pick on the model), and 「让助教改这一步」 for
- * anything structural. Replaces the old all-fields form.
+ * One step of the tree, in the panel above the timeline. Pointed at (`pinned`
+ * off): a read-only preview of fixed height. Clicked (`pinned`): the same
+ * layout, now live: dimensions edit in place, the picked faces or edges can be
+ * re-picked on the model, delete, and 「让助教改这一步」 for anything structural.
  */
-export function FeatureCard({
+export function StepPanel({
   studio,
   feature: f,
   result: r,
+  pinned,
+  readOnly = false,
   reselect,
   annotations,
-  busy,
+  busy = false,
   onClose,
   onPointDim,
 }: {
   studio: Studio
   feature: Feature
   result?: FeatureResult
-  reselect: Reselect
-  annotations: Annotations
-  busy: boolean
+  pinned: boolean
+  /** A shared link: look, don't change. */
+  readOnly?: boolean
+  reselect?: Reselect
+  annotations?: Annotations
+  busy?: boolean
   onClose: () => void
   onPointDim: (id: string | null) => void
 }) {
@@ -58,94 +65,126 @@ export function FeatureCard({
   const { tree } = studio
   const name = displayName(tree, f)
   const index = tree.features.findIndex((x) => x.id === f.id)
-  const viewing = studio.rollback === f.id
   const failed = r?.state === "error" || r?.state === "skipped"
   const [error, setError] = React.useState<{ text: string; cascade?: boolean } | null>(null)
   const dims = studio.dims.filter((d) => d.feature === f.id)
   const shown = dims.filter((d) => d.source.type !== "derived")
   const derived = dims.filter((d) => d.source.type === "derived")
   const sel = selectionOf(f)
-  const picking = reselect.state?.feature === f.id ? reselect.state : null
+  const live = pinned && !readOnly && reselect && annotations ? { reselect, annotations } : null
+  const picking = live && reselect?.state?.feature === f.id ? reselect.state : null
+  const kind = `${OP_NAMES[f.op]}${"mode" in f && f.mode === "cut" ? " · 切除" : ""}`
+  const uses = usesOf(tree, f)
 
-  const run = async (change: (t: Tree) => Tree, done?: () => void) => {
-    const err = await studio.editTree(change)
-    setError(err ? { text: err } : null)
-    if (!err) done?.()
-  }
   const remove = async (cascade = false) => {
     const err = await studio.editTree((t) => applyEdit(t, "delete_feature", { id: f.id, cascade }).tree)
     if (err) return setError({ text: err, cascade: /cascade/.test(err) })
     onClose()
     notify.undo(`已删除「${name}」`, studio.undo)
   }
-  const askAssistant = () =>
-    annotations.startMessage(failed && r?.message ? `「${name}」（${f.id}）报错了：${r.message}。帮我改好。` : `改「${name}」（${f.id}）：`)
+  const askAssistant = () => {
+    live?.annotations.startMessage(failed && r?.message ? `「${name}」（${f.id}）报错了：${r.message}。帮我改好。` : `改「${name}」（${f.id}）：`)
+    // The message is written where the panel sits: make way for it.
+    onClose()
+  }
+
+  const heading = "mb-1 text-caption text-faint-foreground"
 
   return (
     <div
-      role="dialog"
-      aria-label={`「${name}」`}
-      className="flex max-h-full w-80 flex-col rounded-md border bg-popover text-small shadow-popover"
-      onKeyDown={(e) => {
-        if (e.key === "Escape" && !picking) onClose()
-      }}
+      role={pinned ? "dialog" : "tooltip"}
+      id={pinned ? undefined : "feature-peek"}
+      aria-label={pinned ? `「${name}」` : undefined}
+      className={cn("absolute inset-0 flex flex-col bg-background text-small", pinned ? "pointer-events-auto" : "pointer-events-none")}
     >
-      <div className="flex items-center gap-2 border-b px-3 py-2">
-        <span className="min-w-0 flex-1 truncate text-body font-medium">{name}</span>
-        <span className="shrink-0 text-caption text-faint-foreground">
-          第 {index + 1} 步 · {OP_NAMES[f.op]}
-        </span>
-        <IconButton label="关闭" size="icon-sm" onClick={onClose}>
-          <X />
-        </IconButton>
-      </div>
-
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
-        {failed ? (
-          <div role="alert" className="text-destructive">
-            {r?.message ?? "前面的特征失败了，这一步没有重建"}
-            {r?.hint && <div className="mt-1 text-muted-foreground">{r.hint}</div>}
-          </div>
-        ) : (
-          <div>
-            <div className="text-body">{r?.summary ?? ""}</div>
-            {f.suppressed && <div className="text-muted-foreground">已压缩：这一步不参与重建</div>}
+      <header className="shrink-0 border-b px-4 py-3">
+        <div className="flex h-6 items-center gap-2 text-caption text-faint-foreground">
+          <span className="tabular">第 {index + 1} 步</span>
+          <span>{kind}</span>
+          <span className="font-mono">{f.id}</span>
+          {pinned && (
+            <IconButton label="关闭" size="icon-sm" className="-mr-2 ml-auto" onClick={onClose}>
+              <X />
+            </IconButton>
+          )}
+        </div>
+        <h2 className="mt-1 flex items-center gap-2 text-title font-medium">
+          <OpIcon op={iconOf(f)} className="size-5 shrink-0 text-muted-foreground" />
+          <span className={cn("min-w-0 truncate", f.suppressed && "line-through")}>{name}</span>
+        </h2>
+        {r?.state === "ok" && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-caption text-faint-foreground tabular">
+            {r.faces && (
+              <span className="flex items-center gap-1.5">
+                <span aria-hidden className="size-2.5 rounded-xs bg-primary" />
+                新面 {r.faces.new}
+              </span>
+            )}
+            {r.faces?.modified ? (
+              <span className="flex items-center gap-1.5">
+                <span aria-hidden className="size-2.5 rounded-xs bg-scene-modified" />
+                改动 {r.faces.modified} 个面
+              </span>
+            ) : null}
+            <span>用时 {Math.round(r.ms)} ms</span>
           </div>
         )}
-        {f.intent && <p className="text-muted-foreground">设计意图：{f.intent}</p>}
+      </header>
 
-        <section aria-label="尺寸">
-          <h3 className="mb-1 text-caption text-faint-foreground">尺寸</h3>
-          {shown.length ? (
-            <ul className="space-y-0.5">
-              {shown.map((d) => (
-                <DimRow key={d.id} dim={d} studio={studio} busy={busy} onPoint={onPointDim} />
-              ))}
-            </ul>
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4">
+        <section aria-label="这一步做了什么" className="space-y-1">
+          {failed ? (
+            <div role={pinned ? "alert" : undefined} className="text-destructive">
+              {r?.message ?? "前面的特征失败了，这一步没有重建"}
+              {r?.hint && <div className="mt-0.5 text-muted-foreground">{r.hint}</div>}
+            </div>
           ) : (
-            <p className="text-muted-foreground">{derived.length ? "这一步的数都由公式算出" : "这一步没有自己的尺寸"}</p>
+            r?.summary && <p className="text-body">{r.summary}</p>
           )}
-          {derived.length > 0 && (
-            <details className="mt-1">
-              <summary className="cursor-pointer text-muted-foreground">由公式算出的 {derived.length} 个（只读）</summary>
-              <ul className="mt-1 space-y-0.5 pl-2 font-mono text-caption text-muted-foreground">
-                {derived.map((d) => (
-                  <li key={d.id}>
-                    {d.label} = {d.source.type === "derived" ? d.source.text : ""} = {fmtDim(d.value)}
-                  </li>
-                ))}
-              </ul>
-            </details>
-          )}
+          {f.suppressed && <p className="text-faint-foreground">已压缩：暂时不参与重建</p>}
+          {uses && <p className="text-muted-foreground">{uses}</p>}
+          {r?.warnings?.map((w) => (
+            <p key={w} className="text-warning">
+              {w}
+            </p>
+          ))}
+          {f.intent && <p className="text-muted-foreground">设计意图：{f.intent}</p>}
         </section>
 
-        <DirectOptions f={f} studio={studio} busy={busy} onError={(t) => setError(t ? { text: t } : null)} />
+        {(shown.length > 0 || derived.length > 0) && (
+          <section aria-label="尺寸">
+            <h3 className={heading}>尺寸</h3>
+            {shown.length ? (
+              <ul className="-mx-1">
+                {shown.map((d) => (
+                  <DimRow key={d.id} dim={d} studio={studio} busy={busy || !live} onPoint={onPointDim} />
+                ))}
+              </ul>
+            ) : (
+              <p className="text-muted-foreground">这一步的数都由公式算出</p>
+            )}
+            {derived.length > 0 && (
+              <details className="mt-1">
+                <summary className="cursor-pointer text-muted-foreground">由公式算出的 {derived.length} 个（只读）</summary>
+                <ul className="mt-1 space-y-0.5 pl-2 font-mono text-caption text-muted-foreground">
+                  {derived.map((d) => (
+                    <li key={d.id}>
+                      {d.label} = {d.source.type === "derived" ? d.source.text : ""} = {fmtDim(d.value)}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </section>
+        )}
+
+        {live && <DirectOptions f={f} studio={studio} busy={busy} onError={(t) => setError(t ? { text: t } : null)} />}
 
         {sel && (
           <section aria-label={sel.title}>
-            <h3 className="mb-1 text-caption text-faint-foreground">{sel.title}</h3>
-            {picking ? (
-              <div className="rounded-md border border-primary p-2">
+            <h3 className={heading}>{sel.title}</h3>
+            {picking && live ? (
+              <div className="rounded-md border border-primary p-2.5">
                 <p>
                   {picking.result === undefined
                     ? "正在找共同的描述…"
@@ -155,13 +194,13 @@ export function FeatureCard({
                         ? `这 ${picking.hashes.length} ${sel.kind === "edge" ? "条边" : "个面"}找不到一句共同的描述：少选几个，或者${words.pickFor}`
                         : `在模型上点要选的${sel.kind === "edge" ? "边" : "面"}`}
                 </p>
-                <div className="mt-2 flex justify-end gap-2">
+                <div className="mt-2 flex flex-wrap justify-end gap-2">
                   {picking.result === null && picking.hashes.length > 0 && (
-                    <Button size="sm" variant="ghost" className="mr-auto" onClick={() => void askToPick(studio, reselect, annotations, f, name, sel.kind)}>
+                    <Button size="sm" variant="ghost" className="mr-auto" onClick={() => void askToPick(studio, live.reselect, live.annotations, f, name, sel.kind)}>
                       {words.pickFor}
                     </Button>
                   )}
-                  <Button size="sm" variant="ghost" onClick={reselect.cancel}>
+                  <Button size="sm" variant="ghost" onClick={live.reselect.cancel}>
                     取消
                   </Button>
                   <Button
@@ -169,7 +208,7 @@ export function FeatureCard({
                     variant="primary"
                     disabled={!picking.result || busy}
                     onClick={async () => {
-                      const err = await reselect.apply()
+                      const err = await live.reselect.apply()
                       setError(err ? { text: err } : null)
                     }}
                   >
@@ -178,15 +217,17 @@ export function FeatureCard({
                 </div>
               </div>
             ) : (
-              <div className="flex items-start gap-2">
-                <p className="min-w-0 flex-1">
+              <>
+                <p>
                   {selectorWords(sel.value, sel.kind, tree)}
                   {r?.selected !== undefined && <span className="text-muted-foreground"> · 实际 {r.selected} {sel.kind === "edge" ? "条" : "个"}</span>}
                 </p>
-                <Button size="sm" variant="secondary" className="shrink-0 max-sm:hidden" disabled={busy} onClick={() => void reselect.start(f.id, sel.field, sel.kind, sel.value)}>
-                  在模型上重选
-                </Button>
-              </div>
+                {live && (
+                  <Button size="sm" variant="secondary" className="mt-2 max-sm:hidden" disabled={busy} onClick={() => void live.reselect.start(f.id, sel.field, sel.kind, sel.value)}>
+                    在模型上重选
+                  </Button>
+                )}
+              </>
             )}
           </section>
         )}
@@ -201,40 +242,40 @@ export function FeatureCard({
             )}
           </div>
         )}
-        {busy && <p className="text-caption text-faint-foreground">{words.busy}</p>}
+        {pinned && busy && <p className="text-caption text-faint-foreground">{words.busy}</p>}
       </div>
 
-      <div className="flex items-center gap-1 border-t px-2 py-2">
-        <IconButton label={viewing ? "回到最新" : "在这一步查看模型"} size="icon-sm" onClick={() => studio.showFeature(viewing ? null : f.id)}>
-          {viewing ? <EyeOff /> : <Eye />}
-        </IconButton>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => void run((t) => replaceFeature(t, { ...f, suppressed: f.suppressed ? undefined : true }))}>
-          {f.suppressed ? "解除压缩" : "压缩"}
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <IconButton label="更多操作" size="icon-sm" disabled={busy}>
-              <Ellipsis />
-            </IconButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem disabled={index <= 0} onSelect={() => void run((t) => moveFeature(t, f.id, -1))}>
-              <ArrowUp /> 上移一步
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled={index >= tree.features.length - 1} onSelect={() => void run((t) => moveFeature(t, f.id, 1))}>
-              <ArrowDown /> 下移一步
-            </DropdownMenuItem>
-            <DropdownMenuItem tone="danger" onSelect={() => void remove()}>
-              <Trash2 /> 删除这一步
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Button size="sm" variant="primary" className="ml-auto" disabled={busy} onClick={askAssistant}>
-          {failed ? words.fixStep : words.askStep}
-        </Button>
-      </div>
+      <footer className="flex shrink-0 items-center gap-2 border-t px-4 py-2.5">
+        {live ? (
+          <>
+            <Button size="sm" variant="ghost" className="-ml-2 text-muted-foreground" disabled={busy} onClick={() => void remove()}>
+              <Trash2 />
+              删除这一步
+            </Button>
+            <Button size="sm" variant="primary" className="ml-auto" disabled={busy} onClick={askAssistant}>
+              {failed ? words.fixStep : words.askStep}
+            </Button>
+          </>
+        ) : (
+          <span className="text-caption text-faint-foreground">
+            {pinned ? "再点一次这一步、或按 Esc，回到最新" : readOnly ? "单击这一步：在这一步查看" : "单击这一步：在这一步查看，改尺寸和选择"}
+          </span>
+        )}
+      </footer>
     </div>
   )
+}
+
+/** 「基于 草图1」「复制 拉伸2、孔1」: what a feature builds on. */
+function usesOf(tree: Tree, f: Feature): string | null {
+  const name = (id: string) => {
+    const x = tree.features.find((g) => g.id === id)
+    return x ? displayName(tree, x) : id
+  }
+  if (f.op === "extrude" || f.op === "revolve") return `基于 ${name(f.sketch)}`
+  if (f.op === "loft") return `截面 ${f.sketches.map(name).join("、")}`
+  if ((f.op === "linear_pattern" || f.op === "circular_pattern" || f.op === "mirror") && f.features?.length) return `复制 ${f.features.map(name).join("、")}`
+  return null
 }
 
 /** A dimension in the card: name, value; point at it to see it on the model, click to change it. */

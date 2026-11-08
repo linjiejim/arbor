@@ -8,7 +8,8 @@ import type { SceneTokens } from "./tokens"
  *
  * Surface roles:
  *   model / modelDark / metal / glass   resting geometry
- *   highlight                           faces created by the current step
+ *   highlight / hovered                 selection / pointer hover
+ *   added / modified                    opt-in step changes
  *   ghost                               geometry from later steps (preview)
  * Line roles:
  *   edge / edgeSoft (tangent edges) / edgeGhost / edgeHighlight
@@ -31,6 +32,8 @@ export class MaterialKit {
     side: THREE.DoubleSide,
   })
   readonly highlight = this.surface({ roughness: 0.5, metalness: 0, emissiveIntensity: 0.22 })
+  readonly hovered = this.surface({ roughness: 0.6, metalness: 0 })
+  readonly added = this.surface({ roughness: 0.5, metalness: 0 })
   readonly modified = this.surface({ roughness: 0.5, metalness: 0, emissiveIntensity: 0.18 })
   // Pushed back in depth so it never shimmers over coincident resting faces.
   readonly ghost = new THREE.MeshStandardMaterial({
@@ -92,6 +95,8 @@ export class MaterialKit {
     this.modelDark.color.copy(t.modelDark)
     this.metal.color.copy(t.metal)
     this.glass.color.copy(t.dark ? t.edgeSoft : t.ghost)
+    this.hovered.color.copy(t.hover)
+    this.added.color.copy(t.good)
     this.highlight.color.copy(t.highlight)
     this.highlight.emissive.copy(t.highlight)
     this.modified.color.copy(t.modified)
@@ -112,7 +117,7 @@ export class MaterialKit {
     this.construction.color.copy(t.edgeSoft)
     this.dimension.color.copy(t.defined)
     this.path.color.copy(t.sketch)
-    for (const m of [this.model, this.modelDark, this.metal, this.highlight, this.modified]) (m.userData.uCut as { value: THREE.Color }).value.copy(t.cut)
+    for (const m of [this.model, this.modelDark, this.metal, this.hovered, this.added, this.highlight, this.modified]) (m.userData.uCut as { value: THREE.Color }).value.copy(t.cut)
   }
 
   setResolution(w: number, h: number) {
@@ -128,7 +133,7 @@ export class MaterialKit {
     this.clipping.length = 0
     if (plane) this.clipping.push(plane)
     const on = !!plane
-    for (const m of [this.model, this.modelDark, this.metal, this.highlight, this.modified, this.glass, this.edge, this.edgeSoft, this.edgeHighlight]) {
+    for (const m of [this.model, this.modelDark, this.metal, this.hovered, this.added, this.highlight, this.modified, this.glass, this.edge, this.edgeSoft, this.edgeHighlight]) {
       m.clippingPlanes = on ? this.clipping : null
       if (m instanceof THREE.MeshStandardMaterial) m.side = on ? THREE.DoubleSide : THREE.FrontSide
       m.needsUpdate = this.sectionOn !== on

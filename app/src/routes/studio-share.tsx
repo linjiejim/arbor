@@ -91,6 +91,7 @@ function SharedStudio({ snap, onDeleted }: { snap: SharedSnapshot; onDeleted: ()
   const studio = useStudio(snap.tree)
   const annotations = useAnnotations(studio)
   const [hover, setHover] = React.useState<Hover | null>(null)
+  const [stepSlot, setStepSlot] = React.useState<HTMLDivElement | null>(null)
   const panel = usePanelWidth()
   const ready = studio.kernel.phase === "ready"
   const [token] = React.useState(() => shareToken(snap.id))
@@ -149,7 +150,7 @@ function SharedStudio({ snap, onDeleted }: { snap: SharedSnapshot; onDeleted: ()
       <div className="flex min-h-0 flex-1 max-lg:flex-col">
         <main className="relative min-h-0 min-w-0 flex-1">
           <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={false} readOnly />
-          <TreeOverlay studio={studio} onHover={setHover} readOnly />
+          <TreeOverlay studio={studio} onHover={setHover} readOnly detailsIn={stepSlot} />
         </main>
         <ConnectorOverlay param={hover?.param ?? null} row={hover?.row ?? null} />
         <Tabs
@@ -172,6 +173,8 @@ function SharedStudio({ snap, onDeleted }: { snap: SharedSnapshot; onDeleted: ()
           <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
             <CodePanel studio={studio} />
           </TabsContent>
+          {/* A step's details from the timeline cover this panel while shown. */}
+          <div ref={setStepSlot} className="pointer-events-none absolute inset-0 z-20" />
         </Tabs>
       </div>
 

@@ -12,7 +12,7 @@ export function startEngine(opts: { distDir: URL; screen?: () => Screen | null; 
   const kernel = new ThreadKernel(new URL("kernel/kernel-thread.mjs", opts.distDir), () => {
     opts.onKernel?.()
     engine?.kernelChanged()
-  })
+  }, (display) => engine?.kernelPreview(display), (path, report) => engine?.kernelDiagnostics(path, report))
   engine = new Engine({ kernel, files: nodeFiles, screen: opts.screen, recent: readRecent(), onRecent: writeRecent, home: os.homedir() })
   return { engine, kernel }
 }

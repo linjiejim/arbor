@@ -1,16 +1,19 @@
+import { MousePointer2, MessageSquarePlus } from "lucide-react"
 import * as React from "react"
 import { ArrowLeftRight, Expand, Ruler, RulerDimensionLine, ScissorsLineDashed, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { IconButton } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
-import { Tooltip } from "@/components/ui/tooltip"
+import { Hint } from "@/components/hint"
 import type { MeasureResult } from "../kernel/measure"
 import { AXIS_INDEX, newSection, round, type Section } from "../section"
 
 type V3 = [number, number, number]
 
-/** The tools column under the view cube: measure and section. */
+/** The tools column on the left edge of the view: measure, section, dimensions, explode; panels open beside it. */
 export function ViewTools({
+  annotation,
+  onAnnotation,
   measuring,
   onMeasuring,
   section,
@@ -21,7 +24,10 @@ export function ViewTools({
   explode,
   onExplode,
   onExplodeEnd,
+  tips,
 }: {
+  annotation?: boolean
+  onAnnotation?: (on: boolean) => void
   measuring: boolean
   onMeasuring: (on: boolean) => void
   section: Section | null
@@ -34,45 +40,74 @@ export function ViewTools({
   explode: number | null
   onExplode: (f: number) => void
   onExplodeEnd: () => void
+  /** 「视图怎么用」 under the tools. */
+  tips: string[]
 }) {
   const [exploding, setExploding] = React.useState(false)
+  const on = "bg-selected text-primary"
   return (
     <>
-      <div className="absolute top-40 right-3 flex flex-col gap-1 rounded-md border bg-background/90 p-0.5">
-        <Tooltip content="测量：点一个面或边看尺寸，再点一个看两者之间" side="left">
-          <IconButton label="测量" size="icon-sm" aria-pressed={measuring} className={cn(measuring && "bg-selected text-primary")} onClick={() => onMeasuring(!measuring)}>
-            <RulerDimensionLine />
-          </IconButton>
-        </Tooltip>
-        <Tooltip content="剖视：切开看里面" side="left">
-          <IconButton label="剖视" size="icon-sm" aria-pressed={!!section} className={cn(section && "bg-selected text-primary")} disabled={!bbox} onClick={() => onSection(section ? null : newSection(bbox))}>
-            <ScissorsLineDashed />
-          </IconButton>
-        </Tooltip>
-        <Tooltip content={dims.total > dims.shown ? `显示尺寸：标出主要的 ${dims.shown} / ${dims.total} 个，单击可以改` : "显示尺寸：标出模型的尺寸，单击可以改"} side="left">
-          <IconButton label="显示尺寸" size="icon-sm" aria-pressed={dims.on} className={cn(dims.on && "bg-selected text-primary")} disabled={!dims.total} onClick={() => onDims(!dims.on)}>
-            <Ruler />
-          </IconButton>
-        </Tooltip>
-        <Tooltip content={explode === null ? "爆炸：拆件以后可以把零件分开看" : "爆炸：把零件分开看"} side="left">
-          <IconButton
-            label="爆炸"
-            size="icon-sm"
-            aria-pressed={exploding}
-            className={cn(exploding && "bg-selected text-primary")}
-            disabled={explode === null}
-            onClick={() => {
-              if (exploding) onExplode(0)
-              setExploding(!exploding)
-            }}
-          >
-            <Expand />
-          </IconButton>
-        </Tooltip>
+      <div className="absolute top-3 left-3 z-10 flex flex-col items-center gap-1 rounded-md border bg-background/90 p-0.5">
+        {onAnnotation && <>
+          <IconButton label="查看与选择" tooltipSide="right" size="icon-sm" aria-pressed={!annotation && !measuring} className={cn(!annotation && !measuring && on)} onClick={() => { onAnnotation(false); onMeasuring(false) }}><MousePointer2 /></IconButton>
+          <IconButton label="标注" tooltipSide="right" size="icon-sm" aria-pressed={annotation} className={cn(annotation && on)} onClick={() => { onAnnotation(!annotation); onMeasuring(false) }}><MessageSquarePlus /></IconButton>
+        </>}
+        <IconButton
+          label="测量"
+          tooltip="测量：点一个面或边看尺寸，再点一个看两者之间"
+          tooltipSide="right"
+          size="icon-sm"
+          aria-pressed={measuring}
+          className={cn(measuring && on)}
+          onClick={() => { onAnnotation?.(false); onMeasuring(!measuring) }}
+        >
+          <RulerDimensionLine />
+        </IconButton>
+        <IconButton
+          label="剖视"
+          tooltip="剖视：切开看里面"
+          tooltipSide="right"
+          size="icon-sm"
+          aria-pressed={!!section}
+          className={cn(section && on)}
+          disabled={!bbox}
+          onClick={() => onSection(section ? null : newSection(bbox))}
+        >
+          <ScissorsLineDashed />
+        </IconButton>
+        <IconButton
+          label="显示尺寸"
+          tooltip={dims.total > dims.shown ? `显示尺寸：标出主要的 ${dims.shown} / ${dims.total} 个，单击可以改` : "显示尺寸：标出模型的尺寸，单击可以改"}
+          tooltipSide="right"
+          size="icon-sm"
+          aria-pressed={dims.on}
+          className={cn(dims.on && on)}
+          disabled={!dims.total}
+          onClick={() => onDims(!dims.on)}
+        >
+          <Ruler />
+        </IconButton>
+        <IconButton
+          label="爆炸"
+          tooltip={explode === null ? "爆炸：拆件以后可以把零件分开看" : "爆炸：把零件分开看"}
+          tooltipSide="right"
+          size="icon-sm"
+          aria-pressed={exploding}
+          className={cn(exploding && on)}
+          disabled={explode === null}
+          onClick={() => {
+            if (exploding) onExplode(0)
+            setExploding(!exploding)
+          }}
+        >
+          <Expand />
+        </IconButton>
+        <div className="my-0.5 h-px w-5 bg-border" />
+        <Hint step={3} label="视图怎么用" side="right" align="start" className="mb-1" tips={tips} />
       </div>
       {section && bbox && <SectionPanel section={section} onChange={onSection} bbox={bbox} />}
       {exploding && explode !== null && (
-        <div role="group" aria-label="爆炸" className="absolute right-14 top-40 flex w-56 flex-col gap-2 rounded-md border bg-background/95 p-2.5 text-small shadow-popover">
+        <div role="group" aria-label="爆炸" className={cn(PANEL, section && "top-36")}>
           <div className="flex items-center gap-2">
             <span className="font-medium">爆炸</span>
             <span className="ml-auto font-mono text-caption tabular text-muted-foreground">{Math.round(explode * 100)}%</span>
@@ -105,12 +140,15 @@ export function ViewTools({
   )
 }
 
+/** A tool's panel, beside the tools column. */
+const PANEL = "absolute top-3 left-14 z-10 flex w-56 flex-col gap-2 rounded-md border bg-background/95 p-2.5 text-small shadow-popover"
+
 function SectionPanel({ section, onChange, bbox }: { section: Section; onChange: (s: Section | null) => void; bbox: [V3, V3] }) {
   const i = AXIS_INDEX[section.axis]
   const [lo, hi] = [bbox[0][i], bbox[1][i]]
   const pad = Math.max(0.5, (hi - lo) * 0.02)
   return (
-    <div role="group" aria-label="剖视" className="absolute right-14 top-40 flex w-56 flex-col gap-2 rounded-md border bg-background/95 p-2.5 text-small shadow-popover">
+    <div role="group" aria-label="剖视" className={PANEL}>
       <div className="flex items-center gap-2">
         <span className="font-medium">剖视</span>
         <Segmented

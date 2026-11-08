@@ -214,6 +214,8 @@ export async function executeTool(port: KernelPort, tree: Tree, name: string, in
 
 /** One line per requirement: 「✓ size「80×50×30」：实际 80 × 50 × 30」. */
 export function checkText(report: BuildReport) {
+  if (report.checksPending) return "装配已生成，精确检查正在后台进行。"
+  if (report.checksError) return `精确检查失败：${report.checksError}`
   const rows = report.checks ?? []
   if (!rows.length) return "没有核对项。"
   const failed = rows.filter((r) => !r.pass && !r.invalid).length
@@ -277,5 +279,5 @@ export function treeText(tree: Tree, report: BuildReport) {
     const warn = r?.warnings?.length ? `（⚠ ${r.warnings.join("；")}）` : ""
     return `${i + 1}. ${mark} ${f.id}（${displayName(tree, f)}，${OP_NAMES[f.op as FeatureOp]}）${r?.summary ? `：${r.summary}` : ""}${warn}${msg}${why}`
   })
-  return [`参数：${params || "无"}`, ...(rows.length ? rows : ["（特征树是空的）"]), bodyLine(report)].join("\n")
+  return [`参数：${params || "无"}`, ...(rows.length ? rows : ["（特征树是空的）"]), bodyLine(report), ...(report.checksPending ? ["精确检查正在后台进行，可以继续查看和编辑。"] : [])].join("\n")
 }

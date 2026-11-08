@@ -7,6 +7,8 @@ type V3 = [number, number, number]
 
 /** What the kernel says about a clicked face or edge of the latest body. */
 export type PickInfo = {
+  /** Stable assembly instance name; the stored point stays in assembled coordinates. */
+  part?: string
   kind: "face" | "edge"
   /** Mesh hash of the face / edge, to highlight it in the viewport. */
   hash: number
@@ -37,6 +39,7 @@ const Short = z.string().max(300)
 
 /** As stored in the user message's metadata (and checked again on the server). */
 export const Annotation = z.object({
+  part: z.string().max(300).optional(),
   n: z.number().int().min(1).max(20),
   note: z.string().max(600),
   kind: z.enum(["face", "edge"]),

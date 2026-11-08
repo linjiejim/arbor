@@ -14,7 +14,7 @@ import { circled, type PickInfo } from "../annotations"
 import type { DisplayData } from "../kernel/build"
 import type { MeasureResult, MeasureTarget } from "../kernel/measure"
 import type { Pin } from "../look"
-import { edgeHighlight, groupAt, modelObject, NO_PARTS_VIEW, repaint, type Hover, type Paint, type PartsView } from "../scene"
+import { edgeHighlight, groupAt, faceTarget, partOffset, partVisible, modelObject, NO_PARTS_VIEW, repaint, type Hover, type Paint, type PartsView } from "../scene"
 import type { Annotations } from "../use-annotations"
 import type { Studio } from "../use-studio"
 import type { Reselect } from "../use-reselect"
@@ -24,7 +24,6 @@ import { declutter, dimensionLayer, dimParam } from "../dimension-layer"
 import type { Dim } from "../kernel/dims"
 import { DimEditor } from "./dim-editor"
 import { MeasurePanel, ViewTools } from "./viewport-tools"
-import { Hint } from "@/components/hint"
 import { useWords } from "./host-words"
 
 type V3 = [number, number, number]
@@ -56,6 +55,13 @@ export function StudioViewport({
   parts = NO_PARTS_VIEW,
   onParts,
   readOnly = false,
+  annotation = true,
+  onAnnotation,
+  onPointFeature,
+  onSelectFeature,
+  onPresented,
+  selectedParts = [],
+  onLocateStep,
   copy,
 }: {
   studio: Studio
@@ -68,6 +74,13 @@ export function StudioViewport({
   parts?: PartsView
   onParts?: (v: PartsView) => void
   /** A shared link: measure and section, but no annotating (there is no chat to send it to). */
+  annotation?: boolean
+  onAnnotation?: (on: boolean) => void
+  onPointFeature?: (id: string | null, part?: number) => void
+  onSelectFeature?: (id: string | null, part?: number, additive?: boolean) => void
+  onPresented?: (display: DisplayData) => void
+  selectedParts?: number[]
+  onLocateStep?: () => void
   readOnly?: boolean
   copy?: ViewportCopy
 }) {
@@ -166,13 +179,13 @@ export function StudioViewport({
     return () => setViewer(null)
   }, [])
 
+  const [showChanges, setShowChanges] = React.useState(false)
   const paint = React.useMemo<Paint>(() => {
     if (rs) return { status: false, faces: rs.kind === "face" ? rs.hashes : [] }
     if (measuring && picked.length) return { status: false, faces: picked.filter((t) => t.kind === "face").map((t) => t.hash) }
     if (focus) return { status: false, faces: focus.kind === "face" ? focus.hashes : [] }
-    if (hover?.faces?.length || hover?.edges?.length) return { status: false, faces: hover.faces ?? [] }
-    return { status: true, highlight: hover?.ids.length ? hover.ids : undefined }
-  }, [focus, hover, measuring, picked, rs])
+    return { status: showChanges, selected: selectedParts, hovered: hover?.faces ?? display?.groups.filter((g) => hover?.ids.includes(g.origin)).map((g) => g.hash) }
+  }, [focus, hover, measuring, picked, rs, selectedParts, showChanges, display])
   const edgeHashes = React.useMemo(
     () => (rs ? (rs.kind === "edge" ? rs.hashes : []) : hover?.edges?.length ? hover.edges : measuring ? picked.filter((t) => t.kind === "edge").map((t) => t.hash) : focus?.kind === "edge" ? focus.hashes : []),
     [measuring, picked, focus, rs, hover],
@@ -182,12 +195,18 @@ export function StudioViewport({
     paintRef.current = paint
   }, [paint])
 
-  const view = display?.parts && !rs ? parts : NO_PARTS_VIEW
+  const view = React.useMemo(() => {
+    if (!display?.parts || rs) return NO_PARTS_VIEW
+    if (!parts.focus) return parts
+    const names = parts.focus.parts.filter((name) => display.parts!.some((p) => p.name === name))
+    return names.length === parts.focus.parts.length ? parts : { ...parts, focus: names.length ? { ...parts.focus, parts: names } : undefined }
+  }, [display, rs, parts])
   React.useEffect(() => {
     if (!viewer || !display) return
     const g = modelObject(display, viewer.kit, paintRef.current, view)
     viewer.setContent(g)
     current.current = g
+    const stop = viewer.onRendered(() => { stop(); onPresented?.(display) })
     if (display.bbox) {
       const box = new THREE.Box3(new THREE.Vector3(...display.bbox[0]), new THREE.Vector3(...display.bbox[1]))
       const size = box.getSize(new THREE.Vector3()).length()
@@ -197,7 +216,8 @@ export function StudioViewport({
         fittedSize.current = size
       }
     } else fittedSize.current = 0
-  }, [viewer, display, view])
+    return stop
+  }, [viewer, display, view, onPresented])
 
   // Frame the pulled-apart parts once the learner lets go of the explode slider.
   const frameExploded = React.useCallback(() => {
@@ -216,7 +236,7 @@ export function StudioViewport({
   // Highlighted edges: thick lines over the model.
   React.useEffect(() => {
     if (!viewer || !display || !edgeHashes.length) return
-    const lines = edgeHighlight(display, edgeHashes, viewer.kit)
+    const lines = edgeHighlight(display, edgeHashes, viewer.kit, view)
     if (!lines) return
     viewer.scene.add(lines)
     viewer.invalidate()
@@ -226,7 +246,7 @@ export function StudioViewport({
       ;((lines as THREE.Mesh).material as THREE.Material).dispose()
       viewer.invalidate()
     }
-  }, [viewer, display, edgeHashes])
+  }, [viewer, display, edgeHashes, view])
 
   // The shortest segment between two measured items, with its length on it.
   const segment = result?.segment
@@ -311,10 +331,15 @@ export function StudioViewport({
   // Numbered pins: annotations in the composer and of the message being answered, the draft, a located one.
   const pins = React.useMemo(() => {
     const out: (Pin & { tone: "solid" | "draft" | "ghost" })[] = annotations.pins.map((p) => ({ ...p, tone: "solid" }))
-    if (draft) out.push({ n: nextPin, point: draft.point, tone: "draft" })
+    if (draft) out.push({ n: nextPin, point: draft.point, part: draft.part, tone: "draft" })
     if (focus?.pin) out.push({ ...focus.pin, tone: "ghost" })
-    return out
-  }, [annotations.pins, nextPin, draft, focus])
+    return out.flatMap((pin) => {
+      const index = pin.part ? display?.parts?.findIndex((p) => p.name === pin.part) : undefined
+      if (display && index !== undefined && index >= 0 && !partVisible(display, view, index)) return []
+      const offset = display ? partOffset(display, view, index) : [0, 0, 0]
+      return [{ ...pin, point: pin.point.map((v, k) => v + offset[k]) as V3 }]
+    })
+  }, [annotations.pins, nextPin, draft, focus, display, view])
 
   React.useEffect(() => {
     if (!viewer) return
@@ -352,14 +377,17 @@ export function StudioViewport({
 
   const words = useWords()
   const busyText = copy?.busy ?? `${words.helper}正在改模型，这一轮结束后再标注`
-  const latest = React.useRef({ studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly })
+  const latest = React.useRef({ studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature, view })
+  const pickRevision = React.useRef(0)
+  React.useEffect(() => { pickRevision.current++ }, [annotation, measuring, display, view, busy])
   React.useEffect(() => {
-    latest.current = { studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly }
-  }, [studio, busy, busyText, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly])
+    latest.current = { studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature, view }
+  }, [studio, busy, busyText, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature, view])
 
   React.useEffect(() => {
     if (!viewer) return
     const canvas = viewer.renderer.domElement
+    const revisions = pickRevision
     const press: { at: { x: number; y: number } | null } = { at: null }
     const onDown = (e: PointerEvent) => {
       press.at = e.button === 0 ? { x: e.clientX, y: e.clientY } : null
@@ -370,41 +398,90 @@ export function StudioViewport({
       if (at && Math.hypot(e.clientX - at.x, e.clientY - at.y) <= CLICK_PX) void onClick(e)
     }
     const onClick = async (e: PointerEvent) => {
+      const revision = ++pickRevision.current
       const { studio: s, busy: isBusy, busyText: whyBusy, display: d, open, cancel, measuring: isMeasuring, plane: cut, reselect: rsel } = latest.current
-      if (current.current?.userData.partsMode) return notify("零件炸开或隐藏时不能点选：把爆炸拖回 0，并显示全部零件")
+      if (!latest.current.annotation && !isMeasuring && !rsel?.state) {
+        const meshes = current.current?.children.filter((c) => (c as THREE.Mesh).isMesh && !c.userData.reference) ?? []
+        const hit = pickVisible(viewer, e, meshes, cut)
+        const group = hit ? groupAt(hit) : null
+        latest.current.onSelectFeature?.(group?.origin ?? null, group?.part, e.shiftKey)
+        return
+      }
+      if (isBusy) return notify(whyBusy)
+      if (isMeasuring && latest.current.view.explode > 0) return notify("测量使用装配位置：先把爆炸拖回 0。爆炸状态仍可选件和标注。")
       // The model's own mesh (not a see-through reference body, which can't be picked).
-      const mesh = current.current?.children.find((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh && !c.userData.reference)
-      if (!d?.mesh || !mesh || s.kernel.phase !== "ready") return
-      const { edge, face } = pickTargets(viewer, d, mesh, e, cut)
+      const meshes = current.current?.children.filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh && !c.userData.reference) ?? []
+      if (!d?.mesh || !meshes.length || s.kernel.phase !== "ready") return
+      const { edge, face } = pickTargets(viewer, d, meshes, e, cut, latest.current.view)
       if (rsel?.state) return void rsel.toggle({ edge: edge?.hash ?? null, face: face?.hash ?? null })
       if (isMeasuring) {
         if (s.rollback) return notify("先回到最新一步，再测量")
         if (!edge && !face) return setPicked([])
         // Same rule as annotating: a fillet's tangent line means the face under the pointer.
         const info = edge ? await s.pick("edge", edge.hash, edge.point) : null
+        if (revision !== pickRevision.current) return
         const t: MeasureTarget = edge && info && !info.smooth ? { kind: "edge", ...edge } : face ? { kind: "face", ...face } : { kind: "edge", ...edge! }
         setPicked((p) => (p.some((x) => x.kind === t.kind && x.hash === t.hash) ? p.filter((x) => x.hash !== t.hash) : p.length >= 2 ? [t] : [...p, t]))
         return
       }
       if (!edge && !face) return cancel()
       if (latest.current.readOnly) return
-      if (isBusy) return notify(whyBusy)
       if (s.rollback) return notify("先回到最新一步，再在模型上标注")
       let info = edge ? await s.pick("edge", edge.hash, edge.point) : null
       // A fillet's tangent line looks like an edge but has no corner: the face under the pointer is what's meant.
       if ((!info || info.smooth) && face) info = (await s.pick("face", face.hash, face.point)) ?? info
-      if (info) open(info)
+      if (revision !== pickRevision.current) return
+      if (info) {
+        const part = (info.kind === "face" ? d.groups : d.edgeGroups).find((g) => g.hash === info.hash)?.part
+        open({ ...info, part: part === undefined ? undefined : d.parts?.[part]?.name })
+      }
     }
+    const hoverFrame = { current: 0 }
+    const onMove = (e: PointerEvent) => {
+      cancelAnimationFrame(hoverFrame.current)
+      hoverFrame.current = requestAnimationFrame(() => {
+        if (e.buttons || !latest.current.onPointFeature || latest.current.annotation) return
+        const meshes = current.current?.children.filter((c) => (c as THREE.Mesh).isMesh && !c.userData.reference) ?? []
+        const hit = pickVisible(viewer, e, meshes, latest.current.plane)
+        const group = hit ? groupAt(hit) : null
+        latest.current.onPointFeature(group?.origin ?? null, group?.part)
+      })
+    }
+    const onLeave = () => { cancelAnimationFrame(hoverFrame.current); latest.current.onPointFeature?.(null) }
+    canvas.addEventListener("pointermove", onMove)
+    canvas.addEventListener("pointerleave", onLeave)
     canvas.addEventListener("pointerdown", onDown)
     canvas.addEventListener("pointerup", onUp)
     return () => {
+      revisions.current++
+      cancelAnimationFrame(hoverFrame.current)
+      canvas.removeEventListener("pointermove", onMove)
+      canvas.removeEventListener("pointerleave", onLeave)
       canvas.removeEventListener("pointerdown", onDown)
       canvas.removeEventListener("pointerup", onUp)
     }
   }, [viewer])
 
+  const selectionNames = selectedParts.flatMap((i) => display?.parts?.[i] ? [display.parts[i].name] : [])
+  const focusMatches = !!view.focus && selectionNames.length === view.focus.parts.length && selectionNames.every((n) => view.focus!.parts.includes(n))
   return (
-    <Viewport className="absolute inset-0" onReady={onReady}>
+    <Viewport className="absolute inset-0" onReady={onReady} triadBesideCube>
+      <div className="absolute top-3 right-44 z-20 flex items-center gap-2 rounded-md border bg-background/95 p-1 text-caption">
+        <Button size="sm" variant={showChanges ? "secondary" : "ghost"} aria-pressed={showChanges} onClick={() => setShowChanges((v) => !v)}>查看变更</Button>
+        {showChanges && <span className="pr-2">新增：绿色 · 修改：橙色</span>}
+      </div>
+      {onParts && display?.parts && (selectedParts.length > 0 || view.focus) && (
+        <div role="toolbar" aria-label="选中零件" className="absolute bottom-24 left-3 z-20 flex max-w-[calc(100%_-_1.5rem)] flex-wrap items-center gap-1 rounded-md border bg-background/95 p-1 shadow-popover">
+          <span className="max-w-40 truncate px-2 text-caption" title={selectionNames.join("、")}>
+            {selectionNames.length > 1 ? `已选 ${selectionNames.length} 个零件` : selectionNames[0] ?? `${view.focus?.mode === "ghost" ? "保留实体" : "已隔离"} ${view.focus?.parts.length ?? 0} 个零件`}
+          </span>
+          <Button size="sm" variant={focusMatches && view.focus?.mode === "isolate" ? "secondary" : "ghost"} aria-pressed={focusMatches && view.focus?.mode === "isolate"} disabled={!selectionNames.length} onClick={() => onParts({ ...view, focus: focusMatches && view.focus?.mode === "isolate" ? undefined : { parts: selectionNames, mode: "isolate" } })}>隔离零件</Button>
+          <Button size="sm" variant={focusMatches && view.focus?.mode === "ghost" ? "secondary" : "ghost"} aria-pressed={focusMatches && view.focus?.mode === "ghost"} disabled={!selectionNames.length} onClick={() => onParts({ ...view, focus: focusMatches && view.focus?.mode === "ghost" ? undefined : { parts: selectionNames, mode: "ghost" } })}>其余透明</Button>
+          <Button size="sm" variant="ghost" disabled={!onLocateStep} onClick={onLocateStep}>定位步骤</Button>
+          {selectionNames.length > 0 && <Button size="sm" variant="ghost" onClick={() => onSelectFeature?.(null)}>清除选择</Button>}
+          {view.focus && <Button size="sm" variant="ghost" onClick={() => onParts({ ...view, focus: undefined })}>恢复显示</Button>}
+        </div>
+      )}
       {kernel.phase === "loading" && (
         <div className="absolute inset-0 grid place-items-center">
           <div className="flex items-center gap-2 rounded-md border bg-background px-4 py-3 text-body">
@@ -428,6 +505,8 @@ export function StudioViewport({
       {measuring && <MeasurePanel result={result} count={picked.length} onClose={stopMeasuring} />}
       {display?.mesh && kernel.phase === "ready" && !rs && (
         <ViewTools
+          annotation={annotation}
+          onAnnotation={onAnnotation ? (on) => { onAnnotation(on); annotations.cancel(); onPointFeature?.(null) } : undefined}
           measuring={measuring}
           onMeasuring={(on) => {
             if (on) annotations.cancel()
@@ -442,44 +521,17 @@ export function StudioViewport({
           explode={display.parts && display.parts.length > 1 ? parts.explode : null}
           onExplode={(explode) => onParts?.({ ...parts, explode })}
           onExplodeEnd={frameExploded}
+          tips={[
+            ...(readOnly || copy?.hint === null ? [] : [`${copy?.hint ?? "单击模型上的面或边，标注要改的地方"}。`]),
+            "拖动右上角的方块转动视角；点它的面、棱或角，转到对应的视图。",
+            "这一列工具可以测量、剖开看、标尺寸、把零件分开看。",
+          ]}
         />
       )}
       {rs && (
         <div role="status" className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border border-primary bg-background/95 px-2.5 py-1 text-center text-caption text-foreground">
           现在显示的是「{displayName(studio.tree, studio.tree.features[rs.index])}」之前的样子：
           {rs.kind === "edge" ? "点要选的边，再点一次取消；点一个面等于选它的一圈边" : "点要选的面，再点一次取消"}。Esc 退出
-        </div>
-      )}
-      {display?.mesh && !measuring && (
-        <div className="pointer-events-none absolute right-3 bottom-3 flex items-center gap-3 rounded-md border bg-background/90 py-1.5 pr-1.5 pl-3 text-caption text-muted-foreground">
-          {focus ? (
-            <span className="flex items-center gap-1.5">
-              <span className="size-2.5 rounded-xs bg-primary" /> 标注选中的{focus.kind === "face" ? "面" : "边"}
-            </span>
-          ) : (
-            <>
-              <span className="flex items-center gap-1.5">
-                <span className="size-2.5 rounded-xs bg-primary" /> {hover?.ids.length ? hover.label : "这一步新生成"}
-              </span>
-              {!hover?.ids.length && (
-                <span className="flex items-center gap-1.5">
-                  <span className="size-2.5 rounded-xs bg-scene-modified" /> 被修改
-                </span>
-              )}
-            </>
-          )}
-          <Hint
-            step={3}
-            label="视图怎么用"
-            side="top"
-            align="end"
-            className="pointer-events-auto"
-            tips={[
-              ...(readOnly || copy?.hint === null ? [] : [`${copy?.hint ?? "单击模型上的面或边，标注要改的地方"}。`]),
-              "蓝色是这一步新生成的面，橙色是被这一步修改的面。",
-              "右侧的工具可以标尺寸、剖开看、测量。",
-            ]}
-          />
         </div>
       )}
       {editingDim && !busy && (
@@ -490,6 +542,7 @@ export function StudioViewport({
           key={`${draft.kind}-${draft.hash}-${draft.point.join(",")}`}
           viewer={viewer}
           draft={draft}
+          offset={display ? partOffset(display, view, display.parts?.findIndex((p) => p.name === draft.part)) : [0, 0, 0]}
           n={nextPin}
           addLabel={copy?.add ?? "加到消息"}
           onAdd={annotations.add}
@@ -526,19 +579,24 @@ function useHeldHover(hover: Hover | null) {
 
 type Target = { hash: number; point: V3 }
 
+/** Prefer solid geometry behind transparent context; context remains selectable in empty space. */
+function pickVisible(viewer: Viewer, e: PointerEvent, meshes: THREE.Object3D[], cut: THREE.Plane | null) {
+  const accept = (h: THREE.Intersection, ray: THREE.Ray) => (!cut || cut.distanceToPoint(h.point) >= -1e-6) && (!cut || !h.face || h.face.normal.dot(ray.direction) < 0)
+  return viewer.pick(e, meshes.filter((m) => !m.userData.contextGhost), false, accept) ?? viewer.pick(e, meshes, false, accept)
+}
+
 /**
  * The face under the pointer, and an edge within a few pixels of it that isn't hidden behind that face.
  * With a section on, what the plane cut away can't be picked, nor the back faces seen through the cut.
  */
-function pickTargets(viewer: Viewer, d: DisplayData, mesh: THREE.Mesh, e: PointerEvent, cut: THREE.Plane | null = null): { edge: Target | null; face: Target | null } {
+function pickTargets(viewer: Viewer, d: DisplayData, meshes: THREE.Mesh[], e: PointerEvent, cut: THREE.Plane | null = null, view: PartsView = NO_PARTS_VIEW): { edge: Target | null; face: Target | null } {
   const kept = (p: THREE.Vector3) => !cut || cut.distanceToPoint(p) >= -1e-6
-  const hit = viewer.pick(e, [mesh], false, (h, ray) => kept(h.point) && (!cut || !h.face || h.face.normal.dot(ray.direction) < 0))
-  const edge = nearestEdge(viewer, d, e, e.pointerType === "touch" ? 14 : 8, hit?.distance, kept)
-  const g = hit && groupAt(hit)
-  return { edge, face: hit && g ? { hash: g.hash, point: hit.point.toArray() as V3 } : null }
+  const hit = pickVisible(viewer, e, meshes, cut)
+  const edge = nearestEdge(viewer, d, e, e.pointerType === "touch" ? 14 : 8, hit?.distance, kept, view, hit ? groupAt(hit)?.part : undefined)
+  return { edge, face: hit ? faceTarget(hit) : null }
 }
 
-function nearestEdge(viewer: Viewer, d: DisplayData, e: PointerEvent, maxPx: number, faceDistance?: number, kept: (p: THREE.Vector3) => boolean = () => true) {
+function nearestEdge(viewer: Viewer, d: DisplayData, e: PointerEvent, maxPx: number, faceDistance?: number, kept: (p: THREE.Vector3) => boolean = () => true, view: PartsView = NO_PARTS_VIEW, hitPart?: number) {
   const pts = d.edges
   if (!pts) return null
   const rect = viewer.renderer.domElement.getBoundingClientRect()
@@ -551,9 +609,11 @@ function nearestEdge(viewer: Viewer, d: DisplayData, e: PointerEvent, maxPx: num
   const slack = faceDistance !== undefined ? Math.max(0.5, faceDistance * 0.02) : Infinity
   let best: { hash: number; point: V3; px: number } | null = null
   for (const g of d.edgeGroups) {
+    if (g.part !== undefined && (!partVisible(d, view, g.part) || (hitPart !== undefined && g.part !== hitPart))) continue
+    const offset = new THREE.Vector3(...partOffset(d, view, g.part))
     for (let i = g.start; i + 1 < g.start + g.count; i += 2) {
-      a.fromArray(pts, i * 3)
-      b.fromArray(pts, (i + 1) * 3)
+      a.fromArray(pts, i * 3).add(offset)
+      b.fromArray(pts, (i + 1) * 3).add(offset)
       const pa = viewer.project(a)
       const pb = viewer.project(b)
       if (pa.behind || pb.behind) continue
@@ -566,7 +626,7 @@ function nearestEdge(viewer: Viewer, d: DisplayData, e: PointerEvent, maxPx: num
       const p = a.clone().lerp(b, t)
       if (!kept(p)) continue
       if (faceDistance !== undefined && p.distanceTo(cam) > faceDistance + slack) continue
-      best = { hash: g.hash, point: p.toArray() as V3, px }
+      best = { hash: g.hash, point: p.sub(offset).toArray() as V3, px }
     }
   }
   return best && { hash: best.hash, point: best.point }
@@ -575,6 +635,7 @@ function nearestEdge(viewer: Viewer, d: DisplayData, e: PointerEvent, maxPx: num
 /** The note card next to a fresh pick. Hidden while the camera moves, then placed again. */
 function AnnotationCard({
   viewer,
+  offset,
   draft,
   n,
   addLabel,
@@ -582,6 +643,7 @@ function AnnotationCard({
   onCancel,
 }: {
   viewer: Viewer
+  offset: V3
   draft: PickInfo
   n: number
   addLabel: string
@@ -595,10 +657,10 @@ function AnnotationCard({
 
   // Re-anchor to the pick whenever the view settles (and for a new pick).
   React.useLayoutEffect(() => {
-    const p = viewer.project(new THREE.Vector3(...draft.point))
+    const p = viewer.project(new THREE.Vector3(...draft.point).add(new THREE.Vector3(...offset)))
     const r = viewer.renderer.domElement.getBoundingClientRect()
     anchor.current = { getBoundingClientRect: () => new DOMRect(r.left + p.x, r.top + p.y, 0, 0) }
-  }, [viewer, draft, place])
+  }, [viewer, draft, place, offset])
 
   React.useEffect(() => {
     const start = () => setMoving(true)

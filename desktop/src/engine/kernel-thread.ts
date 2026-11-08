@@ -4,10 +4,11 @@
 import { parentPort } from "node:worker_threads"
 import { DirectKernel, wasmHeapMB } from "../../../app/src/desktop/core/direct-kernel"
 import { initNodeKernel } from "../../../app/src/studio/kernel/node"
+import { compileComponent, type BuildProgress, type DisplayData } from "../../../app/src/studio/kernel/build"
 
 export type KernelRequest = {
   id: number
-  op: "use" | "setAssets" | "setComponents" | "setContext" | "rebuild" | "inspect" | "display" | "pick" | "locate" | "selectorFor" | "faceEdges" | "measure" | "dimensions" | "drawing" | "exportBody"
+  op: "compileComponent" | "use" | "setAssets" | "setComponents" | "setContext" | "rebuild" | "inspect" | "display" | "pick" | "locate" | "selectorFor" | "faceEdges" | "measure" | "dimensions" | "drawing" | "exportBody"
   args: unknown[]
 }
 export type KernelReply =
@@ -15,11 +16,16 @@ export type KernelReply =
   | { id: number; ok: false; error: string }
   | { type: "ready" }
   | { type: "failed"; error: string }
+  | { type: "progress"; progress: BuildProgress }
+  | { type: "preview"; display: DisplayData }
 
 const port = parentPort!
 const post = (m: KernelReply, transfer: ArrayBuffer[] = []) => port.postMessage(m, transfer)
 
-const ready = initNodeKernel().then(() => new DirectKernel())
+const ready = initNodeKernel().then(() => new DirectKernel({
+  progress: (progress) => post({ type: "progress", progress }),
+  preview: (display) => post({ type: "preview", display }),
+}))
 ready.then(
   () => post({ type: "ready" }),
   (e) => post({ type: "failed", error: String((e as Error)?.message ?? e) }),
@@ -29,7 +35,7 @@ port.on("message", async (req: KernelRequest) => {
   try {
     const k = await ready
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result = await (k as any)[req.op](...req.args)
+    const result = req.op === "compileComponent" ? compileComponent(req.args[0] as Parameters<typeof compileComponent>[0]) : await (k as any)[req.op](...req.args)
     const transfer: ArrayBuffer[] = []
     if (req.op === "display" && result) {
       const d = result as { mesh: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array } | null; edges: Float32Array | null; sketch: Float32Array | null }

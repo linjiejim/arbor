@@ -21,7 +21,7 @@ test.describe("工作台", () => {
     const tree = page.getByRole("navigation", { name: "特征树" })
     await expect(tree.getByText("5 个特征")).toBeVisible()
     await tree.getByRole("button").nth(2).hover()
-    await expect(page.getByRole("tooltip").getByText("单击看尺寸和选择"), "hovering a feature shows its details").toBeVisible()
+    await expect(page.getByRole("tooltip").getByText("单击这一步：在这一步查看，改尺寸和选择"), "hovering a feature shows its details").toBeVisible()
     await expect(page.getByRole("status"), "the turn's status line is gone once it's done").toHaveCount(0)
     await page.getByRole("button", { name: "更多" }).click()
     await page.getByRole("menuitem", { name: "代码" }).click()
@@ -74,7 +74,8 @@ test.describe("工作台", () => {
     // Click a feature: what it did and its dimensions in words; a dimension edits in place.
     await tree.getByRole("button", { name: /螺栓孔/ }).click()
     const card = page.getByRole("dialog", { name: "「螺栓孔」" })
-    await expect(card.getByText(/第 3 步 · 孔/)).toBeVisible()
+    await expect(card.getByText("第 3 步")).toBeVisible()
+    await expect(tree.getByRole("button", { name: "回到最新" }), "clicking a step shows the model at that step").toBeVisible()
     await card.getByRole("button", { name: /螺栓孔直径/ }).click()
     await card.getByRole("textbox", { name: "螺栓孔直径" }).fill("10")
     await card.getByRole("textbox", { name: "螺栓孔直径" }).press("Enter")
@@ -82,7 +83,7 @@ test.describe("工作台", () => {
     // 「让助教改这一步」 starts a message about this step.
     await card.getByRole("button", { name: /让助教改这一步/ }).click()
     await expect(page.getByLabel("给建模助教的消息")).toHaveValue("改「螺栓孔」（h1）：")
-    await card.getByRole("button", { name: "关闭" }).click()
+    await expect(card, "the details make way for the message").toHaveCount(0)
 
     // Re-pick on the model: the view goes back to what a fillet-like step starts from.
     await page.goto("/studio?start=box-fillet-first")

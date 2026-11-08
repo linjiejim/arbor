@@ -7,7 +7,7 @@ import { modelObject } from "./scene"
 import { sectionPlane } from "./section"
 
 /** A numbered annotation pin at a point on the model. */
-export type Pin = { n: number; point: [number, number, number] }
+export type Pin = { part?: string; n: number; point: [number, number, number] }
 
 /** How to draw a set of shots: what to light up, pins, a cut, parts or reference bodies left out, picture size. */
 export type ShotOptions = { highlight?: string; pins?: Pin[]; section?: LookSection; hide?: string[]; size?: "normal" | "large" }

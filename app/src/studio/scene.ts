@@ -8,7 +8,7 @@ import type { DisplayData } from "./kernel/build"
  * How faces are coloured: by this step's status, by provenance (`highlight` =
  * feature ids), or, when `faces` is given, only those faces (by mesh hash).
  */
-export type Paint = { status: boolean; highlight?: string | string[]; faces?: number[] }
+export type Paint = { status: boolean; selected?: number[]; hovered?: number[]; highlight?: string | string[]; faces?: number[] }
 
 /** Features lit up from outside the viewport (a tree row, a parameter), and what the legend calls them. */
 export type Hover = {
@@ -34,11 +34,12 @@ export type Hover = {
 export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view: PartsView = NO_PARTS_VIEW): THREE.Group {
   const root = new THREE.Group()
   root.name = "studio-model"
-  const materials = [kit.model, kit.highlight, kit.modified, kit.ghost, kit.modelDark]
+  const materials = [kit.model, kit.highlight, kit.modified, kit.ghost, kit.modelDark, kit.hovered, kit.added]
   // Parts pulled apart or hidden: one mesh (and edge set) per part, moved along its explode vector.
-  if (d.parts && (view.explode > 0 || view.hidden.size || d.parts.some((p) => p.hidden))) {
+  if (d.parts && (view.explode > 0 || view.hidden.size || view.focus || d.parts.some((p) => p.hidden))) {
     d.parts.forEach((part, k) => {
-      if (view.hidden.has(k) || part.hidden || !d.mesh) return
+      if (!partVisible(d, view, k) || !d.mesh) return
+      const ghost = view.focus?.mode === "ghost" && !view.focus.parts.includes(part.name)
       const groups = d.groups.filter((g) => g.part === k)
       const index: number[] = []
       const own = groups.map((g) => {
@@ -51,7 +52,8 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
       geo.setAttribute("normal", new THREE.BufferAttribute(d.mesh.normals, 3))
       geo.setIndex(index)
       for (const g of own) geo.addGroup(g.start, g.count, materialIndex(g, paint))
-      const mesh = new THREE.Mesh(geo, materials)
+      const mesh = new THREE.Mesh(geo, ghost ? kit.ghost : materials)
+      mesh.userData.contextGhost = ghost
       mesh.userData.groups = own
       mesh.userData.part = k
       const at = new THREE.Vector3(...part.explode).multiplyScalar(view.explode)
@@ -62,7 +64,7 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
         for (const g of d.edgeGroups) if (g.part === k) for (let i = g.start * 3; i < (g.start + g.count) * 3; i++) pts.push(d.edges[i])
         const eg = new THREE.BufferGeometry()
         eg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3))
-        const lines = new THREE.LineSegments(eg, kit.edge)
+        const lines = new THREE.LineSegments(eg, ghost ? kit.edgeGhost : kit.edge)
         lines.position.copy(at)
         root.add(lines)
       }
@@ -138,35 +140,48 @@ function addRefs(root: THREE.Group, d: DisplayData, kit: MaterialKit) {
 }
 
 function materialIndex(g: DisplayData["groups"][number], paint: Paint) {
-  // Parts alternate between the model grey and a darker one; new / modified colours go on top.
-  const rest = g.part !== undefined && g.part % 2 === 1 ? 4 : 0
+  // A neutral white model is the default; interaction and optional changes go on top.
+  const rest = 0
+  if (g.part !== undefined && paint.selected?.includes(g.part)) return 1
+  if (paint.hovered?.includes(g.hash)) return 5
   if (paint.faces) return paint.faces.includes(g.hash) ? 1 : rest
   if (paint.highlight) return (typeof paint.highlight === "string" ? g.origin === paint.highlight : paint.highlight.includes(g.origin)) ? 1 : rest
   if (!paint.status) return rest
-  return g.status === "new" ? 1 : g.status === "modified" ? 2 : rest
+  return g.status === "new" ? 6 : g.status === "modified" ? 2 : rest
 }
 
 /** How a split body is shown: parts pulled apart (0–1 of their explode vectors) and hidden ones. */
-export type PartsView = { explode: number; hidden: Set<number> }
+export type PartsView = { explode: number; hidden: Set<number>; focus?: { parts: string[]; mode: "isolate" | "ghost" } }
 export const NO_PARTS_VIEW: PartsView = { explode: 0, hidden: new Set() }
+
+/** Visibility and translations are shared by rendering, picking and annotation pins. */
+export function partVisible(d: DisplayData, view: PartsView, index: number) {
+  const part = d.parts?.[index]
+  return !!part && !part.hidden && !view.hidden.has(index) && (view.focus?.mode !== "isolate" || view.focus.parts.includes(part.name))
+}
+export function partOffset(d: DisplayData, view: PartsView, index?: number): [number, number, number] {
+  const part = index === undefined ? undefined : d.parts?.[index]
+  return part ? part.explode.map((v) => v * view.explode) as [number, number, number] : [0, 0, 0]
+}
 
 /** Re-paint an existing model object without rebuilding geometry. */
 export function repaint(root: THREE.Object3D, paint: Paint) {
   root.traverse((o) => {
     const mesh = o as THREE.Mesh
-    if (!mesh.isMesh || !mesh.userData.groups) return
+    if (!mesh.isMesh || !mesh.userData.groups || mesh.userData.contextGhost) return
     const groups = mesh.userData.groups as DisplayData["groups"]
     mesh.geometry.groups.forEach((gr, i) => (gr.materialIndex = materialIndex(groups[i], paint)))
   })
 }
 
 /** Thick lines over the given edges (by mesh hash), drawn on top of the model. */
-export function edgeHighlight(d: DisplayData, hashes: number[], kit: MaterialKit): THREE.Object3D | null {
+export function edgeHighlight(d: DisplayData, hashes: number[], kit: MaterialKit, view: PartsView = NO_PARTS_VIEW): THREE.Object3D | null {
   if (!d.edges) return null
   const pts: number[] = []
   for (const g of d.edgeGroups) {
-    if (!hashes.includes(g.hash)) continue
-    for (let i = g.start * 3; i < (g.start + g.count) * 3; i++) pts.push(d.edges[i])
+    if (!hashes.includes(g.hash) || (g.part !== undefined && !partVisible(d, view, g.part))) continue
+    const offset = partOffset(d, view, g.part)
+    for (let i = g.start * 3; i < (g.start + g.count) * 3; i++) pts.push(d.edges[i] + offset[i % 3])
   }
   if (!pts.length) return null
   const geo = new LineSegmentsGeometry()
@@ -188,4 +203,10 @@ export function groupAt(hit: THREE.Intersection): DisplayData["groups"][number] 
   if (!groups || hit.faceIndex === undefined || hit.faceIndex === null) return null
   const idx = hit.faceIndex * 3
   return groups.find((x) => idx >= x.start && idx < x.start + x.count) ?? null
+}
+
+/** A rendered face pick expressed in the native assembly's coordinates. */
+export function faceTarget(hit: THREE.Intersection) {
+  const group = groupAt(hit)
+  return group ? { hash: group.hash, point: hit.point.clone().sub(hit.object.position).toArray() as [number, number, number] } : null
 }
