@@ -7,7 +7,7 @@ import { executeTool, moveFeature, treeText, type KernelPort } from "../../studi
 import { toBuild123d } from "../../studio/codegen"
 import { EMPTY_TREE, Feature, Tree, componentName, displayName } from "../../studio/dsl"
 import { designation } from "../../studio/fasteners"
-import type { BuildReport, ComponentSource, ContextSource, DisplayData } from "../../studio/kernel/build"
+import type { BuildReport, BuildProgress, ComponentSource, ContextSource, DisplayData } from "../../studio/kernel/build"
 import { num as evalNum } from "../../studio/expr"
 import {
   FOCUS_PADDING,
@@ -50,6 +50,7 @@ import {
   type KernelCall,
   type KernelPhase,
   type LookRequest,
+  type LoadState,
   type PartSummary,
   type PickRequest,
   type ProjectFile,
@@ -64,7 +65,8 @@ type Target = { face?: Record<string, unknown>; edge?: Record<string, unknown>; 
 
 export interface KernelHost {
   readonly phase: KernelPhase
-  rebuild(tree: Tree): Promise<BuildReport>
+  readonly progress?: BuildProgress | null
+  rebuild(tree: Tree, options?: { background?: boolean; interferences?: BuildReport["interferences"]; deferChecks?: boolean }): Promise<BuildReport>
   inspect(what: "body" | "faces" | "edges", selector?: unknown): Promise<string>
   display(index?: number): Promise<DisplayData>
   pick(kind: "face" | "edge", hash: number, point: V3): Promise<PickInfo | null>
@@ -127,6 +129,7 @@ type Doc = {
   tree: Tree
   rev: number
   report: BuildReport | null
+  preview?: DisplayData
   undo: Entry[]
   redo: Entry[]
   changes: Change[]
@@ -207,6 +210,7 @@ export function parseTree(text: string): { ok: true; tree: Tree } | { ok: false;
 }
 
 export class Engine {
+  private loading: LoadState | null = null
   private docs = new Map<string, Doc>()
   private active: string | null = null
   private sessions = new Map<string, string>()
@@ -271,6 +275,21 @@ export class Engine {
     this.emitSnapshot()
   }
 
+  kernelDiagnostics(path: string, report: BuildReport) {
+    const doc = this.docs.get(path)
+    if (!doc) return
+    doc.report = report
+    this.emitDoc(doc)
+  }
+
+  /** Stable geometry arrives before exact checks finish in the kernel worker. */
+  kernelPreview(display: DisplayData) {
+    const doc = this.docs.get(this.loading?.path ?? "")
+    if (!doc) return
+    doc.preview = display
+    this.emitDoc(doc)
+  }
+
   // ------------------------------------------------------------------- state
 
   snapshot(): Snapshot {
@@ -282,7 +301,7 @@ export class Engine {
       error: d.error,
       kind: isAssembly(d.path) ? ("assembly" as const) : ("part" as const),
     }))
-    return { parts, active: this.active, kernel: this.opts.kernel.phase, agent: { ...this.agent }, project: this.projectSummary() }
+    return { parts, active: this.active, kernel: this.opts.kernel.phase, agent: { ...this.agent }, project: this.projectSummary(), loading: this.loading ? { ...this.loading, progress: this.opts.kernel.progress } : null }
   }
 
   private projectSummary(): ProjectSummary | null {
@@ -327,6 +346,7 @@ export class Engine {
       context: doc.context ? { assembly: doc.context, name: partName(doc.context) } : undefined,
       rev: doc.rev,
       report: doc.report,
+      preview: doc.preview,
       canUndo: doc.undo.length > 0,
       canRedo: doc.redo.length > 0,
       changes: doc.changes.slice(0, 50),
@@ -424,7 +444,7 @@ export class Engine {
       await this.ensureKernel(doc)
       // With shared parameters merged in, so expressions that use them check out; saved without them.
       const before = this.effective(doc, doc.tree)
-      const run = await executeTool(this.port(doc), before, name, input)
+      const run = await executeTool(this.port(doc, name !== "check"), before, name, input)
       if (run.tree !== before) await this.adopt(doc, this.unshare(doc, run.tree), ctx.actor, { report: run.report })
       else if (run.report) doc.report = run.report
       return { ok: run.output.ok, text: run.output.text }
@@ -678,6 +698,26 @@ export class Engine {
 
   private async openPart(input: { path: string; create?: boolean; template?: string; context?: string }, ctx: CallContext): Promise<CommandResult> {
     const path = this.partKey(input.path, ctx.cwd)
+    const previous = this.active
+    this.active = path
+    this.loading = { path, name: partName(path), startedAt: Date.now() }
+    this.emitSnapshot()
+    try {
+      const result = await this.finishOpenPart(input, ctx, path)
+      if (!result.ok) this.active = previous
+      return result
+    } catch (e) {
+      this.active = previous
+      throw e
+    } finally {
+      this.loading = null
+      const doc = this.docs.get(this.active ?? "")
+      if (doc) this.emitDoc(doc)
+      else this.emitSnapshot()
+    }
+  }
+
+  private async finishOpenPart(input: { path: string; create?: boolean; template?: string; context?: string }, ctx: CallContext, path: string): Promise<CommandResult> {
     const existed = this.docs.has(path) || (await this.opts.files.read(path)) !== null
     const doc = await this.load(path, { create: input.create, template: isAssembly(path) ? undefined : input.template })
     // In an assembly (or out of one): the other parts come along as see-through references.
@@ -1027,14 +1067,39 @@ export class Engine {
 
   /** Make the kernel hold this part's current tree (with its shared parameters). */
   private async ensureKernel(doc: Doc, force = false) {
-    await this.select(doc)
-    const sourcesChanged = await this.syncAssets(doc, doc.tree)
-    if (force || sourcesChanged || this.built.get(doc.path) !== doc.tree) {
-      const tree = doc.tree
-      doc.report = await this.opts.kernel.rebuild(this.effective(doc, tree))
-      this.built.set(doc.path, tree)
+    let sourcesChanged = false
+    if (!force && this.slot === doc.path && this.built.get(doc.path) === doc.tree) {
+      sourcesChanged = await this.syncAssets(doc, doc.tree)
+      if (!sourcesChanged) return doc.report!
     }
-    return doc.report!
+    return this.withLoading(doc, async () => {
+      await this.select(doc)
+      sourcesChanged = (await this.syncAssets(doc, doc.tree)) || sourcesChanged
+      if (force || sourcesChanged || this.built.get(doc.path) !== doc.tree) {
+        const tree = doc.tree
+        doc.report = await this.opts.kernel.rebuild(this.effective(doc, tree), { background: true })
+        this.built.set(doc.path, tree)
+      }
+      return doc.report!
+    })
+  }
+
+  private async withLoading<T>(doc: Doc, work: () => Promise<T>): Promise<T> {
+    const previous = this.loading
+    if (!previous || previous.path !== doc.path) this.loading = { path: doc.path, name: doc.name, startedAt: Date.now() }
+    this.emitDoc(doc)
+    try {
+      const result = await work()
+      if (doc.error?.startsWith("加载失败：")) doc.error = undefined
+      return result
+    } catch (e) {
+      doc.error = `加载失败：${(e as Error)?.message ?? e}`
+      throw e
+    } finally {
+      doc.preview = undefined
+      this.loading = previous
+      this.emitDoc(doc)
+    }
   }
 
   /** The tree the kernel builds: the part's own, with its shared parameters (which win). */
@@ -1153,17 +1218,17 @@ export class Engine {
     return st ? `stat:${st.size}:${st.mtimeMs}` : "missing"
   }
 
-  private port(doc: Doc): KernelPort {
+  private port(doc: Doc, background = true): KernelPort {
     return {
-      rebuild: async (t) => {
+      rebuild: async (t) => this.withLoading(doc, async () => {
         await this.select(doc)
         this.built.delete(doc.path)
         if (t.uses !== doc.shared?.file) doc.shared = t.uses ? await loadShared(this.opts.files, doc.path, t.uses) : null
         await this.syncAssets(doc, t)
-        const r = await this.opts.kernel.rebuild(this.effective(doc, t))
+        const r = await this.opts.kernel.rebuild(this.effective(doc, t), { background })
         this.built.set(doc.path, t)
         return r
-      },
+      }),
       inspect: (what, selector) => this.opts.kernel.inspect(what, selector),
     }
   }

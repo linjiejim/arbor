@@ -7,6 +7,7 @@
 import {
   Blueprints,
   cast,
+  deserializeShape,
   draw,
   Drawing,
   drawCircle,
@@ -36,7 +37,7 @@ import { referencesOf } from "../apply"
 import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
 import { measure, type MeasureResult, type MeasureSpec, type MeasureTarget } from "./measure"
-import { closest, narrowSpot, relation, TOUCH } from "./proximity"
+import { closest, narrowSpot, overlapVolume, relation, TOUCH } from "./proximity"
 import { compoundOf, countOf, edgesOf, facesOf, solidsOf } from "./topo"
 import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
 import { cylinderAxis, runChecks, type CheckBodies, type CheckResult } from "./check"
@@ -48,6 +49,7 @@ import { cutThreads, DEPTH, type ThreadJob } from "./thread"
 import { applyMate, applyRigid, axisAngle, FREE, IDENTITY, rotation, type Freedom, type MateGeo, type Rigid } from "./mates"
 import { fastenerShape } from "./fastener-shapes"
 import { designation, type FastenerSpec } from "../fasteners"
+import { packDisplay, restoreDisplay, placeDisplay, assemblyDisplay, type ComponentDisplay } from "./component-display"
 import { classifyFaces, faceSignatures, meshBody, meshEdges, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
   axisDir,
@@ -140,6 +142,8 @@ export type BodyStats = {
 }
 
 export type BuildReport = {
+  checksPending?: boolean
+  checksError?: string
   params: Record<string, number>
   paramError?: string
   features: FeatureResult[]
@@ -152,10 +156,18 @@ export type BuildReport = {
   parts?: { name: string; volume: number; size: V3 }[]
   /** Reference bodies brought in with `import`. */
   refs?: { id: string; name: string; size: V3 }[]
+  /** Exact assembly intersections, reusable only for the identical source/placement content. */
+  interferences?: { feature: string; a: string; b: string; volume: number }[]
   ms: number
 }
 
+/** Actual work completed, not a time estimate. */
+export type BuildProgress = { stage: "prepare" | "build" | "mesh" | "checks"; completed: number; total: number; label?: string }
+export type BuildHooks = { deferChecks?: boolean; progress?: (p: BuildProgress) => void; preview?: (d: DisplayData) => void; interferences?: BuildReport["interferences"] }
+
 export type DisplayData = {
+  /** Transport preview; wait for the current interactive kernel before using its face hashes. */
+  provisional?: boolean
   index: number
   mesh: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array } | null
   /** One per B-rep face, in mesh order. `hash` identifies the face for picking; `part` indexes `parts`. */
@@ -195,6 +207,8 @@ type Step = {
   /** After a split: the parts (`body` is their compound), and each part's face origins. */
   parts?: Part[]
   partOrigins?: string[][]
+  interferences?: BuildReport["interferences"]
+  pendingOverlaps?: { id: string; a: Part; b: Part }[]
   /** The name the first feature gave the body (`part` on the first addition), before there are parts. */
   mainName?: string
   /** Reference bodies so far (`import` with mode reference): carried along, never merged. */
@@ -215,14 +229,18 @@ export type ComponentSource = {
   tree?: Tree
   assets?: { name: string; bytes: Uint8Array | null; error?: string }[]
   components?: ComponentSource[]
+  /** Content-validated native shapes prepared by the desktop worker pool. */
+  compiled?: CompiledComponent
 }
+
+export type CompiledComponent = { parts: { name: string | null; brep: string; display?: ComponentDisplay; bounds?: [V3, V3]; volume?: number }[]; failed: number }
 
 /** A built component: its parts' final shapes (unnamed: a single-body part), and how many features failed. */
 type Built = { parts: { name: string | null; shape: Shape3D }[]; failed: number }
 
 /** Built components by content, shared by every kernel in the thread (switching parts doesn't rebuild them). */
 const BUILT = new Map<string, Built>()
-const MAX_BUILT = 16
+const MAX_BUILT = 64
 
 /** A placement in an assembly, numbers already worked out. */
 /** A placement in an assembly, numbers already worked out: rotations about axes through the origin (a name or a direction), then a move. */
@@ -266,6 +284,10 @@ const SLIVER_AREA = 0.01
 const BODY_OPS = new Set<FeatureOp>(["extrude", "revolve", "fillet", "chamfer", "shell", "hole", "linear_pattern", "circular_pattern", "mirror", "sweep", "loft", "draft", "rib", "thread"])
 
 export class Kernel {
+  /** Component preparation needs exact geometry and selectors, not the part editor's diagnostics. */
+  private readonly componentOnly: boolean
+  constructor(componentOnly = false) { this.componentOnly = componentOnly }
+
   private steps: Step[] = []
   private paramsKey = ""
   private scope: Scope = {}
@@ -281,6 +303,8 @@ export class Kernel {
   /** An assembly's components as the host read them, by the file name written in the feature, and their content keys. */
   private components = new Map<string, { source: ComponentSource; key: string }>()
   private componentsGiven = false
+  private overlapJobs: { id: string; a: Part; b: Part }[] = []
+  private trackOrigins = true
 
   /** The host hands over what an assembly's `component` features read. Call before `rebuild`. */
   setComponents(list: ComponentSource[]) {
@@ -367,8 +391,14 @@ export class Kernel {
     this.assets = next
   }
 
-  rebuild(tree: Tree): BuildReport {
+  rebuild(tree: Tree, hooks: BuildHooks = {}): BuildReport {
     const t0 = performance.now()
+    this.overlapJobs = []
+    // Purely geometric selectors never read feature provenance. Intermediate
+    // tessellations then exist only for the part editor's colours, not geometry.
+    const trackOrigins = !this.componentOnly || usesOrigins(tree.features)
+    if (trackOrigins !== this.trackOrigins) this.disposeFrom(0)
+    this.trackOrigins = trackOrigins
     this.tree = tree
     const paramsKey = JSON.stringify(tree.params)
     let paramError: string | undefined
@@ -397,6 +427,7 @@ export class Kernel {
     let failed = paramError !== undefined
     for (let i = 0; i < tree.features.length; i++) {
       const f = tree.features[i]
+      hooks.progress?.({ stage: "build", completed: i, total: tree.features.length, label: displayName(tree, f) })
       key +=
         "\n" +
         JSON.stringify(f) +
@@ -417,9 +448,37 @@ export class Kernel {
           ? this.skip(f, key, prev, tree)
           : this.run(f, key, prev, tree)
       if (step.result.state === "error" || step.result.state === "skipped") failed = true
+      step.pendingOverlaps = this.overlapJobs.filter((job) => job.id === f.id)
       this.steps.push(step)
     }
     this.disposeFrom(tree.features.length)
+
+    // The geometry is now stable: show it while exact interference/check results
+    // are deferred to an independent worker or calculated below for explicit checks.
+    if (hooks.preview && tree.features.some((f) => f.op === "component")) {
+      hooks.progress?.({ stage: "mesh", completed: 0, total: 1 })
+      hooks.preview(this.display())
+    }
+    this.overlapJobs = this.steps.flatMap((s) => s.pendingOverlaps ?? [])
+    const known = new Map(hooks.interferences?.map((r) => [JSON.stringify([r.feature, r.a, r.b]), r.volume]))
+    for (let i = 0; i < this.overlapJobs.length && !hooks.deferChecks; i++) {
+      const { id, a, b } = this.overlapJobs[i]
+      hooks.progress?.({ stage: "checks", completed: i, total: this.overlapJobs.length, label: `${a.name} · ${b.name}` })
+      const step = this.steps.find((s) => s.feature.id === id)
+      const result = step?.result
+      if (!result || result.state !== "ok") continue
+      try {
+        const overlap = known.get(JSON.stringify([id, a.name, b.name])) ?? overlapVolume(a.body, b.body)
+        const measured = step!.interferences ??= []
+        measured.push({ feature: id, a: a.name, b: b.name, volume: overlap })
+        if (overlap > 1e-6) (result.warnings ??= []).push(`「${a.name}」和「${b.name}」重叠 ${fmt(overlap)} mm³`)
+      } catch (e) {
+        (result.warnings ??= []).push(`「${a.name}」和「${b.name}」的干涉检查失败：${describeError(e)}`)
+      }
+    }
+    if (!hooks.deferChecks) this.steps.forEach((s) => { s.pendingOverlaps = undefined })
+    this.overlapJobs = []
+    hooks.progress?.({ stage: "checks", completed: 0, total: tree.checks?.length ?? 0, label: "装配要求" })
 
     const features = this.steps.map((s) => s.result)
     let lastOk = -1
@@ -428,14 +487,16 @@ export class Kernel {
     })
     const last = this.lastBuilt(this.steps.length)
     return {
+      checksPending: hooks.deferChecks || undefined,
       params: this.scope,
       paramError,
       features,
+      interferences: this.steps.flatMap((s) => s.interferences ?? []),
       lastOk,
-      body: last?.body ? stats(last.body) : null,
-      checks: tree.checks?.length && last?.body ? runChecks(last.body, last.origins, tree.checks, this.scope, this.checkBodies(last)) : undefined,
+      body: !this.componentOnly && last?.body ? stats(last.body) : null,
+      checks: !hooks.deferChecks && !this.componentOnly && tree.checks?.length && last?.body ? runChecks(last.body, last.origins, tree.checks, this.scope, this.checkBodies(last)) : undefined,
       refs: last?.refs?.length || this.context.length ? [...(last?.refs ?? []), ...this.context].map((r) => ({ id: r.id, name: r.name, size: sizeOf(r.shape) })) : undefined,
-      parts: last?.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, volume: r2(measureShapeVolumeProperties(p.body).volume), size: stats(p.body).size })) : undefined,
+      parts: !this.componentOnly && last?.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, volume: stats(p.body).volume, size: stats(p.body).size })) : undefined,
       ms: performance.now() - t0,
     }
   }
@@ -458,6 +519,9 @@ export class Kernel {
     if (!step) return empty
     const body = step.result.state === "ok" ? step : this.lastBuilt(i)
     const out: DisplayData = { ...empty, sketch: step.sketch ? step.sketch.lines.slice() : null }
+    // Assemblies only place existing solids. Mesh the requested view once, rather
+    // than re-triangulating every growing prefix of the assembly during rebuild.
+    if (body?.body && !body.mesh) Object.assign(body, (body.feature.op === "component" && body.parts ? assemblyDisplay(body.parts.map((p) => p.body)) : null) ?? meshBody(body.body))
     if (body?.body && body.mesh) {
       const faces = facesOf(body.body)
       const indexByHash = new Map(faces.map((f, k) => [f.hashCode, k]))
@@ -476,7 +540,7 @@ export class Kernel {
       })
       out.edges = body.edges ? body.edges.lines.slice() : null
       out.edgeGroups = body.edges ? body.edges.edgeGroups.map((g) => ({ start: g.start, count: g.count, hash: g.edgeId })) : []
-      const bb = body.body.boundingBox.bounds as [V3, V3]
+      const bb = boundsOf(body.body)
       out.bbox = [[...bb[0]], [...bb[1]]] as [V3, V3]
       out.threads = this.threadRings(this.steps.indexOf(body), body)
       if (body.parts && (body.parts.length > 1 || body.parts.some((p) => p.hidden))) {
@@ -491,7 +555,7 @@ export class Kernel {
           es.forEach((e) => edgeToPart.set(e.hashCode, k))
           fs.forEach((f) => f.delete())
           es.forEach((e) => e.delete())
-          const [a, b] = p.body.boundingBox.bounds as [V3, V3]
+          const [a, b] = boundsOf(p.body)
           return { name: p.name, explode: p.auto ? add(p.explode, auto[k]) : p.explode, center: mul(add(a, b), 0.5), hidden: p.hidden }
         })
         out.groups = out.groups.map((g) => ({ ...g, part: faceToPart.get(g.hash) }))
@@ -984,16 +1048,16 @@ export class Kernel {
       if (out.body) {
         this.commitBody(step, prev, out.body, f.id)
         // A component's faces are its part file's: its slivers are reported there, not in the assembly.
-        const sliver = f.op === "sketch" || f.op === "import" || f.op === "component" ? null : this.slivers(step)
+        const sliver = this.componentOnly || f.op === "sketch" || f.op === "import" || f.op === "component" ? null : this.slivers(step)
         if (sliver) warnings.push(sliver)
-        const narrow = BODY_OPS.has(f.op) && !this.lettering(f) ? this.narrows(step) : null
+        const narrow = !this.componentOnly && BODY_OPS.has(f.op) && !this.lettering(f) ? this.narrows(step) : null
         if (narrow) warnings.push(narrow)
       }
       // Each part's faces are a run of the compound's, in part order.
       if (out.body && step.parts) {
         let at = 0
         step.partOrigins = step.parts.map((p) => {
-          const n = countOf(p.body, "face")
+          const n = faceIds(p.body).length
           const o = step.origins.slice(at, at + n)
           at += n
           return o
@@ -1010,11 +1074,35 @@ export class Kernel {
 
   /** Mesh the new body, classify its faces against the previous one, carry provenance forward. */
   private commitBody(step: Step, prev: Step | null, body: Shape3D, id: string) {
-    const { mesh, edges } = meshBody(body)
+    const identity = step.feature.op === "component" || !this.trackOrigins
+    const { mesh, edges } = identity ? { mesh: null, edges: null } : meshBody(body)
+    if (identity) {
+      const ids = step.parts ? [...new Set(step.parts.flatMap((p) => faceIds(p.body)))] : faceIds(body)
+      FACE_IDS.set(body, ids)
+      const byHash = new Map(prev?.body ? faceIds(prev.body).map((h, i) => [h, i]) : [])
+      step.body = body
+      step.ownsBody = true
+      step.mesh = null
+      step.edges = null
+      step.sigs = []
+      step.status = ids.map((h) => byHash.has(h) ? "kept" : "new")
+      step.origins = ids.map((h) => { const i = byHash.get(h); return i === undefined || !prev ? id : prev.origins[i] })
+      step.result.faces = { new: step.status.filter((s) => s === "new").length, modified: 0 }
+      return
+    }
     const faces = facesOf(body)
-    const sigs = faceSignatures(faces, mesh)
     const prevFaces = prev?.body ? facesOf(prev.body) : null
-    const cls = classifyFaces(prevFaces, prev?.sigs ?? null, sigs)
+    // Placing a component adds unchanged B-rep faces to a compound. Their identities
+    // already tell us which faces survived; projecting every face onto the previous
+    // assembly's surfaces is both unnecessary and wrong for coplanar separate parts.
+    const sigs = mesh ? faceSignatures(faces, mesh) : []
+    const byHash = identity ? new Map(prevFaces?.map((f, i) => [f.hashCode, i])) : null
+    const cls = byHash
+      ? faces.map((f) => {
+          const match = byHash.get(f.hashCode) ?? -1
+          return { status: match >= 0 ? ("kept" as const) : ("new" as const), match }
+        })
+      : classifyFaces(prevFaces, prev?.sigs ?? null, sigs)
     prevFaces?.forEach((pf) => pf.delete())
     faces.forEach((x) => x.delete())
     step.body = body
@@ -1320,7 +1408,7 @@ export class Kernel {
           if (measureShapeVolumeProperties(tool).volume < 1e-9) throw new InputError("草图投影不到选中的面上：把草图挪到面的正前方")
           how = `沿${band.what}等深 ${fmt(n(f.distance!))} mm`
         }
-        const next = applyTool(body, tool, mode, warnings)
+        const next = applyTool(body, tool, mode, warnings, this.componentOnly)
         const box = profile.boundingBox.bounds as [[number, number], [number, number]]
         return {
           body: next,
@@ -1349,7 +1437,7 @@ export class Kernel {
         const start = f.symmetric ? -angle / 2 : f.start !== undefined ? n(f.start) : 0
         let tool = mergeOverlaps(sketchOn(drawing.clone(), plane).revolve(axis, { origin: [0, 0, 0], angle }) as Shape3D)
         if (start) tool = tool.rotate(start, [0, 0, 0], axis)
-        const next = applyTool(body, tool, mode, warnings)
+        const next = applyTool(body, tool, mode, warnings, this.componentOnly)
         const from = f.symmetric ? " · 两侧对称" : start ? ` · 从 ${fmt(start)}° 起` : ""
         return {
           body: next,
@@ -1414,7 +1502,7 @@ export class Kernel {
         const centers = f.at.map(([u, v]) => add(plane.origin, add(mul(plane.x, n(u)), mul(plane.y, n(v)))))
         const parts = centers.map((c) => orient(template(), drill, c))
         const tool = parts.length === 1 ? parts[0] : (makeCompound(parts) as unknown as Shape3D)
-        const next = applyTool(body, tool, "cut", warnings)
+        const next = applyTool(body, tool, "cut", warnings, this.componentOnly)
         const kind = std ? std.label : `${cbore ? "沉头孔" : csink ? "埋头孔" : "孔"} ⌀${fmt(d)}`
         return {
           body: next,
@@ -1467,7 +1555,7 @@ export class Kernel {
           prof.type === "circle" ? sketchCircle(n(prof.d) / 2, { plane: pl as never, origin: origin as never }) : sketchRectangle(n(prof.w), n(prof.h), { plane: pl as never, origin: origin as never }),
         )
         const mode = f.mode ?? "add"
-        const next = applyTool(body, tool, mode, warnings)
+        const next = applyTool(body, tool, mode, warnings, this.componentOnly)
         const shape = prof.type === "circle" ? `⌀${fmt(n(prof.d))}` : `${fmt(n(prof.w))}×${fmt(n(prof.h))}`
         return { body: next, tools: [{ tool, mode }], summary: `${mode === "cut" ? "扫掠切除" : "扫掠"} · 截面 ${shape} · 路径 ${pts.length} 点` }
       }
@@ -1483,7 +1571,7 @@ export class Kernel {
         const [first, ...rest] = sketches
         const tool = (first as unknown as { loftWith: (o: unknown[], c: unknown) => Shape3D }).loftWith(rest, { ruled: f.ruled ?? false })
         const mode = f.mode ?? "add"
-        const next = applyTool(body, tool, mode, warnings)
+        const next = applyTool(body, tool, mode, warnings, this.componentOnly)
         return { body: next, tools: [{ tool, mode }], summary: `${mode === "cut" ? "放样切除" : "放样"} · ${f.sketches.length} 个截面${f.ruled ? " · 直纹" : ""}` }
       }
       case "draft": {
@@ -1518,7 +1606,7 @@ export class Kernel {
         const sk = this.sketchOf(f.sketch)
         if (sk.drawing || sk.paths.length !== 1) throw new InputError("筋的草图只能有一条开放的线（path）")
         const tool = ribTool(body, sk.paths[0], frameOf(sk.plane), n(f.t), 2 * this.bigLength(body), !!f.flip)
-        const next = applyTool(body, tool, "add", warnings)
+        const next = applyTool(body, tool, "add", warnings, this.componentOnly)
         const pts = sk.paths[0]
         const mid = pts[Math.floor(pts.length / 2)]
         const geom: StepGeom = { op: "faces", at: add(sk.plane.origin, add(mul(sk.plane.x, mid[0]), mul(sk.plane.y, mid[1]))), out: sk.plane.normal }
@@ -1689,7 +1777,7 @@ export class Kernel {
     const added: Part[] = placements.flatMap((pl, i) =>
       built.parts.map((p) => ({
         name: `${placements.length > 1 ? `${base}#${i + 1}` : base}${p.name && built.parts.length > 1 ? `/${p.name}` : ""}`,
-        body: place(p.shape.clone(), pl),
+        body: placeComponent(p.shape, pl),
         explode: [0, 0, 0] as V3,
         owned: true,
         auto: true,
@@ -1700,15 +1788,22 @@ export class Kernel {
     )
     // A screw or an insert bites into the material it goes in: overlap is the point, not news.
     const bites = fastener?.type === "screw" || fastener?.type === "insert"
+    const boxes = before.map((p) => boundsOf(p.body))
     for (const a of added) {
       if (before.some((p) => p.name === a.name)) {
         added.forEach((x) => x.body.delete())
         throw new InputError(`零件名「${a.name}」重复了：给 component 写不同的 name`)
       }
-      if (bites) continue
-      for (const p of before) {
-        const r = relation(a.body, p.body, true)
-        if (r.overlap > 1e-6) warnings.push(`「${a.name}」和「${p.name}」重叠 ${fmt(r.overlap)} mm³`)
+      if (bites || this.componentOnly) continue
+      const box = boundsOf(a.body)
+      for (let i = 0; i < before.length; i++) {
+        // Only overlap diagnostics are needed here. Separated bounding boxes prove
+        // the solids cannot touch; exact distances remain available through measure.
+        if (box[0].some((lo, axis) => lo > boxes[i][1][axis] + TOUCH || box[1][axis] < boxes[i][0][axis] - TOUCH)) continue
+        const p = before[i]
+        // We only report intersection volume, so don't first solve the much more
+        // expensive nearest-point problem (especially on nested perforated shells).
+        this.overlapJobs.push({ id: f.id, a, b: p })
       }
     }
     const parts = [...before, ...added]
@@ -1719,7 +1814,10 @@ export class Kernel {
     const copies = placements.length > 1 ? ` × ${placements.length}` : ""
     const mates = f.mates?.length ? ` · 贴合 ${f.mates.length} 条` : ""
     // Even a single component stays a named part (measure, checks and hiding go by its name).
-    return { body: compoundOf(parts.map((p) => p.body)), parts, summary: `零件「${base}」← ${source} · ${size.map(fmt).join(" × ")}${copies}${mates}` }
+    const body = compoundOf(parts.map((p) => p.body))
+    const bounds = parts.map((p) => boundsOf(p.body))
+    BOUNDS.set(body, [[0, 1, 2].map((k) => Math.min(...bounds.map((b) => b[0][k]))) as V3, [0, 1, 2].map((k) => Math.max(...bounds.map((b) => b[1][k]))) as V3])
+    return { body, parts, summary: `零件「${base}」← ${source} · ${size.map(fmt).join(" × ")}${copies}${mates}` }
   }
 
   /**
@@ -1927,7 +2025,7 @@ export class Kernel {
     for (const { tool, mode } of sources) {
       const copies = moves.map((m) => m(tool.clone()))
       const comp = makeCompound(copies) as unknown as Shape3D
-      const next = applyTool(cur, comp, mode, warnings)
+      const next = applyTool(cur, comp, mode, warnings, this.componentOnly)
       if (cur !== body) cur.delete()
       cur = next
       tools.push({ tool: comp, mode })
@@ -1951,8 +2049,14 @@ function isConvexCylinder(f: FaceInfo, ax: { p: V3; d: V3 }): boolean {
   }
 }
 
+/** Conservative: any `of` reference keeps full provenance for component preparation. */
+function usesOrigins(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false
+  return Object.entries(value).some(([key, child]) => key === "of" || usesOrigins(child))
+}
+
 /** What a component's built shape depends on: its tree, the bytes it reads, its own components. */
-function componentKey(c: ComponentSource): string {
+export function componentKey(c: ComponentSource): string {
   if (c.error) return `error:${c.error}`
   if (c.bytes !== undefined) return `step:${c.bytes ? contentHash(c.bytes) : "missing"}`
   return JSON.stringify([c.tree, (c.assets ?? []).map((a) => [a.name, a.bytes ? contentHash(a.bytes) : a.error]), (c.components ?? []).map(componentKey)])
@@ -1969,12 +2073,27 @@ function buildComponent(src: ComponentSource): Built {
   }
   if (src.error) throw new InputError(src.error)
   let built: Built
-  if (src.bytes !== undefined) {
+  if (src.compiled) {
+    const parts: Built["parts"] = []
+    try {
+      for (const p of src.compiled.parts) {
+        const shape = deserializeShape(p.brep) as Shape3D
+        parts.push({ name: p.name, shape })
+        if (p.display) restoreDisplay(shape, p.display)
+        if (p.bounds) BOUNDS.set(shape, p.bounds)
+        if (p.volume !== undefined) VOLUMES.set(shape, p.volume)
+      }
+      built = { parts, failed: src.compiled.failed }
+    } catch (e) {
+      parts.forEach((p) => p.shape.delete())
+      throw e
+    }
+  } else if (src.bytes !== undefined) {
     if (!src.bytes) throw new InputError(`读不到「${src.file}」`)
     const shape = readStep(src.bytes) as Shape3D
     built = { parts: [{ name: null, shape }], failed: 0 }
   } else {
-    const sub = new Kernel()
+    const sub = new Kernel(true)
     try {
       sub.setAssets(src.assets ?? [])
       sub.setComponents(src.components ?? [])
@@ -2002,12 +2121,36 @@ function buildComponent(src: ComponentSource): Built {
   return built
 }
 
+/** Portable OCCT geometry for a component worker/cache; no session-specific face hashes. */
+export function compileComponent(source: ComponentSource): CompiledComponent {
+  const built = buildComponent(source)
+  return { parts: built.parts.map((p) => ({ name: p.name, brep: p.shape.serialize(), display: packDisplay(p.shape), bounds: boundsOf(p.shape), volume: volumeOf(p.shape) })), failed: built.failed }
+}
+
 /** Rotate (in order, about the origin) then move: a component's place in its assembly. */
 function place<T extends AnyShape>(shape: T, p: Placement): T {
   let s = shape as AnyShape
   for (const r of p.rotate) s = s.rotate(r.angle, [0, 0, 0], typeof r.axis === "string" ? AXIS[r.axis] : r.axis)
   if (p.at.some((x) => x !== 0)) s = s.translate(p.at)
   return s as T
+}
+
+/** Native placement and its display travel together. Axis-aligned rotations preserve exact bounds. */
+function placeComponent(source: Shape3D, placement: Placement): Shape3D {
+  const shape = place(source.clone(), placement)
+  const rigid = rigidOf(placement)
+  placeDisplay(source, shape, rigid)
+  const volume = VOLUMES.get(source)
+  if (volume !== undefined) VOLUMES.set(shape, volume)
+  const box = BOUNDS.get(source)
+  if (box && rigid.R.every((v) => Math.abs(v) < 1e-10 || Math.abs(Math.abs(v) - 1) < 1e-10)) {
+    const corners: V3[] = []
+    for (const x of [box[0][0], box[1][0]]) for (const y of [box[0][1], box[1][1]]) for (const z of [box[0][2], box[1][2]]) {
+      corners.push([0, 1, 2].map((k) => rigid.R[k * 3] * x + rigid.R[k * 3 + 1] * y + rigid.R[k * 3 + 2] * z + rigid.t[k]) as V3)
+    }
+    BOUNDS.set(shape, [[0, 1, 2].map((k) => Math.min(...corners.map((c) => c[k]))) as V3, [0, 1, 2].map((k) => Math.max(...corners.map((c) => c[k]))) as V3])
+  }
+  return shape
 }
 
 /** A placement as a rigid transform (mates.ts). */
@@ -2087,13 +2230,15 @@ function unplace<T extends AnyShape>(shape: T, p: Placement): T {
  * upper part of a split moves off along the cut while the lower one stays.
  */
 function autoExplode(parts: Part[]): V3[] {
-  const boxes = parts.map((p) => p.body.boundingBox.bounds as [V3, V3])
+  const boxes = parts.map((p) => boundsOf(p.body))
   const lo: V3 = [0, 1, 2].map((a) => Math.min(...boxes.map((b) => b[0][a]))) as V3
   const hi: V3 = [0, 1, 2].map((a) => Math.max(...boxes.map((b) => b[1][a]))) as V3
   const size = sub(hi, lo)
   const autos = parts.flatMap((p, k) => (p.auto ? [k] : []))
   if (!autos.length) return parts.map(() => [0, 0, 0])
-  const vol = (k: number) => measureShapeVolumeProperties(parts[k].body).volume
+  const vol = (k: number) => {
+    return volumeOf(parts[k].body)
+  }
   const anchor = autos.reduce((a, b) => (vol(b) > vol(a) ? b : a))
   const centre = (k: number) => mul(add(boxes[k][0], boxes[k][1]), 0.5)
   return parts.map((p, k) => {
@@ -2197,7 +2342,7 @@ function centerOf(tools: Tool[]): V3 | null {
   return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]
 }
 
-function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut" | "intersect", warnings: string[]): Shape3D {
+function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut" | "intersect", warnings: string[], quiet = false): Shape3D {
   if (mode === "intersect") {
     if (!body) throw new InputError("还没有实体，不能求交")
     const next = body.intersect(tool)
@@ -2210,23 +2355,23 @@ function applyTool(body: Shape3D | null, tool: Shape3D, mode: "add" | "cut" | "i
   }
   if (mode === "cut") {
     if (!body) throw new InputError("还没有实体，不能切除")
-    const before = measureShapeVolumeProperties(body).volume
+    const before = quiet ? 0 : volumeOf(body)
     const next = body.cut(tool)
-    const after = measureShapeVolumeProperties(next).volume
-    if (Math.abs(before - after) < 1e-6 * Math.max(1, before)) warnings.push("切除没有碰到实体，模型没有变化")
+    const after = quiet ? 0 : volumeOf(next)
+    if (!quiet && Math.abs(before - after) < 1e-6 * Math.max(1, before)) warnings.push("切除没有碰到实体，模型没有变化")
     return next
   }
   // Booleans already unify same-domain faces; the first solid needs it too,
   // or an extruded circle keeps two half-cylinders and two half-arcs per rim.
   const solidsBefore = body ? countOf(body, "solid") : 0
   const next = body ? body.fuse(tool) : unified(tool)
-  if (body) {
-    const before = measureShapeVolumeProperties(body).volume
-    const after = measureShapeVolumeProperties(next).volume
+  if (body && !quiet) {
+    const before = volumeOf(body)
+    const after = volumeOf(next)
     if (Math.abs(after - before) < 1e-6 * Math.max(1, before)) warnings.push("加的料完全在原实体里面，模型没有变化")
   }
   const solids = countOf(next, "solid")
-  if (body && solids > solidsBefore) {
+  if (body && !quiet && solids > solidsBefore) {
     // Apart, or touching only along an edge or at a point (sharing a face would have merged them).
     const c = closest(tool, body)
     warnings.push(
@@ -2253,8 +2398,47 @@ function unified(tool: Shape3D): Shape3D {
   return out
 }
 
+// Committed bodies are immutable. Weak caches retain no OCCT handles and expire
+// with their JS wrappers, including when a tree prefix is invalidated.
+const FACE_IDS = new WeakMap<AnyShape, number[]>()
+function faceIds(body: AnyShape): number[] {
+  let ids = FACE_IDS.get(body)
+  if (!ids) {
+    const faces = facesOf(body)
+    ids = faces.map((f) => f.hashCode)
+    faces.forEach((f) => f.delete())
+    FACE_IDS.set(body, ids)
+  }
+  return ids
+}
+
+const BOUNDS = new WeakMap<AnyShape, [V3, V3]>()
+const STATS = new WeakMap<Shape3D, BodyStats>()
+const VOLUMES = new WeakMap<Shape3D, number>()
+function volumeOf(body: Shape3D): number {
+  const cached = VOLUMES.get(body)
+  if (cached !== undefined) return cached
+  const props = measureShapeVolumeProperties(body)
+  const volume = props.volume
+  props.delete?.()
+  VOLUMES.set(body, volume)
+  return volume
+}
+function boundsOf(body: AnyShape): [V3, V3] {
+  let bounds = BOUNDS.get(body)
+  if (!bounds) {
+    const box = body.boundingBox
+    bounds = box.bounds as [V3, V3]
+    box.delete()
+    BOUNDS.set(body, bounds)
+  }
+  return bounds
+}
+
 function stats(body: Shape3D): BodyStats {
-  const [a, b] = body.boundingBox.bounds as [V3, V3]
+  const cached = STATS.get(body)
+  if (cached) return cached
+  const [a, b] = boundsOf(body)
   const props = measureShapeVolumeProperties(body)
   const c = props.centerOfMass as unknown as V3
   const out: BodyStats = {
@@ -2266,7 +2450,9 @@ function stats(body: Shape3D): BodyStats {
     edges: countOf(body, "edge"),
     solids: countOf(body, "solid"),
   }
+  VOLUMES.set(body, props.volume)
   props.delete?.()
+  STATS.set(body, out)
   return out
 }
 
@@ -2495,7 +2681,7 @@ function orient(shape: Shape3D, dir: V3, at: V3): Shape3D {
 }
 
 function sizeOf(shape: AnyShape): V3 {
-  const [a, b] = shape.boundingBox.bounds as [V3, V3]
+  const [a, b] = boundsOf(shape)
   return [r2(b[0] - a[0]), r2(b[1] - a[1]), r2(b[2] - a[2])]
 }
 

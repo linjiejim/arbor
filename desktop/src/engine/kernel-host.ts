@@ -5,12 +5,15 @@ import { Worker } from "node:worker_threads"
 import type { KernelHost } from "../../../app/src/desktop/core/engine"
 import type { KernelPhase, V3 } from "../../../app/src/desktop/core/protocol"
 import type { Tree } from "../../../app/src/studio/dsl"
-import type { BuildReport, DisplayData, ComponentSource, ContextSource } from "../../../app/src/studio/kernel/build"
+import type { BuildReport, BuildProgress, DisplayData, ComponentSource, ContextSource } from "../../../app/src/studio/kernel/build"
 import type { Dim } from "../../../app/src/studio/kernel/dims"
 import type { DrawingData } from "../../../app/src/studio/kernel/drawing"
 import type { MeasureResult, MeasureSpec } from "../../../app/src/studio/kernel/measure"
 import type { PickInfo } from "../../../app/src/studio/annotations"
 import type { KernelReply, KernelRequest } from "./kernel-thread"
+import { ComponentPool } from "./component-pool"
+import path from "node:path"
+import { AssemblyCache, assemblyKey } from "./assembly-cache"
 
 /** Same limit as the browser studio's worker. */
 const RECYCLE_MB = 1400
@@ -23,6 +26,12 @@ const newSlot = (): Slot => ({ assets: [], components: [], context: null, lastTr
 
 export class ThreadKernel implements KernelHost {
   phase: KernelPhase = { phase: "loading" }
+  progress: BuildProgress | null = null
+  private pool: ComponentPool
+  private cache: Promise<AssemblyCache | null>
+  private diagnosticWorkers = new Map<string, Worker>()
+  private generations = new Map<string, number>()
+  private preview: DisplayData | null = null
   private worker: Worker | null = null
   private started: Promise<void> | null = null
   private seq = 0
@@ -37,7 +46,12 @@ export class ThreadKernel implements KernelHost {
   constructor(
     private readonly file: URL,
     private readonly onPhase: () => void = () => {},
-  ) {}
+    private readonly onPreview: (display: DisplayData) => void = () => {},
+    private readonly onDiagnostics: (path: string, report: BuildReport) => void = () => {},
+  ) {
+    this.pool = new ComponentPool(file)
+    this.cache = this.pool.directory.then((dir) => dir ? new AssemblyCache(path.join(dir, "assemblies")) : null)
+  }
 
   /** Start the thread now (the app does this at launch so the first command is fast). */
   start() {
@@ -55,7 +69,13 @@ export class ThreadKernel implements KernelHost {
     return new Promise<void>((resolve, reject) => {
       worker.on("message", (m: KernelReply) => {
         if ("type" in m) {
-          if (m.type === "ready") {
+          if (m.type === "progress") {
+            this.progress = m.progress
+            this.onPhase()
+          } else if (m.type === "preview") {
+            this.preview = m.display
+            this.onPreview(m.display)
+          } else if (m.type === "ready") {
             this.setPhase({ phase: "ready" })
             resolve()
           } else {
@@ -142,28 +162,105 @@ export class ThreadKernel implements KernelHost {
     return fresh
   }
 
-  /** The files `import` reads; kept here so a replacement thread gets them too. */
+  /** A dependency change invalidates any in-flight result for this slot. */
+  private cancelDiagnostics() {
+    this.generations.set(this.slot, (this.generations.get(this.slot) ?? 0) + 1)
+    const prior = this.diagnosticWorkers.get(this.slot)
+    if (prior) { this.diagnosticWorkers.delete(this.slot); void prior.terminate() }
+  }
+
   async setAssets(list: { name: string; bytes: Uint8Array | null; error?: string }[]) {
+    this.cancelDiagnostics()
     this.cur.assets = list
     await this.call<void>("setAssets", [list])
   }
 
   /** An assembly's components and the context of a part edited inside one; kept for a replacement thread too. */
   async setComponents(list: ComponentSource[]) {
-    this.cur.components = list
-    await this.call<void>("setComponents", [list])
+    this.cancelDiagnostics()
+    this.progress = { stage: "prepare", completed: 0, total: list.length }
+    this.onPhase()
+    const prepared = await this.pool.prepare(list, (completed, total, label) => {
+      this.progress = { stage: "prepare", completed, total, label }
+      this.onPhase()
+    })
+    this.cur.components = prepared
+    await this.call<void>("setComponents", [prepared])
   }
 
   async setContext(ctx: ContextSource | null) {
+    this.cancelDiagnostics()
     this.cur.context = ctx
     await this.call<void>("setContext", [ctx])
   }
 
-  async rebuild(tree: Tree) {
-    const r = await this.call<BuildReport>("rebuild", [tree])
-    this.cur.lastTree = tree
-    return r
+  async rebuild(tree: Tree, { background = false }: { background?: boolean } = {}) {
+    const slot = this.slot
+    const generation = (this.generations.get(slot) ?? 0) + 1
+    this.generations.set(slot, generation)
+    const prior = this.diagnosticWorkers.get(slot)
+    if (prior) { void prior.terminate(); this.diagnosticWorkers.delete(slot) }
+    try {
+      const assembly = tree.features.some((f) => f.op === "component")
+      const key = assembly ? assemblyKey([tree, this.cur.assets, this.cur.components, this.cur.context]) : null
+      const cache = await this.cache
+      const cached = key ? await cache?.get(key) : null
+      this.preview = null
+      if (cached) this.onPreview(cached.display)
+      const deferred = background && assembly
+      const r = await this.call<BuildReport>("rebuild", [tree, { interferences: cached?.interferences, deferChecks: deferred }])
+      this.cur.lastTree = tree
+      if (key && this.preview && !r.checksPending && !r.paramError && r.features.every((f) => f.state !== "error" && f.state !== "skipped")) {
+        await cache?.put(key, { display: this.preview, interferences: r.interferences })
+      }
+      if (deferred && key && this.preview) this.checkInBackground(slot, generation, tree, { ...this.cur }, this.preview, key, cache, r, cached?.interferences)
+      return r
+    } finally {
+      this.progress = null
+      this.onPhase()
+    }
   }
+  private checkInBackground(slot: string, generation: number, tree: Tree, source: Slot, display: DisplayData, key: string, cache: AssemblyCache | null, initial: BuildReport, known?: BuildReport["interferences"]) {
+    const worker = new Worker(this.file, { stdout: true, stderr: true })
+    this.diagnosticWorkers.set(slot, worker)
+    worker.stdout.on("data", (b: Buffer) => process.stderr.write(b))
+    worker.stderr.on("data", (b: Buffer) => process.stderr.write(b))
+    const requests: [KernelRequest["op"], unknown[]][] = [["setAssets", [source.assets]], ["setComponents", [source.components]], ["setContext", [source.context]], ["rebuild", [tree, { interferences: known }]]]
+    let index = 0
+    let checkedDisplay: DisplayData | null = null
+    const send = () => {
+      const [op, args] = requests[index]
+      worker.postMessage({ id: ++index, op, args } satisfies KernelRequest)
+    }
+    const finish = () => { if (this.diagnosticWorkers.get(slot) === worker) this.diagnosticWorkers.delete(slot); void worker.terminate() }
+    const fail = (message: string) => {
+      if (this.generations.get(slot) === generation && !this.closed) this.onDiagnostics(slot, { ...initial, checksPending: false, checksError: message })
+      finish()
+    }
+    worker.on("error", (e) => fail(e.message))
+    worker.on("exit", (code) => { if (this.diagnosticWorkers.get(slot) === worker) fail(`检查线程退出：${code}`) })
+    worker.on("message", async (m: KernelReply) => {
+      if ("type" in m) {
+        if (m.type === "ready") send()
+        if (m.type === "preview") checkedDisplay = m.display
+        if (m.type === "failed") fail(m.error)
+        return
+      }
+      if (!m.ok) { fail(m.error); return }
+      if (index < requests.length) { send(); return }
+      if (this.generations.get(slot) !== generation || this.closed) { finish(); return }
+      const report = m.result as BuildReport
+      // Hashes are process-local. The same ordered topology maps check highlights
+      // back to the interactive kernel; never publish another worker's hashes.
+      const faces = new Map(checkedDisplay?.groups.map((g, i) => [g.hash, display.groups[i]?.hash]))
+      const edges = new Map(checkedDisplay?.edgeGroups.map((g, i) => [g.hash, display.edgeGroups[i]?.hash]))
+      report.checks?.forEach((c) => { c.faces = c.faces.flatMap((h) => faces.get(h) === undefined ? [] : [faces.get(h)!]); c.edges = c.edges.flatMap((h) => edges.get(h) === undefined ? [] : [edges.get(h)!]) })
+      this.onDiagnostics(slot, report)
+      finish()
+      if (report.features.every((f) => f.state !== "error" && f.state !== "skipped")) await cache?.put(key, { display, interferences: report.interferences })
+    })
+  }
+
   inspect(what: "body" | "faces" | "edges", selector?: unknown) {
     return this.call<string>("inspect", [what, selector])
   }
@@ -197,6 +294,9 @@ export class ThreadKernel implements KernelHost {
 
   async dispose() {
     this.closed = true
+    await Promise.all([...this.diagnosticWorkers.values()].map((w) => w.terminate()))
+    this.diagnosticWorkers.clear()
+    await this.pool.dispose()
     const w = this.worker
     this.worker = null
     if (w) {

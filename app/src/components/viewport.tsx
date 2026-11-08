@@ -17,6 +17,7 @@ export function Viewport({
   viewCube = true,
   triad = true,
   triadClassName = "bottom-3 left-3",
+  triadBesideCube = false,
   className,
   children,
 }: {
@@ -26,6 +27,8 @@ export function Viewport({
   triad?: boolean
   /** Where the axis triad sits (move it above a bottom toolbar). */
   triadClassName?: string
+  /** The triad to the left of the view cube instead (keeps the bottom edge free). */
+  triadBesideCube?: boolean
   className?: string
   children?: React.ReactNode
 }) {
@@ -51,8 +54,17 @@ export function Viewport({
     <div className={cn("relative isolate overflow-hidden bg-scene", className)}>
       <div ref={host} className="absolute inset-0" />
       <ViewerCtx.Provider value={viewer}>
-        {viewer && viewCube && <ViewCube viewer={viewer} className="absolute right-3 top-3" />}
-        {viewer && triad && <Triad viewer={viewer} className={cn("absolute", triadClassName)} />}
+        {viewer && viewCube && triad && triadBesideCube ? (
+          <div className="absolute top-3 right-3 z-10 flex items-start gap-1">
+            <Triad viewer={viewer} className="mt-5" />
+            <ViewCube viewer={viewer} />
+          </div>
+        ) : (
+          <>
+            {viewer && viewCube && <ViewCube viewer={viewer} className="absolute right-3 top-3 z-10" />}
+            {viewer && triad && <Triad viewer={viewer} className={cn("absolute", triadClassName)} />}
+          </>
+        )}
         {children}
       </ViewerCtx.Provider>
     </div>
@@ -77,18 +89,48 @@ function toCss(m: THREE.Matrix4, w: THREE.Vector3, out: THREE.Vector3) {
   return out
 }
 
+/** Half the cube's edge, px. */
+const HALF = 28
+/** Width of the edge and corner bands on each face, px. */
+const BAND = 13
+/** Drag on the cube: radians per pixel. */
+const DRAG_RAD = 0.012
+
+/** A view direction's name: 「前右上」. */
+function dirLabel(d: THREE.Vector3) {
+  return [d.y < 0 ? "前" : d.y > 0 ? "后" : "", d.x > 0 ? "右" : d.x < 0 ? "左" : "", d.z > 0 ? "上" : d.z < 0 ? "下" : ""].join("")
+}
+
+/**
+ * One face's nine regions: the middle turns to that face's view, the bands
+ * along its sides to the edge's view, the corner squares to the corner's.
+ * `key` is shared by the same edge or corner on neighbouring faces.
+ */
+function regions(f: (typeof FACES)[number]) {
+  const out: { key: string; dir: THREE.Vector3; view: ViewName | null; label: string }[] = []
+  for (const j of [1, 0, -1])
+    for (const i of [-1, 0, 1]) {
+      const dir = f.n.clone().addScaledVector(f.u, i).addScaledVector(f.v, j)
+      const key = dir.toArray().map(Math.round).join(",")
+      out.push({ key, dir, view: i === 0 && j === 0 ? f.view : null, label: dirLabel(dir) })
+    }
+  return out
+}
+const REGIONS = FACES.map(regions)
+
 /**
  * The navigation cube, drawn in HTML with CSS 3D transforms so the labels
- * are real text. It mirrors the camera's orientation; click a face to fly
- * to that standard view, the house for isometric.
+ * are real text. It mirrors the camera's orientation. Click a face, an edge
+ * or a corner to fly to that view; drag it to turn the camera; the house for isometric.
  */
 export function ViewCube({ viewer, className }: { viewer: Viewer; className?: string }) {
-  const refs = React.useRef<(HTMLButtonElement | null)[]>([])
+  const refs = React.useRef<(HTMLDivElement | null)[]>([])
+  const [hot, setHot] = React.useState<string | null>(null)
+  const drag = React.useRef<{ x: number; y: number; moved: boolean; id: number } | null>(null)
   React.useEffect(() => {
     const u = new THREE.Vector3()
     const v = new THREE.Vector3()
     const n = new THREE.Vector3()
-    const h = 22
     return viewer.onCameraChange(() => {
       const m = viewer.camera.matrixWorldInverse
       FACES.forEach((f, i) => {
@@ -97,33 +139,77 @@ export function ViewCube({ viewer, className }: { viewer: Viewer; className?: st
         toCss(m, f.u, u)
         toCss(m, f.v, v)
         toCss(m, f.n, n)
-        el.style.transform = `matrix3d(${u.x},${u.y},${u.z},0,${-v.x},${-v.y},${-v.z},0,${n.x},${n.y},${n.z},0,${n.x * h},${n.y * h},${n.z * h},1)`
+        el.style.transform = `matrix3d(${u.x},${u.y},${u.z},0,${-v.x},${-v.y},${-v.z},0,${n.x},${n.y},${n.z},0,${n.x * HALF},${n.y * HALF},${n.z * HALF},1)`
         el.style.visibility = n.z > 0.02 ? "visible" : "hidden"
         el.style.zIndex = String(Math.round(n.z * 100))
       })
     })
   }, [viewer])
 
+  const go = (r: (typeof REGIONS)[number][number]) => {
+    if (drag.current?.moved) return
+    if (r.view) void viewer.setView(r.view)
+    else void viewer.setViewDir(r.dir)
+  }
+
   return (
     <div className={cn("flex flex-col items-center gap-1", className)}>
-      <div className="relative size-16" aria-label="视图方块" role="group">
+      <div
+        className="relative size-24 cursor-grab touch-none select-none active:cursor-grabbing"
+        aria-label="视图方块：拖动转视角，点面、棱、角切换视图"
+        role="group"
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          drag.current = { x: e.clientX, y: e.clientY, moved: false, id: e.pointerId }
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current
+          if (!d || d.id !== e.pointerId) return
+          const dx = e.clientX - d.x
+          const dy = e.clientY - d.y
+          if (!d.moved && Math.hypot(dx, dy) < 3) return
+          if (!d.moved) {
+            d.moved = true
+            setHot(null)
+            e.currentTarget.setPointerCapture(e.pointerId)
+          }
+          viewer.orbitBy(-dx * DRAG_RAD, -dy * DRAG_RAD)
+          d.x = e.clientX
+          d.y = e.clientY
+        }}
+        onPointerUp={() => {
+          // Let the click that ends a drag see `moved`, then forget it.
+          window.setTimeout(() => (drag.current = null))
+        }}
+        onPointerCancel={() => (drag.current = null)}
+      >
         {FACES.map((f, i) => (
-          <button
+          <div
             key={f.view}
             ref={(el) => {
               refs.current[i] = el
             }}
-            type="button"
-            aria-label={`${f.label}视图`}
-            onClick={() => viewer.setView(f.view)}
-            className={cn(
-              "absolute left-1/2 top-1/2 -ml-[22px] -mt-[22px] grid size-[44px] place-items-center",
-              "rounded-xs border border-input bg-popover/90 text-small font-medium text-muted-foreground",
-              "transition-colors duration-(--duration-fast) hover:border-primary hover:bg-selected hover:text-foreground",
-            )}
+            className="absolute top-1/2 left-1/2 grid rounded-xs border border-input bg-popover/90 text-small font-medium text-muted-foreground"
+            style={{ width: HALF * 2, height: HALF * 2, margin: -HALF, gridTemplateColumns: `${BAND}px 1fr ${BAND}px`, gridTemplateRows: `${BAND}px 1fr ${BAND}px` }}
           >
-            {f.label}
-          </button>
+            {REGIONS[i].map((r) => (
+              <button
+                key={r.key}
+                type="button"
+                aria-label={`${r.view ? f.label : r.label}视图`}
+                tabIndex={r.view ? 0 : -1}
+                onClick={() => go(r)}
+                onPointerEnter={() => !drag.current?.moved && setHot(r.key)}
+                onPointerLeave={() => setHot((h) => (h === r.key ? null : h))}
+                className={cn(
+                  "grid min-h-0 min-w-0 place-items-center outline-none transition-colors duration-(--duration-fast) focus-visible:bg-selected",
+                  hot === r.key && "bg-primary/30 text-foreground",
+                )}
+              >
+                {r.view ? f.label : null}
+              </button>
+            ))}
+          </div>
         ))}
       </div>
       <IconButton label="等轴测视图" size="icon-sm" className="text-muted-foreground" onClick={() => viewer.setView("iso")}>

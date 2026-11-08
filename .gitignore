@@ -6,3 +6,5 @@ __pycache__/
 .DS_Store
 .tmp/
 .claude/worktrees/
+
+/projects/

@@ -22,6 +22,7 @@ import { PartsSidebar } from "./ui/parts-sidebar"
 import { ActivityPanel, NotesPanel } from "./ui/side-panels"
 import { TitleBar } from "./ui/title-bar"
 import { Welcome } from "./ui/welcome"
+import { ModelLoading } from "./ui/model-loading"
 
 /** A note pinned on a face or an edge (not one about the whole part). */
 const onSpot = (n: PartNote): n is PartNote & { kind: "face" | "edge" } => n.kind !== "part"
@@ -38,6 +39,7 @@ export function DesktopApp() {
   const reselect = useReselect(studio)
   const [partsView, setPartsView] = React.useState<PartsView>(NO_PARTS_VIEW)
   const [treeHover, setTreeHover] = React.useState<Hover | null>(null)
+  const [stepSlot, setStepSlot] = React.useState<HTMLDivElement | null>(null)
   const [setupOpen, setSetupOpen] = React.useState(false)
   const [tab, setTab] = React.useState("notes")
   /** 「工程图」 over the 3D view; parameters stay editable beside it. */
@@ -84,7 +86,16 @@ export function DesktopApp() {
   // A pick request is answered only on the part it asks about.
   const pickHere = pick && pick.path === path ? pick : null
 
+  const [annotation, setAnnotation] = React.useState(false)
+  const [pointed, setPointed] = React.useState<{ path?: string; id: string | null } | null>(null)
+  const [selected, setSelected] = React.useState<{ path?: string; id: string | null } | null>(null)
+  const pointedFeature = pointed?.path === path ? pointed?.id : null
+  const selectedFeature = selected?.path === path ? selected?.id : null
+  const pointFeature = React.useCallback((id: string | null) => setPointed((p) => p?.id === id && p.path === path ? p : { path, id }), [path])
+  const selectFeature = React.useCallback((id: string | null) => setSelected((p) => ({ path, id: p?.path === path && p?.id === id ? null : id })), [path])
+  const [presented, setPresented] = React.useState<unknown>(null)
   const assembly = doc?.kind === "assembly" && !doc.context
+  const loading = snapshot?.loading ?? (doc && !doc.error && snapshot?.kernel.phase !== "error" && (!studio.display || studio.display.provisional || presented !== studio.display) ? { path: doc.path, name: doc.name, startedAt: 0, progress: { stage: "mesh" as const, completed: 0, total: 1 } } : null)
   return (
     <WordsContext.Provider value={DESKTOP_WORDS}>
     <Tour page="desktop" ready={Boolean(doc)}>
@@ -97,10 +108,15 @@ export function DesktopApp() {
             <>
               <StudioViewport
                 studio={studio}
-                hover={treeHover ?? agentHover}
+                annotation={annotation || Boolean(pickHere)}
+                onAnnotation={setAnnotation}
+                onPointFeature={pointFeature}
+                onSelectFeature={selectFeature}
+                onPresented={setPresented}
+                hover={treeHover ?? ((pointedFeature ?? selectedFeature) ? { ids: [pointedFeature ?? selectedFeature!], feature: pointedFeature ?? selectedFeature!, label: "零件或步骤" } : agentHover)}
                 annotations={notes}
-                busy={false}
-                copy={{ hint: pick ? null : "单击模型上的面或边，给 agent 留一条备注", add: pickHere ? "就是这里" : "记下备注", next: notes.nextPin }}
+                busy={Boolean(loading)}
+                copy={{ hint: pick || loading || !annotation ? null : "单击模型上的面或边，给 agent 留一条备注", add: pickHere ? "就是这里" : "记下备注", next: notes.nextPin, busy: "模型还在加载，完成后即可选面和标注" }}
                 reselect={reselect}
                 parts={partsView}
                 onParts={setPartsView}
@@ -108,6 +124,9 @@ export function DesktopApp() {
               <TreeOverlay
                 studio={studio}
                 onHover={setTreeHover}
+                pointedFeature={pointedFeature}
+                selectedFeature={selectedFeature}
+                onSelectFeature={selectFeature}
                 reselect={reselect}
                 annotations={notes}
                 parts={partsView}
@@ -115,6 +134,7 @@ export function DesktopApp() {
                 partsList={!assembly}
                 rowActions={assembly ? (f) => <ComponentActions f={f} doc={doc} studio={studio} view={partsView} onView={setPartsView} /> : undefined}
                 footer={assembly ? <AddPartMenu doc={doc} /> : undefined}
+                detailsIn={stepSlot}
               />
               {sheet && (
                 <div className="absolute inset-0 z-30 bg-background">
@@ -124,6 +144,8 @@ export function DesktopApp() {
               <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex flex-col items-center gap-2 px-56">
                 {pick && <PickBanner request={pick} elsewhere={pick.path !== path} />}
                 {show && show.path === path && !pick && <ShowBanner request={show} onClose={clearShow} />}
+                {doc.report?.checksError && <Banner tone="info" icon={<Boxes />}>后台检查失败：{doc.report.checksError}。可继续查看，精确结果暂不可用。</Banner>}
+                {doc.report?.checksPending && !loading && <Banner tone="info" icon={<Boxes />}>正在后台检查装配，可继续查看和编辑</Banner>}
                 {doc.error && (
                   <Banner tone="danger" icon={<CircleAlert />}>
                     {doc.error}
@@ -133,11 +155,12 @@ export function DesktopApp() {
               </div>
             </>
           ) : (
-            <Welcome onSetup={() => setSetupOpen(true)} />
+            !loading && <Welcome onSetup={() => setSetupOpen(true)} />
           )}
+          {loading && <ModelLoading load={loading} visible={Boolean(doc?.path === loading.path && studio.display?.mesh)} />}
         </main>
         {doc && (
-          <Tabs value={tab} onValueChange={setTab} className="flex w-[380px] shrink-0 flex-col border-l max-xl:w-[340px]">
+          <Tabs value={tab} onValueChange={setTab} className="relative flex w-[380px] shrink-0 flex-col border-l max-xl:w-[340px]">
             <TabsList className="shrink-0 px-3">
               <TabsTrigger value="notes">
                 备注{doc.notes.some((n) => n.status === "open") ? ` ${doc.notes.filter((n) => n.status === "open").length}` : ""}
@@ -158,6 +181,8 @@ export function DesktopApp() {
             <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
               <CodePanel studio={studio} />
             </TabsContent>
+            {/* A step's details from the timeline cover this panel while shown. */}
+            <div ref={setStepSlot} className="pointer-events-none absolute inset-0 z-20" />
           </Tabs>
         )}
       </div>

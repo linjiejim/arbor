@@ -60,6 +60,7 @@ export class Viewer {
   private lastTime = 0
   private visible = true
   private frameHooks = new Set<FrameHook>()
+  private renderedListeners = new Set<() => void>()
   private cameraListeners = new Set<() => void>()
   private themeListeners = new Set<(t: SceneTokens) => void>()
   private ro: ResizeObserver
@@ -152,6 +153,13 @@ export class Viewer {
     return () => this.frameHooks.delete(hook)
   }
 
+  /** Subscribe to actual completed draws, without the immediate camera callback. */
+  onRendered(cb: () => void): () => void {
+    this.renderedListeners.add(cb)
+    this.invalidate()
+    return () => this.renderedListeners.delete(cb)
+  }
+
   /** Called after each rendered frame (view cube, triad, overlays). */
   onCameraChange(cb: () => void): () => void {
     this.cameraListeners.add(cb)
@@ -182,6 +190,7 @@ export class Viewer {
     this.renderer.render(this.scene, this.camera)
     this.labels.render(this.scene, this.camera)
     for (const cb of this.cameraListeners) cb()
+    for (const cb of this.renderedListeners) cb()
   }
 
   private resize() {
@@ -257,6 +266,32 @@ export class Viewer {
     const dist = opts.distance ?? this.camera.position.distanceTo(this.controls.target)
     const pos = VIEW_DIRS[name].clone().multiplyScalar(dist).add(target)
     return this.flyTo(pos, target, opts.animate === false ? 0 : 750)
+  }
+
+  /**
+   * Fly to look at the target from a direction (a view cube's edge or corner),
+   * keeping target and distance. Straight up or down is nudged off the Z axis, like the top view.
+   */
+  setViewDir(dir: THREE.Vector3, opts: { animate?: boolean } = {}) {
+    const d = dir.clone().normalize()
+    if (Math.abs(d.z) > 0.9999) d.set(0, -1e-4, Math.sign(d.z)).normalize()
+    const target = this.controls.target.clone()
+    const pos = d.multiplyScalar(this.camera.position.distanceTo(target)).add(target)
+    return this.flyTo(pos, target, opts.animate === false ? 0 : 750)
+  }
+
+  /** Turn the camera around its target: `azimuth` about world Z, `polar` towards or away from the pole (radians). */
+  orbitBy(azimuth: number, polar: number) {
+    this.tweens.cancel("camera")
+    const target = this.controls.target
+    const off = this.camera.position.clone().sub(target)
+    const r = off.length()
+    const theta = Math.atan2(off.y, off.x) + azimuth
+    const phi = THREE.MathUtils.clamp(Math.acos(THREE.MathUtils.clamp(off.z / r, -1, 1)) + polar, 1e-3, Math.PI - 1e-3)
+    off.set(Math.sin(phi) * Math.cos(theta), Math.sin(phi) * Math.sin(theta), Math.cos(phi)).multiplyScalar(r)
+    this.camera.position.copy(target).add(off)
+    this.camera.lookAt(target)
+    this.invalidate()
   }
 
   /** Arc the camera around its target (slerped direction, lerped distance) so orientation changes read clearly. */

@@ -24,7 +24,6 @@ import { declutter, dimensionLayer, dimParam } from "../dimension-layer"
 import type { Dim } from "../kernel/dims"
 import { DimEditor } from "./dim-editor"
 import { MeasurePanel, ViewTools } from "./viewport-tools"
-import { Hint } from "@/components/hint"
 import { useWords } from "./host-words"
 
 type V3 = [number, number, number]
@@ -56,6 +55,11 @@ export function StudioViewport({
   parts = NO_PARTS_VIEW,
   onParts,
   readOnly = false,
+  annotation = true,
+  onAnnotation,
+  onPointFeature,
+  onSelectFeature,
+  onPresented,
   copy,
 }: {
   studio: Studio
@@ -68,6 +72,11 @@ export function StudioViewport({
   parts?: PartsView
   onParts?: (v: PartsView) => void
   /** A shared link: measure and section, but no annotating (there is no chat to send it to). */
+  annotation?: boolean
+  onAnnotation?: (on: boolean) => void
+  onPointFeature?: (id: string | null) => void
+  onSelectFeature?: (id: string | null) => void
+  onPresented?: (display: DisplayData) => void
   readOnly?: boolean
   copy?: ViewportCopy
 }) {
@@ -188,6 +197,7 @@ export function StudioViewport({
     const g = modelObject(display, viewer.kit, paintRef.current, view)
     viewer.setContent(g)
     current.current = g
+    const stop = viewer.onRendered(() => { stop(); onPresented?.(display) })
     if (display.bbox) {
       const box = new THREE.Box3(new THREE.Vector3(...display.bbox[0]), new THREE.Vector3(...display.bbox[1]))
       const size = box.getSize(new THREE.Vector3()).length()
@@ -197,7 +207,8 @@ export function StudioViewport({
         fittedSize.current = size
       }
     } else fittedSize.current = 0
-  }, [viewer, display, view])
+    return stop
+  }, [viewer, display, view, onPresented])
 
   // Frame the pulled-apart parts once the learner lets go of the explode slider.
   const frameExploded = React.useCallback(() => {
@@ -352,10 +363,10 @@ export function StudioViewport({
 
   const words = useWords()
   const busyText = copy?.busy ?? `${words.helper}正在改模型，这一轮结束后再标注`
-  const latest = React.useRef({ studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly })
+  const latest = React.useRef({ studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature })
   React.useEffect(() => {
-    latest.current = { studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly }
-  }, [studio, busy, busyText, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly])
+    latest.current = { studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature }
+  }, [studio, busy, busyText, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature])
 
   React.useEffect(() => {
     if (!viewer) return
@@ -371,6 +382,13 @@ export function StudioViewport({
     }
     const onClick = async (e: PointerEvent) => {
       const { studio: s, busy: isBusy, busyText: whyBusy, display: d, open, cancel, measuring: isMeasuring, plane: cut, reselect: rsel } = latest.current
+      if (!latest.current.annotation && !isMeasuring && !rsel?.state) {
+        const meshes = current.current?.children.filter((c) => (c as THREE.Mesh).isMesh && !c.userData.reference) ?? []
+        const hit = viewer.pick(e, meshes, false, (h) => !cut || cut.distanceToPoint(h.point) >= -1e-6)
+        latest.current.onSelectFeature?.(hit ? groupAt(hit)?.origin ?? null : null)
+        return
+      }
+      if (isBusy) return notify(whyBusy)
       if (current.current?.userData.partsMode) return notify("零件炸开或隐藏时不能点选：把爆炸拖回 0，并显示全部零件")
       // The model's own mesh (not a see-through reference body, which can't be picked).
       const mesh = current.current?.children.find((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh && !c.userData.reference)
@@ -388,23 +406,38 @@ export function StudioViewport({
       }
       if (!edge && !face) return cancel()
       if (latest.current.readOnly) return
-      if (isBusy) return notify(whyBusy)
       if (s.rollback) return notify("先回到最新一步，再在模型上标注")
       let info = edge ? await s.pick("edge", edge.hash, edge.point) : null
       // A fillet's tangent line looks like an edge but has no corner: the face under the pointer is what's meant.
       if ((!info || info.smooth) && face) info = (await s.pick("face", face.hash, face.point)) ?? info
       if (info) open(info)
     }
+    const hoverFrame = { current: 0 }
+    const onMove = (e: PointerEvent) => {
+      cancelAnimationFrame(hoverFrame.current)
+      hoverFrame.current = requestAnimationFrame(() => {
+        if (e.buttons || !latest.current.onPointFeature || latest.current.annotation) return
+        const meshes = current.current?.children.filter((c) => (c as THREE.Mesh).isMesh && !c.userData.reference) ?? []
+        const hit = viewer.pick(e, meshes, false, (h) => !latest.current.plane || latest.current.plane.distanceToPoint(h.point) >= -1e-6)
+        latest.current.onPointFeature(hit ? groupAt(hit)?.origin ?? null : null)
+      })
+    }
+    const onLeave = () => { cancelAnimationFrame(hoverFrame.current); latest.current.onPointFeature?.(null) }
+    canvas.addEventListener("pointermove", onMove)
+    canvas.addEventListener("pointerleave", onLeave)
     canvas.addEventListener("pointerdown", onDown)
     canvas.addEventListener("pointerup", onUp)
     return () => {
+      cancelAnimationFrame(hoverFrame.current)
+      canvas.removeEventListener("pointermove", onMove)
+      canvas.removeEventListener("pointerleave", onLeave)
       canvas.removeEventListener("pointerdown", onDown)
       canvas.removeEventListener("pointerup", onUp)
     }
   }, [viewer])
 
   return (
-    <Viewport className="absolute inset-0" onReady={onReady}>
+    <Viewport className="absolute inset-0" onReady={onReady} triadBesideCube>
       {kernel.phase === "loading" && (
         <div className="absolute inset-0 grid place-items-center">
           <div className="flex items-center gap-2 rounded-md border bg-background px-4 py-3 text-body">
@@ -428,6 +461,8 @@ export function StudioViewport({
       {measuring && <MeasurePanel result={result} count={picked.length} onClose={stopMeasuring} />}
       {display?.mesh && kernel.phase === "ready" && !rs && (
         <ViewTools
+          annotation={annotation}
+          onAnnotation={onAnnotation ? (on) => { onAnnotation(on); annotations.cancel(); onPointFeature?.(null) } : undefined}
           measuring={measuring}
           onMeasuring={(on) => {
             if (on) annotations.cancel()
@@ -442,44 +477,17 @@ export function StudioViewport({
           explode={display.parts && display.parts.length > 1 ? parts.explode : null}
           onExplode={(explode) => onParts?.({ ...parts, explode })}
           onExplodeEnd={frameExploded}
+          tips={[
+            ...(readOnly || copy?.hint === null ? [] : [`${copy?.hint ?? "单击模型上的面或边，标注要改的地方"}。`]),
+            "拖动右上角的方块转动视角；点它的面、棱或角，转到对应的视图。",
+            "这一列工具可以测量、剖开看、标尺寸、把零件分开看。",
+          ]}
         />
       )}
       {rs && (
         <div role="status" className="pointer-events-none absolute top-3 left-1/2 max-w-[calc(100%-12rem)] -translate-x-1/2 rounded-md border border-primary bg-background/95 px-2.5 py-1 text-center text-caption text-foreground">
           现在显示的是「{displayName(studio.tree, studio.tree.features[rs.index])}」之前的样子：
           {rs.kind === "edge" ? "点要选的边，再点一次取消；点一个面等于选它的一圈边" : "点要选的面，再点一次取消"}。Esc 退出
-        </div>
-      )}
-      {display?.mesh && !measuring && (
-        <div className="pointer-events-none absolute right-3 bottom-3 flex items-center gap-3 rounded-md border bg-background/90 py-1.5 pr-1.5 pl-3 text-caption text-muted-foreground">
-          {focus ? (
-            <span className="flex items-center gap-1.5">
-              <span className="size-2.5 rounded-xs bg-primary" /> 标注选中的{focus.kind === "face" ? "面" : "边"}
-            </span>
-          ) : (
-            <>
-              <span className="flex items-center gap-1.5">
-                <span className="size-2.5 rounded-xs bg-primary" /> {hover?.ids.length ? hover.label : "这一步新生成"}
-              </span>
-              {!hover?.ids.length && (
-                <span className="flex items-center gap-1.5">
-                  <span className="size-2.5 rounded-xs bg-scene-modified" /> 被修改
-                </span>
-              )}
-            </>
-          )}
-          <Hint
-            step={3}
-            label="视图怎么用"
-            side="top"
-            align="end"
-            className="pointer-events-auto"
-            tips={[
-              ...(readOnly || copy?.hint === null ? [] : [`${copy?.hint ?? "单击模型上的面或边，标注要改的地方"}。`]),
-              "蓝色是这一步新生成的面，橙色是被这一步修改的面。",
-              "右侧的工具可以标尺寸、剖开看、测量。",
-            ]}
-          />
         </div>
       )}
       {editingDim && !busy && (

@@ -82,7 +82,13 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
   }
   const at = rollback && tree.features.some((f) => f.id === rollback) ? rollback : null
   const atIndex = at ? tree.features.findIndex((f) => f.id === at) : -1
-  const ready = snapshot?.kernel.phase === "ready"
+  const ready = snapshot?.kernel.phase === "ready" && snapshot.loading?.path !== path
+
+  const [seenPreview, setSeenPreview] = React.useState<DisplayData | null>(null)
+  if (doc?.preview && doc.preview !== seenPreview && atIndex < 0) {
+    setSeenPreview(doc.preview)
+    setDisplay({ ...doc.preview, provisional: true })
+  }
 
   React.useEffect(() => {
     if (!path || !ready) return

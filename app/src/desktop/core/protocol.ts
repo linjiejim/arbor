@@ -3,7 +3,7 @@
 // MCP / CLI front ends. No runtime code beyond constants.
 import type { PickInfo } from "../../studio/annotations"
 import type { Tree } from "../../studio/dsl"
-import type { BuildReport, DisplayData } from "../../studio/kernel/build"
+import type { BuildReport, BuildProgress, DisplayData } from "../../studio/kernel/build"
 import type { MeasureTarget } from "../../studio/kernel/measure"
 import type { LookSection, LookShot } from "../../studio/look-plan"
 
@@ -57,6 +57,8 @@ export type DocState = {
   context?: { assembly: string; name: string }
   rev: number
   report: BuildReport | null
+  /** Geometry is ready to orbit while the worker finishes exact checks. */
+  preview?: DisplayData
   canUndo: boolean
   canRedo: boolean
   /** Latest first. */
@@ -85,7 +87,8 @@ export type ProjectFile = {
 /** The folder the open files belong to (see core/project.ts). */
 export type ProjectSummary = { root: string; name: string; files: ProjectFile[]; truncated: boolean }
 
-export type Snapshot = { parts: PartSummary[]; active: string | null; kernel: KernelPhase; agent: AgentActivity; project: ProjectSummary | null }
+export type LoadState = { path: string; name: string; startedAt: number; progress?: BuildProgress | null }
+export type Snapshot = { parts: PartSummary[]; active: string | null; kernel: KernelPhase; agent: AgentActivity; project: ProjectSummary | null; loading?: LoadState | null }
 
 /** The agent asks the person to click a face or an edge. */
 export type PickRequest = { id: string; path: string; prompt: string; kind: "face" | "edge" | "any" }

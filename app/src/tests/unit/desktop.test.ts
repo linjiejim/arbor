@@ -46,6 +46,42 @@ beforeAll(async () => {
 }, 60_000)
 
 describe("arbor: paths and catalog", () => {
+  it("publishes loading and a preview before open resolves, then clears loading on success and failure", async () => {
+    const mem = memFiles()
+    const tree = { params: {}, features: [{ id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 12, h: 10 }] }, { id: "e", op: "extrude", sketch: "s", distance: 5 }] }
+    await mem.files.write(PART, JSON.stringify(tree))
+    let enter!: () => void
+    let release!: () => void
+    const entered = new Promise<void>((resolve) => { enter = resolve })
+    const hold = new Promise<void>((resolve) => { release = resolve })
+    class SlowKernel extends DirectKernel {
+      override async rebuild(t: Parameters<DirectKernel["rebuild"]>[0]) {
+        const r = await super.rebuild(t)
+        engine.kernelPreview(await this.display())
+        enter()
+        await hold
+        return r
+      }
+    }
+    const kernel = new SlowKernel()
+    const engine = new Engine({ kernel, files: mem.files })
+    const opening = engine.openForUser(PART)
+    await entered
+    expect(engine.snapshot().loading?.path).toBe(PART)
+    expect(engine.snapshot().active).toBe(PART)
+    expect(engine.docState()?.preview?.mesh).toBeTruthy()
+    expect(engine.docState()?.report).toBeNull()
+    release()
+    expect((await opening).ok).toBe(true)
+    expect(engine.snapshot().loading).toBeNull()
+    expect(engine.docState()?.preview).toBeUndefined()
+    expect((await engine.openForUser("/work/missing.arbor.json")).ok).toBe(false)
+    expect(engine.snapshot().active).toBe(PART)
+    expect(engine.snapshot().loading).toBeNull()
+    engine.dispose()
+    kernel.dispose()
+  })
+
   it("normalizes part paths and derives names", () => {
     expect(normalizePartPath("parts/box", "/work")).toBe("/work/parts/box.arbor.json")
     expect(normalizePartPath("/abs/x.json")).toBe("/abs/x.json")

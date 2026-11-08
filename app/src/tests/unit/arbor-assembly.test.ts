@@ -7,7 +7,7 @@ import { Engine } from "@/desktop/core/engine"
 import type { CallContext } from "@/desktop/core/protocol"
 import { toBuild123d } from "@/studio/codegen"
 import type { Tree } from "@/studio/dsl"
-import { Kernel } from "@/studio/kernel/build"
+import { Kernel, compileComponent } from "@/studio/kernel/build"
 import { initNodeKernel } from "@/studio/kernel/node"
 import { memFiles } from "./mem-files"
 
@@ -116,6 +116,130 @@ async function penWorkspace() {
 }
 
 describe("shared parameters and assemblies", () => {
+  it("shows stable geometry before interference checks, and keeps cached checks on a repeated build", () => {
+    const k = new Kernel()
+    k.setComponents([{ file: "preview-cube", tree: { params: {}, features: box(12, 12, 12) } }])
+    const tree: Tree = { params: {}, features: [
+      { op: "component", id: "a", name: "a", file: "preview-cube" },
+      { op: "component", id: "b", name: "b", file: "preview-cube", at: [6, 0, 0] },
+    ] }
+    const order: string[] = []
+    const report = k.rebuild(tree, {
+      progress: (p) => order.push(p.stage),
+      preview: (d) => { order.push("preview"); expect(d.parts).toHaveLength(2); expect(d.mesh!.triangles.length).toBeGreaterThan(0) },
+    })
+    expect(order.indexOf("preview")).toBeLessThan(order.indexOf("checks"))
+    expect(report.features[1].warnings).toEqual(["「b」和「a」重叠 864 mm³"])
+    expect(k.rebuild(tree).interferences).toEqual(report.interferences)
+    const moved = structuredClone(tree)
+    moved.features[1] = { ...moved.features[1], at: [12, 0, 0] } as Tree["features"][number]
+    expect(k.rebuild(moved).features[1].warnings).toBeUndefined()
+    k.dispose()
+  })
+
+  it("defers exact checks without losing pending intersections on a later explicit check", () => {
+    const k = new Kernel()
+    k.setComponents([{ file: "deferred", tree: { params: {}, features: box(12, 12, 12) } }])
+    const tree: Tree = { params: {}, features: [
+      { op: "component", id: "a", file: "deferred", name: "a" },
+      { op: "component", id: "b", file: "deferred", name: "b", at: [6, 0, 0] },
+    ], checks: [{ id: "size", said: "宽 18", kind: "size", expect: [18, 12, 12] }] }
+    const initial = k.rebuild(tree, { deferChecks: true })
+    expect(initial.checksPending).toBe(true)
+    expect(initial.checks).toBeUndefined()
+    expect(initial.interferences).toEqual([])
+    const d = k.display()
+    expect(k.pick({ kind: "face", hash: d.groups[0].hash, point: [0, 0, 0] })).not.toBeNull()
+    const checked = k.rebuild(tree)
+    expect(checked.checksPending).toBeUndefined()
+    expect(checked.features[1].warnings).toEqual(["「b」和「a」重叠 864 mm³"])
+    expect(checked.checks?.[0].pass).toBe(true)
+    expect(k.rebuild(tree).features[1].warnings).toHaveLength(1)
+    k.dispose()
+  })
+
+  it("prepares exact native parts without losing provenance-based selectors or geometry after serialization", () => {
+    const tree: Tree = { params: {}, features: [
+      ...box(16, 12, 8),
+      { id: "round", op: "fillet", edges: { of: "box", parallel: "Z" }, r: 1 },
+    ] }
+    const direct = new Kernel()
+    const expected = direct.rebuild(tree).body
+    const compiled = compileComponent({ file: "native-part", tree })
+    const k = new Kernel()
+    // A different content key forces the serialized path instead of the in-memory shape.
+    k.setComponents([{ file: "restored", tree: { ...tree, paramNotes: { note: "serialized test" } }, compiled }])
+    const rep = k.rebuild({ params: {}, features: [{ id: "restored", op: "component", file: "restored" }] })
+    expect(rep.features[0].state).toBe("ok")
+    expect(rep.body).toEqual(expected)
+    // No growing assembly prefix is meshed until it is actually requested.
+    expect(k.lastBuilt(Infinity)?.mesh).toBeNull()
+    const display = k.display()
+    expect(display.mesh!.triangles.length).toBeGreaterThan(0)
+    expect(k.measure([{ kind: "face", hash: display.groups[0].hash, point: [0, 0, 0] }])?.items).toHaveLength(1)
+    const rotated = k.rebuild({ params: {}, features: [
+      { id: "restored", op: "component", file: "restored", rotate: [{ axis: "X", angle: 90 }], at: [40, 20, 10] },
+    ] })
+    const placed = k.display()
+    expect(rotated.body?.size).toEqual([16, 8, 12])
+    expect(placed.bbox?.[0][0]).toBeCloseTo(32)
+    expect(placed.mesh!.vertices[0]).toBeCloseTo(display.mesh!.vertices[0] + 40)
+    expect(placed.mesh!.vertices[1]).toBeCloseTo(-display.mesh!.vertices[2] + 20)
+    expect(placed.mesh!.vertices[2]).toBeCloseTo(display.mesh!.vertices[1] + 10)
+    for (const g of placed.groups) expect(k.pick({ kind: "face", hash: g.hash, point: [40, 20, 10] })).not.toBeNull()
+    expect(placed.groups.every((g) => g.origin === "restored")).toBe(true)
+    direct.dispose()
+    k.dispose()
+  })
+
+  it("keeps each component's face ownership when their contacting faces coincide", () => {
+    const k = new Kernel()
+    k.setComponents([{ file: "cube.arbor.json", tree: { params: {}, features: box(10, 10, 10) } }])
+    const tree: Tree = {
+      params: {},
+      features: [
+        { op: "component", id: "lower", name: "下块", file: "cube.arbor.json" },
+        { op: "component", id: "upper", name: "上块", file: "cube.arbor.json", at: [0, 0, 10] },
+      ],
+    }
+    const rep = k.rebuild(tree)
+    expect(rep.features.every((f) => f.state === "ok" && !f.warnings?.length)).toBe(true)
+    expect(rep.features[1].faces).toEqual({ new: 6, modified: 0 })
+    const d = k.display()
+    expect(d.groups.filter((g) => g.part === 0).every((g) => g.origin === "lower" && g.status === "kept")).toBe(true)
+    expect(d.groups.filter((g) => g.part === 1).every((g) => g.origin === "upper" && g.status === "new")).toBe(true)
+    // Going back in the tree still shows exactly the first component.
+    expect(k.display(0).groups).toHaveLength(6)
+    expect(k.display(0).bbox).toEqual([[-5, -5, 0], [5, 5, 10]])
+    const hash = d.groups.find((g) => g.part === 1)!.hash
+    expect(k.measure([{ kind: "face", hash, point: [0, 0, 10] }])?.items).toHaveLength(1)
+    k.dispose()
+  })
+
+  it("reports exact overlap while preserving contact and separated component measurements", () => {
+    const k = new Kernel()
+    k.setComponents([{ file: "overlap-cube.arbor.json", tree: { params: {}, features: box(10, 10, 10) } }])
+    const rep = k.rebuild({
+      params: {},
+      features: [
+        { op: "component", id: "base", name: "基准块", file: "overlap-cube.arbor.json" },
+        { op: "component", id: "touch", name: "接触块", file: "overlap-cube.arbor.json", at: [10, 0, 0] },
+        { op: "component", id: "overlap", name: "干涉块", file: "overlap-cube.arbor.json", at: [0, 0, 5] },
+        { op: "component", id: "far", name: "远处块", file: "overlap-cube.arbor.json", at: [100, 0, 0] },
+      ],
+    })
+    expect(rep.features.every((f) => f.state === "ok")).toBe(true)
+    expect(rep.features[1].warnings).toBeUndefined()
+    expect(rep.features[2].warnings).toEqual(["「干涉块」和「基准块」重叠 500 mm³"])
+    expect(rep.features[3].warnings).toBeUndefined()
+    expect(rep.body?.volume).toBe(4000)
+    const touch = k.measure([{ kind: "part", name: "基准块" }, { kind: "part", name: "接触块" }])
+    expect(touch?.between).toContainEqual({ name: "最短距离", value: "0（接触）" })
+    const far = k.measure([{ kind: "part", name: "基准块" }, { kind: "part", name: "远处块" }])
+    expect(far?.between).toContainEqual({ name: "最短距离", value: "90 mm" })
+    k.dispose()
+  })
+
   it("places part files in an assembly, checks how they meet, and follows a shared parameter", async () => {
     const { run, disk } = await penWorkspace()
     let st = await run("get_state", {})

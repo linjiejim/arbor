@@ -50,6 +50,7 @@ export function StudioPage() {
     if (!chat.busy) clearSent()
   }, [chat.busy, clearSent])
   const [hover, setHover] = React.useState<Hover | null>(null)
+  const [stepSlot, setStepSlot] = React.useState<HTMLDivElement | null>(null)
   const reselect = useReselect(studio)
   // A split body: how far its parts are pulled apart, and which are hidden.
   const [partsView, setPartsView] = React.useState<PartsView>(NO_PARTS_VIEW)
@@ -242,7 +243,7 @@ export function StudioPage() {
           }}
         >
           <StudioViewport studio={studio} hover={hover} annotations={annotations} busy={chat.busy} reselect={reselect} parts={partsView} onParts={setPartsView} />
-          <TreeOverlay studio={studio} onHover={setHover} reselect={reselect} annotations={annotations} busy={chat.busy} parts={partsView} onParts={setPartsView} />
+          <TreeOverlay studio={studio} onHover={setHover} reselect={reselect} annotations={annotations} busy={chat.busy} parts={partsView} onParts={setPartsView} detailsIn={stepSlot} />
           {sheet && (
             <div className="absolute inset-0 z-30 bg-background">
               <DrawingSheet studio={studio} title={studio.tree.features.length ? "零件" : ""} />
@@ -306,6 +307,8 @@ export function StudioPage() {
           <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
             <ParamsPanel studio={studio} onHover={setHover} annotations={annotations} />
           </TabsContent>
+          {/* A step's details from the timeline cover this panel while shown. */}
+          <div ref={setStepSlot} className="pointer-events-none absolute inset-0 z-20" />
         </Tabs>
       </div>
 

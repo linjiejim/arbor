@@ -82,7 +82,7 @@ function Group({ title, children }: { title?: string; children: ReactNode }) {
 }
 
 const rowClass = (active: boolean) => cn("group relative flex items-center rounded-md", active ? "bg-selected" : "hover:bg-accent")
-const buttonClass = "flex min-w-0 flex-1 flex-col items-start gap-0.5 px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+const buttonClass = "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
 
 /** A file of the project: open or not. */
 function FileRow({ file: f, active }: { file: ProjectFile; active: boolean }) {
@@ -90,14 +90,13 @@ function FileRow({ file: f, active }: { file: ProjectFile; active: boolean }) {
   return (
     <div className={rowClass(active)}>
       <button type="button" className={buttonClass} title={f.path} aria-current={active ? "page" : undefined} onClick={() => void arbor.call("open_part", { path: f.path })}>
-        <span className={cn("flex w-full items-center gap-1.5 truncate text-body", active && "font-medium", !f.open && !active && "text-muted-foreground")}>
+        <span className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate text-body", active && "font-medium", !f.open && !active && "text-muted-foreground")}>
           {f.kind === "assembly" && <Boxes className="size-3.5 shrink-0 text-faint-foreground" />}
           <span className="truncate">{f.name}</span>
         </span>
-        <span className="flex w-full items-center gap-2 truncate text-caption text-faint-foreground">
+        <span className={cn("ml-auto shrink-0 text-caption text-faint-foreground", f.open && "group-hover:invisible group-focus-within:invisible")}>
           {f.features === null ? "读不了" : `${f.features} ${unit}`}
-          {f.folder && <span className="truncate">{f.folder}</span>}
-          {f.openNotes > 0 && <span className="text-warning">{f.openNotes} 条备注</span>}
+          {f.openNotes > 0 && <span className="ml-1 text-warning">{f.openNotes} 条备注</span>}
         </span>
       </button>
       {f.open && <CloseButton path={f.path} />}
@@ -110,14 +109,14 @@ function OpenRow({ part: p, active }: { part: PartSummary; active: boolean }) {
   return (
     <div className={rowClass(active)}>
       <button type="button" className={buttonClass} title={p.path} aria-current={active ? "page" : undefined} onClick={() => void arbor.call("open_part", { path: p.path })}>
-        <span className={cn("flex w-full items-center gap-1.5 truncate text-body", active && "font-medium")}>
+        <span className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate text-body", active && "font-medium")}>
           {p.error && <CircleAlert className="size-3.5 shrink-0 text-destructive" aria-label="文件有错" />}
           {p.kind === "assembly" && <Boxes className="size-3.5 shrink-0 text-faint-foreground" />}
           <span className="truncate">{p.name}</span>
         </span>
-        <span className="flex items-center gap-2 text-caption text-faint-foreground">
+        <span className="ml-auto shrink-0 text-caption text-faint-foreground group-hover:invisible group-focus-within:invisible">
           {p.features} 个{p.kind === "assembly" ? "零件" : "特征"}
-          {p.openNotes > 0 && <span className="text-warning">{p.openNotes} 条备注</span>}
+          {p.openNotes > 0 && <span className="ml-1 text-warning">{p.openNotes} 条备注</span>}
         </span>
       </button>
       <CloseButton path={p.path} />
@@ -130,7 +129,7 @@ function CloseButton({ path }: { path: string }) {
     <IconButton
       label="关闭（文件不动）"
       size="icon-sm"
-      className="mr-1 opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
+      className="absolute right-1 bg-sunken opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
       onClick={() => void arbor.call("close_part", { path })}
     >
       <X />

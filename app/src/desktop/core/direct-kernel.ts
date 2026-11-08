@@ -3,7 +3,7 @@
 // (initNodeKernel in Node).
 import { getOC } from "replicad"
 import type { Tree } from "../../studio/dsl"
-import { Kernel, type ComponentSource, type ContextSource } from "../../studio/kernel/build"
+import { Kernel, type BuildHooks, type BuildReport, type ComponentSource, type ContextSource } from "../../studio/kernel/build"
 import type { MeasureSpec } from "../../studio/kernel/measure"
 import type { KernelHost } from "./engine"
 import type { KernelPhase, V3 } from "./protocol"
@@ -19,6 +19,8 @@ export function wasmHeapMB() {
 export const KERNEL_SLOTS = 4
 
 export class DirectKernel implements KernelHost {
+  private readonly hooks: BuildHooks
+  constructor(hooks: BuildHooks = {}) { this.hooks = hooks }
   readonly phase: KernelPhase = { phase: "ready" }
   private k = new Kernel()
   /** One kernel per part (by path), most recently used last. */
@@ -44,8 +46,8 @@ export class DirectKernel implements KernelHost {
     return fresh
   }
 
-  async rebuild(tree: Tree) {
-    return this.k.rebuild(tree)
+  async rebuild(tree: Tree, options: { background?: boolean; interferences?: BuildReport["interferences"]; deferChecks?: boolean } = {}) {
+    return this.k.rebuild(tree, { ...this.hooks, ...options })
   }
   async inspect(what: "body" | "faces" | "edges", selector?: unknown) {
     return this.k.inspect(what, undefined, selector)
