@@ -47,6 +47,7 @@ export const FaceSelector = z
 const edgeFields = {
   of: z.string().optional().describe("只选这个特征生成的面上的边（特征 id）"),
   faces: FaceSelector.optional().describe("只选这些面的边界边"),
+  outer: z.boolean().optional().describe("和 faces 一起写：只要这些面的外轮廓边，不要面上孔口的边（盖面外缘倒圆角时用）"),
   parallel: Axis.optional().describe("平行于这个轴的直线边"),
   kind: CurveKind.optional(),
   extreme: Dir.optional().describe('沿这个方向最靠外的边，例如 "+Z" = 最上面一圈边'),

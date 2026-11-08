@@ -232,7 +232,11 @@ function edges(sel: EdgeSelector): string {
 }
 
 function edgeFilter(sel: Omit<EdgeSelector, "not" | "expect">) {
-  let e = sel.faces ? `${faces(sel.faces)}.edges()` : "part.edges()"
+  let e = sel.faces
+    ? sel.outer
+      ? `ShapeList([e for f in ${faces(sel.faces)} for e in f.outer_wire().edges()])`
+      : `${faces(sel.faces)}.edges()`
+    : "part.edges()"
   if (sel.of) e = `on_feature(${e}, ${ref("tool", sel.of)})`
   if (sel.kind) e += `.filter_by(GeomType.${KIND_EDGE[sel.kind]})`
   if (sel.parallel) e += `.filter_by(${AXIS[sel.parallel]})`

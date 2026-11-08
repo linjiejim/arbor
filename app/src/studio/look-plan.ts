@@ -101,3 +101,36 @@ export function mmPerPixel(box: Box, h: number, padding = LOOK_PADDING) {
 }
 
 export const scaleText = (mm: number) => (mm >= 0.1 ? fmt(mm) : String(Math.round(mm * 1000) / 1000))
+
+/** A box at least `share` of its longest side thick in every direction: a flat face framed with what is around it. */
+export function padFlat(b: Box, share = 0.2): Box {
+  const ext = [0, 1, 2].map((k) => b[1][k] - b[0][k])
+  const min = Math.max(...ext) * share
+  const lo = [...b[0]] as V3
+  const hi = [...b[1]] as V3
+  for (let k = 0; k < 3; k++) {
+    if (ext[k] >= min) continue
+    const grow = (min - ext[k]) / 2
+    lo[k] -= grow
+    hi[k] += grow
+  }
+  return [lo, hi]
+}
+
+/** The one direction the triangles of these face groups face (all the same plane orientation), else null. */
+export function facingOf(d: DisplayData, keep: (g: DisplayData["groups"][number]) => boolean): V3 | null {
+  if (!d.mesh) return null
+  const t = d.mesh.triangles
+  const n = d.mesh.normals
+  let first: V3 | null = null
+  for (const g of d.groups) {
+    if (!keep(g)) continue
+    for (let i = g.start; i < g.start + g.count; i++) {
+      const k = t[i] * 3
+      const v: V3 = [n[k], n[k + 1], n[k + 2]]
+      if (!first) first = v
+      else if (first[0] * v[0] + first[1] * v[1] + first[2] * v[2] < 0.999) return null
+    }
+  }
+  return first ? norm(first) : null
+}

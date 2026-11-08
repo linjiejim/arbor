@@ -36,7 +36,7 @@ import { referencesOf } from "../apply"
 import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
 import { measure, type MeasureResult, type MeasureSpec, type MeasureTarget } from "./measure"
-import { closest, relation, TOUCH } from "./proximity"
+import { closest, narrowSpot, relation, TOUCH } from "./proximity"
 import { compoundOf, countOf, edgesOf, facesOf, solidsOf } from "./topo"
 import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
 import { cylinderAxis, runChecks, type CheckBodies, type CheckResult } from "./check"
@@ -949,6 +949,8 @@ export class Kernel {
         // A component's faces are its part file's: its slivers are reported there, not in the assembly.
         const sliver = f.op === "sketch" || f.op === "import" || f.op === "component" ? null : this.slivers(step)
         if (sliver) warnings.push(sliver)
+        const narrow = BODY_OPS.has(f.op) && !this.lettering(f) ? this.narrows(step) : null
+        if (narrow) warnings.push(narrow)
       }
       // Each part's faces are a run of the compound's, in part order.
       if (out.body && step.parts) {
@@ -1016,6 +1018,41 @@ export class Kernel {
       return `生成了 ${tiny.length} 个极小的面（最小 ${Math.min(...tiny).toPrecision(2)} mm²）：多半是两个面几乎重合，或者切除擦着面切过去`
     } finally {
       faces.forEach((f) => f.delete())
+    }
+  }
+
+  /**
+   * A slit or a thin wall this step left: faces of the same solid facing each other closer than a
+   * 3D printer can make (proximity.ts). Skipped on big bodies (it's a hint, not worth seconds).
+   */
+  private narrows(step: Step): string | null {
+    if (!step.body) return null
+    const fresh = step.status.filter((s) => s === "new").length
+    if (!fresh || fresh > 150 || step.status.length > 3000) return null
+    const faces = facesOf(step.body)
+    const solids = solidsOf(step.body)
+    try {
+      // Which solid each face is on: parts and pieces that are apart on purpose aren't compared.
+      const group = faces.map(() => 0)
+      if (solids.length > 1) {
+        const byHash = new Map<number, number[]>()
+        faces.forEach((f, i) => byHash.set(f.hashCode, [...(byHash.get(f.hashCode) ?? []), i]))
+        solids.forEach((so, k) => {
+          for (const sf of facesOf(so)) {
+            for (const i of byHash.get(sf.hashCode) ?? []) if (faces[i].isSame(sf)) group[i] = k
+            sf.delete()
+          }
+        })
+      }
+      const spot = narrowSpot(faces, step.status.map((s) => s === "new"), group)
+      if (!spot) return null
+      const at = `(${spot.at.map((x) => fmt(x)).join(", ")}) 附近`
+      return spot.kind === "slit"
+        ? `留下了一条只有 ${fmt(spot.d)} mm 的窄缝（${at}）：两个面对面的面隔得这么近，多半是没对齐、本来要贴上；有意留缝的话，3D 打印一般至少要 0.4 mm`
+        : `留下了只有 ${fmt(spot.d)} mm 的薄壁（${at}）：3D 打印一般至少要 0.8 mm（两圈线宽），注塑约 1 mm；有意这么薄就可以不管`
+    } finally {
+      faces.forEach((f) => f.delete())
+      solids.forEach((so) => so.delete())
     }
   }
 

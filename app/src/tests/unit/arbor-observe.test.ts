@@ -77,7 +77,9 @@ describe("arbor look: framing what is small", () => {
     expect(looks.at(-1)!.shots!.map((s) => s.label)).toEqual(["特写：拉伸1 · 等轴测", "特写：拉伸1 · 前视（从 -Y 看）"])
     const faces = await run("look", { focus: { faces: { normal: "+Z", extreme: "+Z" } }, views: ["top"] })
     expect(faces.ok, faces.text).toBe(true)
-    expect(looks.at(-1)!.shots![0].box![0][2]).toBeCloseTo(30, 3)
+    // A flat face is framed with some depth around it, centred on it.
+    const fb = looks.at(-1)!.shots![0].box!
+    expect((fb[0][2] + fb[1][2]) / 2).toBeCloseTo(30, 3)
     const sec = await run("look", { section: { plane: "XZ", offset: 5 } })
     expect(sec.ok, sec.text).toBe(true)
     expect(looks.at(-1)!.section).toEqual({ axis: "Y", at: 5 })
@@ -229,5 +231,73 @@ describe("arbor checks: position and gap", () => {
     expect(web).not.toMatch(/"position"|"gap"/)
     expect(desk).toMatch(/"position"/)
     expect(desk).toMatch(/"gap"/)
+  })
+})
+
+describe("arbor: what tripped an agent up while building a box", () => {
+  /** The demo box: rounded block, bottom fillet, shelled open at the top, posts in the corners. */
+  async function shelledBox(run: (n: string, i: unknown) => Promise<{ ok: boolean; text: string }>, inset: number) {
+    await run("set_params", { set: { L: 80, W: 50, H: 30, t: 2, inset, bd: 7 } })
+    await run("sketch", { id: "sb", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: "W", r: 4 }] })
+    await run("extrude", { id: "base", sketch: "sb", distance: "H" })
+    await run("fillet", { id: "fb", edges: { faces: { normal: "-Z" } }, r: 3 })
+    const sh = await run("shell", { id: "sh", open: { normal: "+Z", extreme: "+Z" }, t: "t" })
+    expect(sh.text).not.toMatch(/窄缝|薄壁/)
+    const corners = [["L/2-inset", "W/2-inset"], ["-(L/2-inset)", "W/2-inset"], ["L/2-inset", "-(W/2-inset)"], ["-(L/2-inset)", "-(W/2-inset)"]]
+    await run("sketch", { id: "sp", on: { plane: "XY", offset: "t" }, shapes: corners.map((c) => ({ type: "circle", d: "bd", center: c })) })
+    return run("extrude", { id: "boss", sketch: "sp", distance: "H-t" })
+  }
+
+  it("warns about a post that stops 0.5 mm short of the wall, and not once it joins it", async () => {
+    const { run } = await engineWithScreen()
+    const boss = await shelledBox(run, 6)
+    expect(boss.ok, boss.text).toBe(true)
+    expect(boss.text).toMatch(/只有 0\.5 mm 的窄缝/)
+    await run("set_params", { set: { inset: 5 } })
+    const st = await run("inspect", { what: "tree" })
+    expect(st.text).not.toMatch(/窄缝/)
+  })
+
+  it("says why `of` finds nothing when the feature's face merged into an older one", async () => {
+    const { run } = await engineWithScreen()
+    await shelledBox(run, 5)
+    const h = await run("hole", { id: "h1", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z", of: "boss" } }, at: [[35, 20]], standard: { size: "M3", fit: "tap" }, depth: 8 })
+    expect(h.ok).toBe(false)
+    expect(h.text).toMatch(/满足其余条件的面记在「base」名下，不在「boss」名下.*合成了一个/)
+  })
+
+  it("rounds a lid's outer rim with `outer`, leaving the hole rims alone", async () => {
+    const { run } = await engineWithScreen()
+    await run("sketch", { id: "s", on: { plane: "XY" }, shapes: [{ type: "rect", w: 80, h: 50, r: 4 }] })
+    await run("extrude", { id: "plate", sketch: "s", distance: 3 })
+    await run("hole", { id: "hs", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, at: [[30, 15], [-30, 15], [30, -15], [-30, -15]], d: 3.4 })
+    const all = await run("inspect", { what: "edges", edges: { faces: { normal: "+Z", extreme: "+Z" } } })
+    expect(all.text.split("\n").filter((l) => l.startsWith("边#")).length).toBe(12)
+    const f = await run("fillet", { id: "ft", edges: { faces: { normal: "+Z", extreme: "+Z" }, outer: true }, r: 1 })
+    expect(f.ok, f.text).toBe(true)
+    expect(f.text).toMatch(/R1 · 8 条边/)
+  })
+
+  it("warns about a hole that leaves a wall thinner than a printer can make", async () => {
+    const { run } = await engineWithScreen()
+    await block(run)
+    const h = await run("hole", { id: "h", on: { plane: "XY", face: { normal: "+Z", extreme: "+Z" } }, at: [[37.5, 0]], d: 4.4, depth: 10 })
+    expect(h.ok, h.text).toBe(true)
+    expect(h.text).toMatch(/只有 0\.3 mm 的薄壁/)
+  })
+})
+
+describe("arbor look: a close-up of a flat face", () => {
+  it("frames the face with some of what is around it and adds a picture straight at it", async () => {
+    const { run, looks } = await engineWithScreen()
+    await block(run)
+    const res = await run("look", { focus: { faces: { normal: "+X" } } })
+    expect(res.ok, res.text).toBe(true)
+    const shots = looks.at(-1)!.shots!
+    expect(shots.map((s) => s.label)).toEqual(["特写：1 个面 · 等轴测", "特写：1 个面 · 正对着看"])
+    expect(shots[1].dir[0]).toBeCloseTo(1, 3)
+    // The +X wall is 0 thick along X; framed at least a fifth of its 50 mm side.
+    const b = shots[0].box!
+    expect(b[1][0] - b[0][0]).toBeCloseTo(10, 1)
   })
 })
