@@ -190,6 +190,22 @@ describe("standard parts and mates in an assembly", () => {
     expect(st.text).toMatch(/盒体/)
   }, 120_000)
 
+  it("leaves the context empty, without failing, when an empty part's placement doesn't work out", () => {
+    const k = new Kernel()
+    const box = { file: "box.arbor.json", tree: { params: {}, features: [{ id: "s", op: "sketch" as const, on: { plane: "XY" as const }, shapes: [{ type: "rect" as const, w: 20, h: 20 }] }, { id: "e", op: "extrude" as const, sketch: "s", distance: 10 }] } }
+    const empty = { file: "new.arbor.json", tree: { params: {}, features: [] } }
+    expect(() =>
+      k.setContext({
+        assembly: "a",
+        self: "new.arbor.json",
+        tree: { params: {}, features: [{ id: "b", op: "component", file: "box.arbor.json" }, { id: "n", op: "component", file: "new.arbor.json", at: ["missing", 0, 0] }] },
+        components: [box, empty],
+      }),
+    ).not.toThrow()
+    expect(k.rebuild({ params: {}, features: [] }).refs).toBeUndefined()
+    k.dispose()
+  })
+
   it("refuses what it can't make sense of", async () => {
     const { run } = await enclosure()
     // Each failure is taken out again, or everything after it waits for it.

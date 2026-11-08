@@ -313,13 +313,13 @@ export class Kernel {
       if (!where) {
         const f = ctx.tree.features.find((x): x is Extract<Feature, { op: "component" }> => x.op === "component" && x.file === ctx.self)
         if (!f) return
-        let scope: Scope
+        // A placement that doesn't work out (an unknown parameter) just leaves the context empty.
         try {
-          scope = resolveParams(ctx.tree.params)
+          const scope = resolveParams(ctx.tree.params)
+          where = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: num(r.angle, scope) })), at: (f.at ?? [0, 0, 0]).map((v) => num(v, scope)) as V3 }
         } catch {
           return
         }
-        where = { rotate: (f.rotate ?? []).map((r) => ({ axis: r.axis, angle: num(r.angle, scope) })), at: (f.at ?? [0, 0, 0]).map((v) => num(v, scope)) as V3 }
         selfId = f.id
       }
       for (const p of parts) {
