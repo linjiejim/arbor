@@ -137,6 +137,19 @@ describe("arbor step diagnostics", () => {
     const res = await run("extrude", { id: "tiny", sketch: "t", distance: 0.05 })
     expect(res.text).toMatch(/生成了 \d+ 个极小的面/)
   })
+
+  it("doesn't count where a letter's strokes cross as slivers", async () => {
+    const { run } = await engineWithScreen()
+    await block(run)
+    // The leg of an R runs into its bowl: the fused strokes keep a wall ~0.014 mm wide.
+    await run("sketch", { id: "t", on: { plane: "XZ", face: { normal: "-Y", extreme: "-Y" } }, shapes: [{ type: "text", text: "ARBOR", size: 8, center: [0, 15] }] })
+    for (const mode of ["cut", "add"] as const) {
+      const res = await run("extrude", { id: `e_${mode}`, sketch: "t", mode, distance: 0.6, direction: mode === "cut" ? "reverse" : "normal" })
+      expect(res.ok, res.text).toBe(true)
+      expect(res.text).not.toMatch(/极小的面/)
+      await run("delete_feature", { id: `e_${mode}` })
+    }
+  })
 })
 
 describe("arbor measure between features and parts, with coordinates", () => {

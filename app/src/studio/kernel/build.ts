@@ -771,11 +771,7 @@ export class Kernel {
    * from the body before the first lettering feature.
    */
   drawing(withIso: boolean): DrawingData | null {
-    const usesText = (f: Feature) => {
-      const sk = "sketch" in f && typeof f.sketch === "string" ? this.tree.features.find((x) => x.id === f.sketch) : undefined
-      return sk?.op === "sketch" && sk.shapes.some((x) => x.type === "text")
-    }
-    const cut = this.tree.features.findIndex(usesText)
+    const cut = this.tree.features.findIndex((f) => this.lettering(f))
     const until = cut >= 0 ? cut : this.steps.length
     const step = this.lastBuilt(until)
     if (!step?.body) return null
@@ -1002,12 +998,31 @@ export class Kernel {
     try {
       const areas = faces.map((f) => measureArea(f))
       const total = areas.reduce((a, b) => a + b, 0)
-      const tiny = areas.filter((a, i) => step.status[i] === "new" && a < SLIVER_AREA && a < 1e-5 * total)
+      let tiny = areas.filter((a, i) => step.status[i] === "new" && a < SLIVER_AREA && a < 1e-5 * total)
       if (!tiny.length) return null
+      // Lettering: where a glyph's strokes cross (the leg of an R into its bowl) the
+      // fused strokes keep a wall a few µm wide. It is the font's shape, already in
+      // the tool before any boolean; only slivers the boolean made are reported.
+      if (this.lettering(step.feature)) {
+        const own = (step.tools ?? []).flatMap((t) => toolSlivers(t.tool))
+        tiny = tiny.filter((a) => {
+          const k = own.findIndex((b) => Math.abs(a - b) <= 1e-3 * b + 1e-9)
+          if (k < 0) return true
+          own.splice(k, 1)
+          return false
+        })
+        if (!tiny.length) return null
+      }
       return `生成了 ${tiny.length} 个极小的面（最小 ${Math.min(...tiny).toPrecision(2)} mm²）：多半是两个面几乎重合，或者切除擦着面切过去`
     } finally {
       faces.forEach((f) => f.delete())
     }
+  }
+
+  /** Does this feature make its shape from a sketch with text in it? */
+  private lettering(f: Feature): boolean {
+    const sk = "sketch" in f && typeof f.sketch === "string" ? this.tree.features.find((x) => x.id === f.sketch) : undefined
+    return sk?.op === "sketch" && sk.shapes.some((x) => x.type === "text")
   }
 
   private plane(ref: PlaneRef, prev: Step | null): ResolvedPlane {
@@ -2125,6 +2140,16 @@ export function mergeOverlaps(shape: Shape3D): Shape3D {
     return cast(fuse.Shape() as never) as Shape3D
   } finally {
     for (const x of [fuse, progress, args, tools, ...solids, shape]) x.delete()
+  }
+}
+
+/** Areas of the tool's own faces small enough to count as slivers. */
+function toolSlivers(tool: Shape3D): number[] {
+  const faces = facesOf(tool)
+  try {
+    return faces.map((f) => measureArea(f)).filter((a) => a < SLIVER_AREA)
+  } finally {
+    faces.forEach((f) => f.delete())
   }
 }
 
