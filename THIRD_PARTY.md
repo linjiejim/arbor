@@ -90,13 +90,13 @@ Arbor 的窗口和网站共用上面「随网站发布」的前端组件（React
 - **OpenCascade 的 wasm 怎么分发**：和网站一样是单独的文件，在 `Arbor.app/Contents/Resources/app/dist/vendor/opencascade/`（`replicad_single.js` + `replicad_single.wasm`，旁边附 `LICENSE`）。安装包不打 asar，替换这两个文件就能换成自己编译的版本。
 - 只在构建时用、不进安装包：electron-builder（MIT）、esbuild（MIT）。
 
-### jim-uiux 组件（待确认）
+### jim-uiux 组件
 
 `app/src/components/ui/` 下的组件、`app/src/lib/utils.ts`、`app/src/lib/strings.ts` 和设计令牌，来自作者自己的设计系统 [jim-uiux](https://design.linjiejim.com)（通过 shadcn 注册表安装）。
 
 - 除 import 路径外和上游一致。
 - 它们基于 [shadcn/ui](https://github.com/shadcn-ui/ui)（MIT），用到的 Radix、cva 等见上表。
-- jim-uiux 目前没有公开的许可证文件。在作者确认之前，这些文件随本仓库按 MIT 发布的前提是作者同意。
+- jim-uiux 以 MIT 许可证开源：[linjiejim/jim-uiux](https://github.com/linjiejim/jim-uiux)（[LICENSE](https://github.com/linjiejim/jim-uiux/blob/main/LICENSE)）。
 
 ## 2. 只在构建时用（不进产物）
 
