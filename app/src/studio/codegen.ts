@@ -326,6 +326,9 @@ function feature(f: Feature, tree: Tree): string[] {
       return [...head, `${ref("tool", f.id)} = rib(part, ${ref("plane", f.sketch)}, ${ref("pts", f.sketch)}, ${py(f.t)}${f.flip ? ", flip=True" : ""})`, combine(f.id, "add")]
     case "component":
       return [...head, `# 装配里的零件 ${f.file}：装配不能导出成 build123d 代码，请分别导出每个零件`]
+    case "thread":
+      // build123d's core has no threads (bd_warehouse does): the export keeps the plain cylinder.
+      return [...head, `# 螺纹：build123d 本身没有螺纹命令，导出时省略（可以用 bd_warehouse.thread 补上）`]
     case "import": {
       const v = ref("tool", f.id)
       const out = [...head, `${v} = import_step(${JSON.stringify(f.file)})  # 相对零件文件所在的文件夹`]

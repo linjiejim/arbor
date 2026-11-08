@@ -321,6 +321,18 @@ export const Feature = z.discriminatedUnion("op", [
   }),
   z.object({
     ...Base,
+    op: z.literal("thread"),
+    faces: FaceSelector.describe("要做螺纹的圆柱面：轴的外圆是外螺纹，孔壁是内螺纹；可以一次选几个一样大的孔"),
+    size: z.enum(SCREW_SIZES).optional().describe("公制粗牙螺纹，按它定大径和螺距"),
+    d: Num.optional().describe("不用 size 时：螺纹大径"),
+    pitch: Num.optional().describe("螺距；用 size 时缺省是粗牙螺距"),
+    length: Num.optional().describe("螺纹长度，缺省整个圆柱面"),
+    from: Dir.optional().describe('写了 length 时从圆柱面的哪一端量起，例如 "+Z" = 从上端往下'),
+    clearance: Num.optional().describe("打印用的间隙（mm，缺省 0）：外螺纹做细、内螺纹做大这么多；FDM 打印常用 0.1–0.2"),
+    left: z.boolean().optional().describe("左旋"),
+  }),
+  z.object({
+    ...Base,
     op: z.literal("mirror"),
     plane: PlaneName,
     offset: Num.optional(),
@@ -421,6 +433,7 @@ export const OP_NAMES: Record<FeatureOp, string> = {
   split: "拆件",
   import: "导入",
   component: "零件",
+  thread: "螺纹",
 }
 
 /** Display name: the model's own name, else 「拉伸2」 style numbering. */

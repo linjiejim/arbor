@@ -43,8 +43,9 @@ import { cylinderAxis, runChecks, type CheckBodies, type CheckResult } from "./c
 import { pathPoints, planeFace, ribTool, tapered, thinProfile, untilNext } from "./features2"
 import { stepAscii, zipStore } from "../zip"
 import { makeDrawing, type DrawingData } from "./drawing"
-import { standardHole } from "../holes"
-import { classifyFaces, faceSignatures, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
+import { METRIC, standardHole } from "../holes"
+import { cutThreads, DEPTH, type ThreadJob } from "./thread"
+import { classifyFaces, faceSignatures, meshBody, meshEdges, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
   axisDir,
   DIRS,
@@ -243,7 +244,7 @@ type Part = { name: string; body: Shape3D; explode: V3; owned: boolean; auto?: b
 const SLIVER_AREA = 0.01
 
 /** Features that change the body; after a split they run on each part (see `onParts`). */
-const BODY_OPS = new Set<FeatureOp>(["extrude", "revolve", "fillet", "chamfer", "shell", "hole", "linear_pattern", "circular_pattern", "mirror", "sweep", "loft", "draft", "rib"])
+const BODY_OPS = new Set<FeatureOp>(["extrude", "revolve", "fillet", "chamfer", "shell", "hole", "linear_pattern", "circular_pattern", "mirror", "sweep", "loft", "draft", "rib", "thread"])
 
 export class Kernel {
   private steps: Step[] = []
@@ -289,7 +290,7 @@ export class Kernel {
       for (const p of built.parts) {
         const shape = unplace(place(p.shape.clone(), o.place), ctx.self)
         const name = p.name && built.parts.length > 1 ? `${o.name}/${p.name}` : o.name
-        this.context.push({ id: name, name, shape, mesh: meshShape(shape), edges: meshEdges(shape), owned: true })
+        this.context.push({ id: name, name, shape, ...meshBody(shape), owned: true })
       }
     }
   }
@@ -938,7 +939,7 @@ export class Kernel {
       // The first addition may name the body: it is that part until a second one comes.
       if (!prev?.body && g.part && addsMaterial(g)) step.mainName = g.part
       if (out.parts) step.parts = out.parts
-      if (out.ref) step.refs = [...(step.refs ?? []), { id: f.id, name: displayName(tree, f), shape: out.ref, mesh: meshShape(out.ref as Shape3D), edges: meshEdges(out.ref as Shape3D), owned: true }]
+      if (out.ref) step.refs = [...(step.refs ?? []), { id: f.id, name: displayName(tree, f), shape: out.ref, ...meshBody(out.ref as Shape3D), owned: true }]
       Object.assign(step.result, { summary: out.summary, selected: out.selected })
       if (out.sketch) step.sketch = out.sketch
       if (out.tools) step.tools = out.tools
@@ -973,7 +974,7 @@ export class Kernel {
 
   /** Mesh the new body, classify its faces against the previous one, carry provenance forward. */
   private commitBody(step: Step, prev: Step | null, body: Shape3D, id: string) {
-    const mesh = meshShape(body)
+    const { mesh, edges } = meshBody(body)
     const faces = facesOf(body)
     const sigs = faceSignatures(faces, mesh)
     const prevFaces = prev?.body ? facesOf(prev.body) : null
@@ -983,7 +984,7 @@ export class Kernel {
     step.body = body
     step.ownsBody = true
     step.mesh = mesh
-    step.edges = meshEdges(body)
+    step.edges = edges
     step.sigs = sigs
     step.status = cls.map((c) => c.status)
     step.origins = cls.map((c) => (c.match >= 0 && prev ? prev.origins[c.match] : id))
@@ -1504,6 +1505,63 @@ export class Kernel {
       case "component":
         // Routed by `run` (it changes the parts, not one body).
         throw new InputError("装配里的零件不在这里处理")
+      case "thread": {
+        if (!body || !prev) throw new InputError("还没有实体，没有圆柱面可以做螺纹")
+        return this.thread(f, body, prev.origins)
+      }
+    }
+  }
+
+  /** Real threads on the selected cylinders (thread.ts): external on a shaft, internal in a bore. */
+  private thread(f: Extract<Feature, { op: "thread" }>, body: Shape3D, origins: string[]): ApplyOut {
+    const n = (v: number | string) => num(v, this.scope)
+    const row = f.size ? METRIC[f.size] : null
+    if (!row && f.d === undefined) throw new InputError("螺纹要么写 size（如 M8），要么写 d（大径）和 pitch（螺距）")
+    const major = row && f.d === undefined ? Number(f.size!.slice(1)) : n(f.d!)
+    const pitch = f.pitch !== undefined ? n(f.pitch) : row ? row.pitch : NaN
+    if (!(pitch > 0)) throw new InputError("不用 size 时要写 pitch（螺距）")
+    if (!(major > 2 * DEPTH * pitch)) throw new InputError(`螺距 ${fmt(pitch)} 对 ⌀${fmt(major)} 太粗了`)
+    const clearance = f.clearance !== undefined ? n(f.clearance) : 0
+    if (clearance < 0 || clearance > 0.25 * pitch) throw new InputError(`clearance 要在 0 到 ${fmt(0.25 * pitch)} 之间（螺距的四分之一）`)
+    const faces = faceInfos(body, origins)
+    try {
+      const sel = selectFaces(f.faces, faces, this.scope)
+      const jobs: ThreadJob[] = []
+      let internal: boolean | null = null
+      for (const face of sel) {
+        if (face.kind !== "cylinder" || face.radius === undefined) throw new InputError(`螺纹只能做在圆柱面上，选中的有${describeFace(face).split(" 来自")[0]}`)
+        const ax = cylinderAxis(face)
+        if (!ax) throw new InputError("读不出这个圆柱面的轴线")
+        const inside = !isConvexCylinder(face, ax)
+        if (internal !== null && internal !== inside) throw new InputError("一次只能都是外螺纹（轴）或都是内螺纹（孔）")
+        internal = inside
+        const r = face.radius
+        const depth = DEPTH * pitch
+        if (!inside && r < major / 2 - depth) throw new InputError(`圆柱 ⌀${fmt(2 * r)} 比 ${fmt(major)} 螺纹的小径（⌀${fmt(major - 2 * depth)}）还细：先把轴做成 ⌀${fmt(major)}`)
+        if (!inside && r > major / 2 + 0.4 * pitch) throw new InputError(`圆柱 ⌀${fmt(2 * r)} 比螺纹大径 ⌀${fmt(major)} 粗太多：先把轴做成 ⌀${fmt(major)}`)
+        if (inside && r > major / 2) throw new InputError(`孔 ⌀${fmt(2 * r)} 比螺纹大径 ⌀${fmt(major)} 还大：内螺纹的孔先打成 ⌀${fmt(major - 2 * depth)} 左右（小径），或者用 hole 的 standard（fit: tap）打攻丝底孔`)
+        // Along the axis: the face's parameter range is where it starts and ends.
+        const { vMin, vMax } = face.face.UVBounds
+        let [t0, t1] = [vMin, vMax]
+        if (f.length !== undefined) {
+          const len = n(f.length)
+          if (!(len > 0) || len > t1 - t0 + 1e-6) throw new InputError(`螺纹长度要在 0 到 ${fmt(t1 - t0)}（圆柱面的长度）之间`)
+          const towards = f.from ? dot(DIRS[f.from], ax.d) : 1
+          if (f.from && Math.abs(towards) < 1e-6) throw new InputError(`from 要沿圆柱的轴线方向，${f.from} 和轴线垂直`)
+          if (towards > 0) t0 = t1 - len
+          else t1 = t0 + len
+        }
+        jobs.push({ p: ax.p, d: ax.d, t0, t1, major, pitch, internal: inside, clearance, left: !!f.left })
+      }
+      const next = cutThreads(body, jobs)
+      const name = row && f.d === undefined && f.pitch === undefined ? f.size! : `M${fmt(major)}×${fmt(pitch)}`
+      const len = jobs[0].t1 - jobs[0].t0
+      return {
+        body: next,
+        summary: `${name} ${internal ? "内" : "外"}螺纹${f.left ? "（左旋）" : ""} × ${jobs.length} · 长 ${fmt(len)} · 螺距 ${fmt(pitch)}${clearance ? ` · 间隙 ${fmt(clearance)}` : ""}`,
+      }
+    } finally {
+      disposeInfos(faces)
     }
   }
 

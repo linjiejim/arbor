@@ -38,6 +38,21 @@ export function meshShape(shape: AnyShape, tolerance = 0.05, angularTolerance = 
   return { vertices, normals, triangles, faceGroups }
 }
 
+/** Above this many triangles at the coarse angle, a shape keeps the coarse mesh. */
+const FINE_LIMIT = 30_000
+const COARSE_ANGLE = 0.5
+
+/**
+ * The display mesh of a body and its edges. Meshed at a coarse angle first: an ordinary part comes out
+ * small and is meshed again at the usual fine angle (round edges stay smooth), while a body with long
+ * twisted faces (real threads: 0.5 million triangles at the fine angle, ten seconds) keeps the coarse one.
+ */
+export function meshBody(shape: AnyShape): { mesh: Mesh; edges: EdgeMesh } {
+  const coarse = meshShape(shape, 0.05, COARSE_ANGLE)
+  if (coarse.triangles.length / 3 > FINE_LIMIT) return { mesh: coarse, edges: meshEdges(shape, 0.05, COARSE_ANGLE) }
+  return { mesh: meshShape(shape), edges: meshEdges(shape) }
+}
+
 export function meshEdges(shape: AnyShape, tolerance = 0.05, angularTolerance = 0.2): EdgeMesh {
   const oc: OC = getOC()
   const raw = oc.ReplicadEdgeMeshExtractor.extract(shape.wrapped, tolerance, angularTolerance)
