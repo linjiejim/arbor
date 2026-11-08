@@ -301,3 +301,30 @@ describe("arbor look: a close-up of a flat face", () => {
     expect(b[1][0] - b[0][0]).toBeCloseTo(10, 1)
   })
 })
+
+describe("lettering stays last", () => {
+  it("puts a feature added without `after` before the text at the end, and says so", async () => {
+    const { applyEdit } = await import("@/studio/apply")
+    const tree = {
+      params: {},
+      features: [
+        { id: "s", op: "sketch" as const, on: { plane: "XY" as const }, shapes: [{ type: "rect" as const, w: 40, h: 20 }] },
+        { id: "e", op: "extrude" as const, sketch: "s", distance: 10 },
+        { id: "ts", op: "sketch" as const, on: { plane: "XY" as const, offset: 10 }, shapes: [{ type: "text" as const, text: "AB", size: 5 }] },
+        { id: "tx", op: "extrude" as const, sketch: "ts", distance: 0.5, mode: "cut" as const, direction: "reverse" as const },
+      ],
+    }
+    const f = applyEdit(tree, "fillet", { id: "f", edges: { parallel: "Z" }, r: 2 })
+    expect(f.tree.features.map((x) => x.id)).toEqual(["s", "e", "f", "ts", "tx"])
+    expect(f.note).toMatch(/已放在文字特征（「拉伸2」）前面/)
+    // A new sketch and the extrusion made from it both go before the text.
+    const s2 = applyEdit(f.tree, "sketch", { id: "s2", on: { plane: "XY", offset: 10 }, shapes: [{ type: "circle", d: 4, center: [15, 5] }] })
+    const e2 = applyEdit(s2.tree, "extrude", { id: "e2", sketch: "s2", distance: 3 })
+    expect(e2.tree.features.map((x) => x.id)).toEqual(["s", "e", "f", "s2", "e2", "ts", "tx"])
+    // More lettering goes at the end; `after` is obeyed.
+    const t2 = applyEdit(e2.tree, "sketch", { id: "t2", on: { plane: "XY" }, shapes: [{ type: "text", text: "C", size: 5 }] })
+    expect(t2.tree.features.at(-1)!.id).toBe("t2")
+    const late = applyEdit(t2.tree, "chamfer", { id: "c", edges: { parallel: "X" }, d: 0.5, after: "tx" })
+    expect(late.tree.features.map((x) => x.id).indexOf("c")).toBe(late.tree.features.findIndex((x) => x.id === "tx") + 1)
+  })
+})
