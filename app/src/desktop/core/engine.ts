@@ -202,6 +202,8 @@ export class Engine {
   private sessions = new Map<string, string>()
   private listeners = new Set<(e: EngineEvent) => void>()
   private chain: Promise<unknown> = Promise.resolve()
+  /** After dispose: changes on disk are no longer followed (the CLI exits as soon as its command is done). */
+  private disposed = false
   private kernelDoc: Doc | null = null
   private kernelTree: Tree | null = null
   /** Which part's files (and versions) the kernel holds for `import`. */
@@ -357,6 +359,16 @@ export class Engine {
     const job = this.chain.then(fn)
     this.chain = job.catch(() => undefined)
     return job
+  }
+
+  /**
+   * A file changed on disk: follow it in turn with the commands, unless the engine was disposed
+   * meanwhile (a write of our own can be reported just after). Nobody waits for the result, so a
+   * failure (the kernel closed or crashed) is dropped; the next command reports the state.
+   */
+  private onDisk(fn: () => Promise<void>) {
+    if (this.disposed) return
+    this.exclusive(() => (this.disposed ? Promise.resolve() : fn())).catch(() => {})
   }
 
   private async runLocked(name: string, input: Record<string, unknown>, ctx: CallContext): Promise<CommandResult> {
@@ -881,7 +893,7 @@ export class Engine {
     this.docs.set(path, doc)
     await this.refreshShared(doc)
     if (text === null) await this.save(doc)
-    doc.unwatch = this.opts.files.watch(path, () => void this.exclusive(() => this.fileChanged(doc)))
+    doc.unwatch = this.opts.files.watch(path, () => this.onDisk(() => this.fileChanged(doc)))
     await this.ensureKernel(doc)
     this.recent = [path, ...this.recent.filter((p) => p !== path)].slice(0, 20)
     this.opts.onRecent?.(this.recent)
@@ -1080,7 +1092,7 @@ export class Engine {
       doc.assetWatch.set(
         p,
         this.opts.files.watch(p, () =>
-          void this.exclusive(async () => {
+          this.onDisk(async () => {
             if (this.docs.get(doc.path) !== doc) return
             if (doc.shared?.path === p) {
               const text = await this.opts.files.read(p)
@@ -1409,6 +1421,7 @@ export class Engine {
   }
 
   dispose() {
+    this.disposed = true
     for (const d of this.docs.values()) {
       d.unwatch()
       for (const stop of d.assetWatch.values()) stop()
