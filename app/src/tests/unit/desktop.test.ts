@@ -388,3 +388,39 @@ describe("arbor: importing STEP", () => {
     web.dispose()
   }, 60_000)
 })
+
+describe("arbor: each part keeps its last build", () => {
+  it("switches between parts without rebuilding them, and rebuilds one that was dropped to make room", async () => {
+    const { KERNEL_SLOTS } = await import("@/desktop/core/direct-kernel")
+    const mem = memFiles()
+    const kernel = new DirectKernel()
+    let rebuilds = 0
+    const real = kernel.rebuild.bind(kernel)
+    kernel.rebuild = async (t) => {
+      rebuilds++
+      return real(t)
+    }
+    const engine = new Engine({ kernel, files: mem.files })
+    const ctx: CallContext = { actor: "agent", session: "s", cwd: "/w" }
+    const run = (n: string, i: unknown) => engine.run(n, i, ctx)
+    const names = Array.from({ length: KERNEL_SLOTS + 1 }, (_, i) => `p${i}`)
+    for (const [i, n] of names.entries()) {
+      await run("open_part", { path: n, create: true })
+      await run("sketch", { id: "s", on: { plane: "XY" }, shapes: [{ type: "rect", w: 10 + i, h: 10 }] })
+      await run("extrude", { id: "e", sketch: "s", distance: 5 })
+    }
+    // The last few parts are still built: going back to one doesn't rebuild it.
+    let before = rebuilds
+    const back = await run("open_part", { path: names[2] })
+    expect(back.ok, back.text).toBe(true)
+    const st = await run("get_state", {})
+    expect(st.text).toMatch(/12 × 10 × 5 mm/)
+    expect(rebuilds).toBe(before)
+    // The first one was dropped (more parts than slots): it builds again, and comes out the same.
+    before = rebuilds
+    await run("open_part", { path: names[0] })
+    const st0 = await run("get_state", {})
+    expect(st0.text).toMatch(/10 × 10 × 5 mm/)
+    expect(rebuilds).toBe(before + 1)
+  })
+})

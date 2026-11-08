@@ -17,14 +17,20 @@ const RECYCLE_MB = 1400
 
 type Pending = { resolve: (v: unknown) => void; reject: (e: Error) => void }
 
+/** What one part's kernel in the thread holds: replayed into a replacement thread. */
+type Slot = { assets: { name: string; bytes: Uint8Array | null; error?: string }[]; components: ComponentSource[]; context: ContextSource | null; lastTree: Tree | null }
+const newSlot = (): Slot => ({ assets: [], components: [], context: null, lastTree: null })
+
 export class ThreadKernel implements KernelHost {
   phase: KernelPhase = { phase: "loading" }
   private worker: Worker | null = null
   private started: Promise<void> | null = null
   private seq = 0
   private pending = new Map<number, Pending>()
-  private lastTree: Tree | null = null
   private stale = false
+  /** The part the calls go to, and per part what the thread was last handed (a replacement thread gets the current one again). */
+  private slot = ""
+  private slots = new Map<string, Slot>([["", newSlot()]])
   /** Disposed: a late call (a file change already on its way) must not start a new thread. */
   private closed = false
 
@@ -112,37 +118,50 @@ export class ThreadKernel implements KernelHost {
         this.pending.set(id, { resolve, reject })
         this.worker!.postMessage({ id, op, args } satisfies KernelRequest)
       })
-    if (this.assets.length) await send("setAssets", [this.assets])
-    if (this.components.length) await send("setComponents", [this.components])
-    if (this.context) await send("setContext", [this.context])
-    if (this.lastTree) await send("rebuild", [this.lastTree])
+    // The other parts' kernels are gone with the old thread: the next `use` of each says it's empty.
+    const cur = this.slots.get(this.slot) ?? newSlot()
+    this.slots = new Map([[this.slot, cur]])
+    await send("use", [this.slot])
+    if (cur.assets.length) await send("setAssets", [cur.assets])
+    if (cur.components.length) await send("setComponents", [cur.components])
+    if (cur.context) await send("setContext", [cur.context])
+    if (cur.lastTree) await send("rebuild", [cur.lastTree])
+  }
+
+  private get cur() {
+    let s = this.slots.get(this.slot)
+    if (!s) this.slots.set(this.slot, (s = newSlot()))
+    return s
+  }
+
+  /** One kernel per part in the thread: true when this part's starts empty (the engine hands everything over again). */
+  async use(slot: string) {
+    const fresh = await this.call<boolean>("use", [slot])
+    this.slot = slot
+    if (fresh) this.slots.set(slot, newSlot())
+    return fresh
   }
 
   /** The files `import` reads; kept here so a replacement thread gets them too. */
-  private assets: { name: string; bytes: Uint8Array | null; error?: string }[] = []
-
   async setAssets(list: { name: string; bytes: Uint8Array | null; error?: string }[]) {
-    this.assets = list
+    this.cur.assets = list
     await this.call<void>("setAssets", [list])
   }
 
   /** An assembly's components and the context of a part edited inside one; kept for a replacement thread too. */
-  private components: ComponentSource[] = []
-  private context: ContextSource | null = null
-
   async setComponents(list: ComponentSource[]) {
-    this.components = list
+    this.cur.components = list
     await this.call<void>("setComponents", [list])
   }
 
   async setContext(ctx: ContextSource | null) {
-    this.context = ctx
+    this.cur.context = ctx
     await this.call<void>("setContext", [ctx])
   }
 
   async rebuild(tree: Tree) {
     const r = await this.call<BuildReport>("rebuild", [tree])
-    this.lastTree = tree
+    this.cur.lastTree = tree
     return r
   }
   inspect(what: "body" | "faces" | "edges", selector?: unknown) {

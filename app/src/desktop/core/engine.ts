@@ -81,6 +81,11 @@ export interface KernelHost {
   setComponents?(list: ComponentSource[]): Promise<void>
   /** Editing a part inside an assembly: the other parts around it (null: none). */
   setContext?(ctx: ContextSource | null): Promise<void>
+  /**
+   * Hosts that keep several parts built (one kernel per part): make `slot` current. Resolves true when
+   * that kernel starts empty, so files and the tree must be handed over again.
+   */
+  use?(slot: string): Promise<boolean>
 }
 
 export interface Files {
@@ -208,10 +213,13 @@ export class Engine {
   private chain: Promise<unknown> = Promise.resolve()
   /** After dispose: changes on disk are no longer followed (the CLI exits as soon as its command is done). */
   private disposed = false
-  private kernelDoc: Doc | null = null
-  private kernelTree: Tree | null = null
+  /** The tree each part's kernel last built (absent: it must build again). */
+  private built = new Map<string, Tree>()
+  /** The part whose kernel the next kernel calls go to. */
+  private slot: string | null = null
   /** Which part's files (and versions) the kernel holds for `import`. */
-  private assetsKey = ""
+  /** Per part: what its kernel was last handed (files, components, context), to skip handing it again. */
+  private assetsKeys = new Map<string, string>()
   /** Shared parameter files written by this engine, as written (their watchers then see no change). */
   /** What the engine itself last wrote to a path, and for whom: a watcher seeing it again is that change, not someone else's. */
   private wrote = new Map<string, { text: string; actor: CallContext["actor"] }>()
@@ -579,9 +587,9 @@ export class Engine {
       if (d.shared?.path === sh.path) await this.refreshShared(d)
       d.rev += 1
       d.changes = [{ rev: d.rev, actor: ctx.actor, at: Date.now(), summary: `改了共享参数 ${sh.file}`, seq: ++d.seq }, ...d.changes].slice(0, MAX_CHANGES)
-      if (this.kernelDoc === d) this.kernelDoc = null
+      this.built.delete(d.path)
     }
-    this.assetsKey = ""
+    this.assetsKeys.clear()
     const active = users.find((d) => d.path === this.active) ?? users[0]
     if (active) {
       await this.ensureKernel(active, true)
@@ -686,7 +694,7 @@ export class Engine {
         }
         contextNote = found.note ? `\n${found.note}。` : ""
       } else doc.context = null
-      this.assetsKey = ""
+      this.assetsKeys.delete(path)
       await this.ensureKernel(doc, true)
     }
     this.active = path
@@ -833,7 +841,8 @@ export class Engine {
     doc.unwatch()
     for (const stop of doc.assetWatch.values()) stop()
     this.docs.delete(path)
-    if (this.kernelDoc === doc) this.kernelDoc = null
+    this.built.delete(path)
+    this.assetsKeys.delete(path)
     for (const [s, p] of this.sessions) if (p === path) this.sessions.delete(s)
     if (this.active === path) this.active = [...this.docs.keys()].pop() ?? null
     const next = this.active ? this.docs.get(this.active) : null
@@ -941,7 +950,7 @@ export class Engine {
     doc.rev += 1
     doc.error = undefined
     if (usesChanged) await this.refreshShared(doc)
-    if (opts.report && this.kernelDoc === doc && this.kernelTree === tree) doc.report = opts.report
+    if (opts.report && this.slot === doc.path && this.built.get(doc.path) === tree) doc.report = opts.report
     else await this.ensureKernel(doc, true)
     doc.changes = [{ rev: doc.rev, actor, at: Date.now(), summary, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
     if (opts.save !== false && !(await this.save(doc, actor))) {
@@ -995,14 +1004,34 @@ export class Engine {
 
   // ------------------------------------------------------------------ kernel
 
-  /** The kernel holds one tree at a time: make it this part's current one (with its shared parameters). */
+  /**
+   * Point the kernel at this part. A host with one kernel per part keeps each part's last build, so
+   * switching back is a lookup, not a rebuild; a plain host holds one tree, rebuilt on every switch.
+   */
+  private async select(doc: Doc) {
+    if (this.slot === doc.path) return
+    if (this.opts.kernel.use) {
+      // That part's kernel came back empty (first use, or dropped to make room): hand everything over again.
+      if (await this.opts.kernel.use(doc.path)) {
+        this.built.delete(doc.path)
+        this.assetsKeys.delete(doc.path)
+      }
+    } else {
+      // One kernel for every part: it now holds another part's tree and files.
+      this.built.clear()
+      this.assetsKeys.clear()
+    }
+    this.slot = doc.path
+  }
+
+  /** Make the kernel hold this part's current tree (with its shared parameters). */
   private async ensureKernel(doc: Doc, force = false) {
+    await this.select(doc)
     const sourcesChanged = await this.syncAssets(doc, doc.tree)
-    if (force || sourcesChanged || this.kernelDoc !== doc || this.kernelTree !== doc.tree) {
+    if (force || sourcesChanged || this.built.get(doc.path) !== doc.tree) {
       const tree = doc.tree
       doc.report = await this.opts.kernel.rebuild(this.effective(doc, tree))
-      this.kernelDoc = doc
-      this.kernelTree = tree
+      this.built.set(doc.path, tree)
     }
     return doc.report!
   }
@@ -1039,12 +1068,12 @@ export class Engine {
     const ctx = doc.context ? await this.contextOf(doc, false) : null
     this.watchAssets(doc, [...probe.watch, ...(doc.shared ? [doc.shared.path] : []), ...(ctx?.watch ?? [])])
     const key = JSON.stringify([doc.path, probe.signature, ctx?.key ?? null])
-    if (key === this.assetsKey) return false
+    if (key === this.assetsKeys.get(doc.path)) return false
     const full = await gather(files, doc.path, tree, [], true)
     await this.opts.kernel.setAssets?.(full.assets)
     await this.opts.kernel.setComponents?.(full.components)
     await this.opts.kernel.setContext?.(doc.context ? ((await this.contextOf(doc, true))?.source ?? null) : null)
-    this.assetsKey = key
+    this.assetsKeys.set(doc.path, key)
     return true
   }
 
@@ -1115,7 +1144,7 @@ export class Engine {
               // writeShared already rebuilt every part using it and logged who changed what.
               if (mine) return
             }
-            this.assetsKey = ""
+            this.assetsKeys.delete(doc.path)
             doc.rev += 1
             doc.changes = [{ rev: doc.rev, actor: mine ? ours.actor : ("file" as const), at: Date.now(), summary: `${p.split(/[\\/]/).pop()} 更新了，已重建`, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
             await this.ensureKernel(doc, true)
@@ -1136,12 +1165,12 @@ export class Engine {
   private port(doc: Doc): KernelPort {
     return {
       rebuild: async (t) => {
-        this.kernelTree = null
+        await this.select(doc)
+        this.built.delete(doc.path)
         if (t.uses !== doc.shared?.file) doc.shared = t.uses ? await loadShared(this.opts.files, doc.path, t.uses) : null
         await this.syncAssets(doc, t)
         const r = await this.opts.kernel.rebuild(this.effective(doc, t))
-        this.kernelDoc = doc
-        this.kernelTree = t
+        this.built.set(doc.path, t)
         return r
       },
       inspect: (what, selector) => this.opts.kernel.inspect(what, selector),
