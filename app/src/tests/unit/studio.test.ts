@@ -11,6 +11,7 @@ import { trimMessages } from "@/studio/trim"
 import { annotationText } from "@/studio/annotations"
 import { STARTERS } from "@/studio/starters"
 import { closeOpen, splitBlocks } from "@/studio/md-blocks"
+import { termMentions } from "@/studio/md-terms"
 import { describeUse, drivenFeatures, paramDependents, paramUses } from "@/studio/param-uses"
 import { standardHole } from "@/studio/holes"
 import { dimSource } from "@/studio/dim-source"
@@ -389,6 +390,15 @@ describe("trimMessages", () => {
 })
 
 describe("streaming Markdown", () => {
+  it("marks a concept at its first mention in prose, read the way the reply is rendered", () => {
+    // A nested list item and a paragraph's continuation are prose, though indented four spaces.
+    expect(termMentions(["- 外层\n    - 基准"])).toEqual([["datum"]])
+    expect(termMentions(["说明\n    基准"])).toEqual([["datum"]])
+    // Code (fenced, ~~~, indented, inline) and link text don't count, and don't use the concept up.
+    expect(termMentions(["```\n基准\n```", "~~~\n基准\n~~~", "    基准", "`基准` 和 [基准](/glossary/datum)", "基准和自由度"])).toEqual([[], [], [], [], ["dof", "datum"]])
+    // Once per reply.
+    expect(termMentions(["基准", "还是基准"])).toEqual([["datum"], []])
+  })
   it("splits at blank lines, but not inside a fence or before a list item's continuation", () => {
     expect(splitBlocks("a\n\nb")).toEqual(["a", "b"])
     expect(splitBlocks("```\nx\n\ny\n```\n\nz")).toEqual(["```\nx\n\ny\n```", "z"])

@@ -3,7 +3,7 @@ import { Link } from "react-router"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { ConceptText } from "@/components/concept-term"
-import { TERMS } from "@/content/terms"
+import { remarkTerms, termMentions, type MdNode } from "../md-terms"
 import { CIRCLED_RE, circledNumber } from "../annotations"
 import { closeOpen, splitBlocks } from "../md-blocks"
 
@@ -61,8 +61,6 @@ const base: Components = {
   td: ({ children }) => <td className="border px-2 py-1 tabular">{children}</td>,
 }
 
-type MdNode = { type: string; value?: string; url?: string; children?: MdNode[] }
-
 /** ①②… in prose become links to `#pin-N`, so a reply can point back at an annotation. */
 function remarkPins() {
   const walk = (node: MdNode) => {
@@ -85,42 +83,6 @@ function remarkPins() {
     })
   }
   return (tree: MdNode) => walk(tree)
-}
-
-/** Glossary concepts, longest name first (so 「特征顺序」 wins over a shorter name inside it). */
-const TERM_NAMES = TERMS.map((t) => ({ id: t.id, name: t.name })).sort((a, b) => b.name.length - a.name.length)
-
-/** The first mention of each concept in `ids` becomes a `#term-<id>` link (not inside links or code). */
-function remarkTerms(ids: string[]) {
-  return () => (tree: MdNode) => {
-    const left = TERM_NAMES.filter((t) => ids.includes(t.id))
-    const walk = (node: MdNode) => {
-      if (!node.children || node.type === "link" || node.type === "inlineCode" || node.type === "code") return
-      node.children = node.children.flatMap((c): MdNode[] => {
-        if (c.type !== "text" || !c.value) {
-          walk(c)
-          return [c]
-        }
-        const out: MdNode[] = []
-        let rest = c.value
-        for (;;) {
-          let best: { at: number; t: (typeof left)[number] } | null = null
-          for (const t of left) {
-            const at = rest.indexOf(t.name)
-            if (at >= 0 && (!best || at < best.at)) best = { at, t }
-          }
-          if (!best) break
-          left.splice(left.indexOf(best.t), 1)
-          if (best.at > 0) out.push({ type: "text", value: rest.slice(0, best.at) })
-          out.push({ type: "link", url: `#term-${best.t.id}`, children: [{ type: "text", value: best.t.name }] })
-          rest = rest.slice(best.at + best.t.name.length)
-        }
-        if (rest) out.push({ type: "text", value: rest })
-        return out
-      })
-    }
-    walk(tree)
-  }
 }
 
 /** Plugin lists by what they do, so finished blocks keep the same props while a reply streams. */
@@ -147,23 +109,7 @@ export function Markdown({ text, onPin, streaming = false, terms = false }: { te
     if (streaming && list.length) list[list.length - 1] = closeOpen(list[list.length - 1])
     return list
   }, [text, streaming])
-  // Which concepts each block marks: a concept only at its first mention in the reply.
-  const termIds = React.useMemo(() => {
-    if (!terms) return blocks.map(() => [] as string[])
-    const seen = new Set<string>()
-    return blocks.map((b) => {
-      // Only prose counts: a mention inside code or a link text isn't marked, so it mustn't use up the term.
-      const prose = b
-        .replace(/(```|~~~)[\s\S]*?(\1|$)/g, " ")
-        .replace(/^(?: {4}|\t).*$/gm, " ")
-        .replace(/`[^`\n]*`/g, " ")
-        .replace(/\[[^\]]*\]\([^)]*\)/g, " ")
-      return TERM_NAMES.filter((t) => !seen.has(t.id) && prose.includes(t.name)).map((t) => {
-        seen.add(t.id)
-        return t.id
-      })
-    })
-  }, [blocks, terms])
+  const termIds = React.useMemo(() => (terms ? termMentions(blocks) : blocks.map(() => [] as string[])), [blocks, terms])
   const components = React.useMemo<Components>(
     () =>
       onPin || terms
