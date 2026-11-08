@@ -252,8 +252,9 @@ function DockContent({
           drag.current = null
         }}
         onKeyDown={(e) => {
-          if (e.key === "ArrowLeft") (e.preventDefault(), resizeBy(16))
-          if (e.key === "ArrowRight") (e.preventDefault(), resizeBy(-16))
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+          e.preventDefault()
+          resizeBy(e.key === "ArrowLeft" ? 16 : -16)
         }}
         className={cn(
           "absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none max-sm:hidden",
