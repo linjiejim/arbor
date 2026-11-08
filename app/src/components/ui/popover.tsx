@@ -1,5 +1,3 @@
-"use client"
-
 import * as React from "react"
 import { Popover as PopoverPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
@@ -7,7 +5,11 @@ import { cn } from "@/lib/utils"
 export const Popover = PopoverPrimitive.Root
 export const PopoverTrigger = PopoverPrimitive.Trigger
 export const PopoverClose = PopoverPrimitive.Close
-/** Position the panel somewhere other than the trigger (e.g. a point in a 3D view, via `virtualRef`). */
+// Puts the panel somewhere other than its trigger: a point on a canvas or in a
+// 3D view (`virtualRef` to an object with `getBoundingClientRect`), a word in
+// the text. Whatever opens it still needs a keyboard path. Pass a new
+// `virtualRef` object whenever the point moves: Radix re-measures only when the
+// anchor object changes (a fixed one can also lose to a PopoverTrigger in StrictMode).
 export const PopoverAnchor = PopoverPrimitive.Anchor
 
 /** Small, non-blocking panel anchored to its trigger: filters, pickers, quick edits. */

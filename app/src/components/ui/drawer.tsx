@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { Dialog as DialogPrimitive } from "radix-ui"
-import { X } from "lucide-react"
+import { ChevronLeft, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { s } from "@/lib/strings"
 import { useGuardedOpen } from "@/hooks/use-guarded-open"
@@ -17,17 +17,31 @@ import { FieldControlProvider } from "@/components/ui/field"
  *
  * Widths: sm 400 (filters, small settings), md 560 (details, default),
  * lg min(60vw, 960) (rich details). Full width on phones.
+ *
+ * mode="dock" is the workbench inspector: non-modal, no scrim, the main pane
+ * stays clickable. From 1440 (DOCK_MIN) it docks as a column beside the main
+ * pane (place <Drawer mode="dock"> last in a flex row); below it floats over
+ * the page and a click outside closes it. Width 360–520 (default 400), dragged
+ * from its left edge and remembered per `storageKey` (one per place). Esc
+ * closes the top layer only. Nested objects: useInspectorStack (≤ 3 deep).
  */
 let openCount = 0
 
+export const DOCK_MIN = 1440
+export const INSPECTOR_WIDTH = { min: 360, default: 400, max: 520 } as const
+
+type DrawerMode = "modal" | "dock"
+const ModeContext = React.createContext<DrawerMode>("modal")
+
 export function Drawer({
+  mode = "modal",
   dirty,
   open,
   defaultOpen,
   onOpenChange,
   children,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Root> & { dirty?: boolean }) {
+}: React.ComponentProps<typeof DialogPrimitive.Root> & { dirty?: boolean; mode?: DrawerMode }) {
   const g = useGuardedOpen({ open, defaultOpen, onOpenChange, dirty })
 
   React.useEffect(() => {
@@ -42,8 +56,8 @@ export function Drawer({
 
   return (
     <>
-      <DialogPrimitive.Root open={g.open} onOpenChange={g.onOpenChange} {...props}>
-        {children}
+      <DialogPrimitive.Root open={g.open} onOpenChange={g.onOpenChange} modal={mode !== "dock"} {...props}>
+        <ModeContext.Provider value={mode}>{children}</ModeContext.Provider>
       </DialogPrimitive.Root>
       <DiscardDialog open={g.discard.open} onKeep={g.discard.keep} onDiscard={g.discard.discard} />
     </>
@@ -61,10 +75,23 @@ const widths = {
 
 export function DrawerContent({
   size = "md",
+  storageKey,
   className,
   children,
   ...props
-}: React.ComponentProps<typeof DialogPrimitive.Content> & { size?: keyof typeof widths }) {
+}: React.ComponentProps<typeof DialogPrimitive.Content> & {
+  size?: keyof typeof widths
+  /** dock mode: remembers the width under this key (one per place). */
+  storageKey?: string
+}) {
+  const mode = React.useContext(ModeContext)
+  if (mode === "dock") {
+    return (
+      <DockContent storageKey={storageKey} className={className} {...props}>
+        {children}
+      </DockContent>
+    )
+  }
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay data-slot="scrim" className="fixed inset-0 z-50 bg-scrim data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out" />
@@ -90,20 +117,27 @@ export function DrawerContent({
   )
 }
 
-/** Title, optional meta line, actions (≤2 icon buttons), then ✕. */
+/** Title, optional meta line, actions (≤2 icon buttons), then ✕. `onBack` adds ← for a nested inspector object. */
 export function DrawerHeader({
   title,
   description,
   actions,
+  onBack,
   className,
 }: {
   title: React.ReactNode
   description?: React.ReactNode
   actions?: React.ReactNode
+  onBack?: () => void
   className?: string
 }) {
   return (
-    <div className={cn("flex shrink-0 items-start gap-2 border-b px-5 py-3.5", className)}>
+    <div className={cn("flex shrink-0 items-start gap-2 border-b px-5 py-3.5", onBack && "pl-3", className)}>
+      {onBack && (
+        <IconButton label={s().back} size="icon-sm" tooltip={false} onClick={onBack} className="-my-0.5 text-muted-foreground">
+          <ChevronLeft />
+        </IconButton>
+      )}
       <div className="min-w-0 flex-1 py-0.5">
         <DialogPrimitive.Title className="truncate text-heading font-semibold">{title}</DialogPrimitive.Title>
         {description ? (
@@ -120,6 +154,136 @@ export function DrawerHeader({
       </DialogPrimitive.Close>
     </div>
   )
+}
+
+function useMinWidth(px: number) {
+  const query = `(min-width: ${px}px)`
+  return React.useSyncExternalStore(
+    (cb) => {
+      const mq = window.matchMedia(query)
+      mq.addEventListener("change", cb)
+      return () => mq.removeEventListener("change", cb)
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  )
+}
+
+const clampWidth = (w: number) => Math.round(Math.min(INSPECTOR_WIDTH.max, Math.max(INSPECTOR_WIDTH.min, w)))
+
+function useStoredWidth(storageKey?: string) {
+  const key = `inspector:width:${storageKey ?? "default"}`
+  const [width, setWidth] = React.useState<number>(() => {
+    const saved = typeof localStorage !== "undefined" ? Number(localStorage.getItem(key)) : NaN
+    return Number.isFinite(saved) && saved > 0 ? clampWidth(saved) : INSPECTOR_WIDTH.default
+  })
+  const save = React.useCallback((w: number) => localStorage.setItem(key, String(w)), [key])
+  return [width, setWidth, save] as const
+}
+
+function DockContent({
+  storageKey,
+  className,
+  children,
+  onOpenAutoFocus,
+  onInteractOutside,
+  onFocusOutside,
+  style,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Content> & { storageKey?: string }) {
+  const docked = useMinWidth(DOCK_MIN)
+  const [width, setWidth, saveWidth] = useStoredWidth(storageKey)
+  const drag = React.useRef<{ x: number; w: number } | null>(null)
+
+  const resizeBy = (dx: number) =>
+    setWidth((w) => {
+      const next = clampWidth(w + dx)
+      saveWidth(next)
+      return next
+    })
+
+  return (
+    <DialogPrimitive.Content
+      data-mode="dock"
+      data-docked={docked || undefined}
+      // Docked, the inspector is part of the page: opening it leaves focus where it was (the row),
+      // and clicks or focus in the main pane never close it. Floating, it behaves like a light drawer.
+      onOpenAutoFocus={(e) => {
+        onOpenAutoFocus?.(e)
+        if (e.defaultPrevented) return
+        e.preventDefault()
+        if (!docked) (e.currentTarget as HTMLElement).focus()
+      }}
+      onInteractOutside={(e) => {
+        onInteractOutside?.(e)
+        if (docked) e.preventDefault()
+      }}
+      onFocusOutside={(e) => {
+        onFocusOutside?.(e)
+        if (docked) e.preventDefault()
+      }}
+      style={{ ...style, ["--inspector-w" as string]: `${width}px` }}
+      className={cn(
+        "flex flex-col outline-none sm:w-(--inspector-w)",
+        docked
+          ? "relative h-full shrink-0 border-l bg-background"
+          : "fixed inset-y-0 right-0 z-40 h-dvh w-full max-w-full bg-popover shadow-overlay data-[state=open]:animate-slide-in-right data-[state=closed]:animate-slide-out-right",
+        className,
+      )}
+      {...props}
+    >
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={s().resizePanel}
+        aria-valuemin={INSPECTOR_WIDTH.min}
+        aria-valuemax={INSPECTOR_WIDTH.max}
+        aria-valuenow={width}
+        tabIndex={0}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          drag.current = { x: e.clientX, w: width }
+        }}
+        onPointerMove={(e) => {
+          if (drag.current) setWidth(clampWidth(drag.current.w + drag.current.x - e.clientX))
+        }}
+        onPointerUp={() => {
+          if (drag.current) saveWidth(width)
+          drag.current = null
+        }}
+        onKeyDown={(e) => {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return
+          e.preventDefault()
+          resizeBy(e.key === "ArrowLeft" ? 16 : -16)
+        }}
+        className={cn(
+          "absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize touch-none outline-none max-sm:hidden",
+          "after:absolute after:inset-y-0 after:left-[3px] after:w-0.5 after:transition-colors after:duration-(--duration-fast)",
+          "hover:after:bg-input focus-visible:after:bg-ring",
+        )}
+      />
+      {children}
+    </DialogPrimitive.Content>
+  )
+}
+
+/**
+ * The inspector's history: `show` opens an object from the main pane (a new stack), `push`
+ * opens one linked from inside the inspector (≤ `max` deep; the next one replaces the top),
+ * `back` returns, `close` empties it. Promoting the top object to the main pane is the caller's
+ * navigation followed by `close()`.
+ */
+export function useInspectorStack<T>(max = 3) {
+  const [stack, setStack] = React.useState<T[]>([])
+  return {
+    stack,
+    top: stack.at(-1),
+    depth: stack.length,
+    show: React.useCallback((item: T) => setStack([item]), []),
+    push: React.useCallback((item: T) => setStack((s) => (s.length >= max ? [...s.slice(0, max - 1), item] : [...s, item])), [max]),
+    back: React.useCallback(() => setStack((s) => s.slice(0, -1)), []),
+    close: React.useCallback(() => setStack([]), []),
+  }
 }
 
 export function DrawerBody({ className, ...props }: React.ComponentProps<"div">) {
