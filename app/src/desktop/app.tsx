@@ -37,7 +37,9 @@ export function DesktopApp() {
   const studio = useDesktopStudio(doc, snapshot)
   const notes = useDesktopNotes(studio, doc, pick)
   const reselect = useReselect(studio)
+  const [partsPath, setPartsPath] = React.useState(doc?.path)
   const [partsView, setPartsView] = React.useState<PartsView>(NO_PARTS_VIEW)
+  if (partsPath !== doc?.path) { setPartsPath(doc?.path); setPartsView(NO_PARTS_VIEW) }
   const [treeHover, setTreeHover] = React.useState<Hover | null>(null)
   const [stepSlot, setStepSlot] = React.useState<HTMLDivElement | null>(null)
   const [setupOpen, setSetupOpen] = React.useState(false)
@@ -87,12 +89,25 @@ export function DesktopApp() {
   const pickHere = pick && pick.path === path ? pick : null
 
   const [annotation, setAnnotation] = React.useState(false)
-  const [pointed, setPointed] = React.useState<{ path?: string; id: string | null } | null>(null)
-  const [selected, setSelected] = React.useState<{ path?: string; id: string | null } | null>(null)
+  const [pointed, setPointed] = React.useState<{ path?: string; id: string | null; part?: string } | null>(null)
+  const [selected, setSelected] = React.useState<{ path?: string; id: string | null; part?: string } | null>(null)
   const pointedFeature = pointed?.path === path ? pointed?.id : null
   const selectedFeature = selected?.path === path ? selected?.id : null
-  const pointFeature = React.useCallback((id: string | null) => setPointed((p) => p?.id === id && p.path === path ? p : { path, id }), [path])
-  const selectFeature = React.useCallback((id: string | null) => setSelected((p) => ({ path, id: p?.path === path && p?.id === id ? null : id })), [path])
+  const selectedPart = selected?.part && selected.path === path ? studio.display?.parts?.findIndex((p) => p.name === selected.part) : undefined
+  const pointedPart = pointed?.part && pointed.path === path ? studio.display?.parts?.findIndex((p) => p.name === pointed.part) : undefined
+  const [locateStep, setLocateStep] = React.useState<{ id: string; request: number } | null>(null)
+  const pointFeature = React.useCallback((id: string | null, part?: number) => {
+    const name = part === undefined ? undefined : studio.display?.parts?.[part]?.name
+    setPointed((p) => p?.id === id && p.path === path && p.part === name ? p : { path, id, part: name })
+  }, [path, studio.display])
+  const selectFeature = React.useCallback((id: string | null, part?: number) => {
+    const name = part === undefined ? undefined : studio.display?.parts?.[part]?.name
+    setSelected((p) => ({ path, id: p?.path === path && p?.id === id && p.part === name ? null : id, part: name }))
+    if (name) setPartsView((v) => v.focus ? { ...v, focus: { ...v.focus, part: name } } : v)
+  }, [path, studio.display])
+  const selectionHover = pointedFeature ?? selectedFeature
+  const hoverPart = pointedFeature ? pointedPart : selectedPart
+  const modelHover: Hover | null = selectionHover ? { ids: [selectionHover], feature: selectionHover, label: "零件或步骤", faces: hoverPart !== undefined && hoverPart >= 0 ? studio.display?.groups.filter((g) => g.part === hoverPart).map((g) => g.hash) : undefined } : agentHover
   const [presented, setPresented] = React.useState<unknown>(null)
   const assembly = doc?.kind === "assembly" && !doc.context
   const loading = snapshot?.loading ?? (doc && !doc.error && snapshot?.kernel.phase !== "error" && (!studio.display || studio.display.provisional || presented !== studio.display) ? { path: doc.path, name: doc.name, startedAt: 0, progress: { stage: "mesh" as const, completed: 0, total: 1 } } : null)
@@ -103,7 +118,7 @@ export function DesktopApp() {
       <TitleBar snapshot={snapshot} doc={doc} pick={pick} onSetup={() => setSetupOpen(true)} sheet={sheet && Boolean(doc)} onSheet={setSheet} />
       <div className="flex min-h-0 flex-1">
         <PartsSidebar snapshot={snapshot} />
-        <main className="relative min-h-0 min-w-0 flex-1">
+        <main className="relative min-h-0 min-w-0 flex-1" data-testid="model-viewport" data-document={path} data-presented={Boolean(studio.display && presented === studio.display)} data-geometry-state={!studio.display ? "loading" : studio.display.provisional ? "preview" : "ready"}>
           {doc ? (
             <>
               <StudioViewport
@@ -113,7 +128,9 @@ export function DesktopApp() {
                 onPointFeature={pointFeature}
                 onSelectFeature={selectFeature}
                 onPresented={setPresented}
-                hover={treeHover ?? ((pointedFeature ?? selectedFeature) ? { ids: [pointedFeature ?? selectedFeature!], feature: pointedFeature ?? selectedFeature!, label: "零件或步骤" } : agentHover)}
+                selectedPart={selectedPart}
+                onLocateStep={selectedFeature ? () => setLocateStep((r) => ({ id: selectedFeature, request: (r?.request ?? 0) + 1 })) : undefined}
+                hover={treeHover ?? modelHover}
                 annotations={notes}
                 busy={Boolean(loading)}
                 copy={{ hint: pick || loading || !annotation ? null : "单击模型上的面或边，给 agent 留一条备注", add: pickHere ? "就是这里" : "记下备注", next: notes.nextPin, busy: "模型还在加载，完成后即可选面和标注" }}
@@ -123,9 +140,11 @@ export function DesktopApp() {
               />
               <TreeOverlay
                 studio={studio}
+                busy={Boolean(loading)}
                 onHover={setTreeHover}
                 pointedFeature={pointedFeature}
                 selectedFeature={selectedFeature}
+                locateStep={locateStep}
                 onSelectFeature={selectFeature}
                 reselect={reselect}
                 annotations={notes}

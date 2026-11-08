@@ -13,7 +13,7 @@ export function ModelLoading({ load, visible }: { load: LoadState; visible: bool
     return () => window.clearInterval(timer)
   }, [load.startedAt])
   const p = load.progress
-  const title = !load.startedAt ? "正在显示模型" : p ? STAGES[p.stage] : "正在打开模型"
+  const title = visible && load.startedAt ? "正在恢复精确几何" : !load.startedAt ? "正在显示模型" : p ? STAGES[p.stage] : "正在打开模型"
   const elapsed = Math.max(0, Math.floor((now - (load.startedAt || mountedAt)) / 1000))
   const determinate = p && p.total > 0
   const percent = determinate ? Math.min(100, Math.round(100 * p.completed / p.total)) : 0
@@ -37,7 +37,7 @@ export function ModelLoading({ load, visible }: { load: LoadState; visible: bool
             </div>
           </>
         )}
-        <p className="mt-3 text-caption text-muted-foreground">{visible ? "模型正在呈现，可以旋转查看。" : "正在计算模型，完成后会自动显示。"}</p>
+        <p className="mt-3 text-caption text-muted-foreground">{visible ? "预览已显示，可旋转、选件和隔离。标注与测量将在精确几何就绪后可用。" : "正在计算模型，完成后会自动显示。"}</p>
       </div>
     </div>
   )

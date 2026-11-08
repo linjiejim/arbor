@@ -24,7 +24,7 @@ export function useAnnotations(studio: Studio) {
   /** Direction from the target to the camera, kept by the viewport: the screenshot uses the learner's view. */
   const viewDir = React.useRef(new THREE.Vector3(1, -1.1, 0.85).normalize())
 
-  const pins: Pin[] = React.useMemo(() => [...pending, ...sent].map((a) => ({ n: a.n, point: a.point as Pin["point"] })), [pending, sent])
+  const pins: Pin[] = React.useMemo(() => [...pending, ...sent].map((a) => ({ n: a.n, point: a.point as Pin["point"], part: a.part })), [pending, sent])
   // `look` draws this turn's pins too, so the model can check it changed the right spot.
   const { setPins } = studio
   React.useEffect(() => setPins(pins), [setPins, pins])
@@ -63,7 +63,7 @@ export function useAnnotations(studio: Studio) {
         notify(`${a.kind === "face" ? "这个面" : "这条边"}已经变了，在现在的模型上找不到`)
         return
       }
-      setFocus({ kind: a.kind, hashes, pin: { n: a.n, point: a.point as Pin["point"] } })
+      setFocus({ kind: a.kind, hashes, pin: { n: a.n, point: a.point as Pin["point"], part: a.part } })
     },
     [studio],
   )

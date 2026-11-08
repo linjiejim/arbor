@@ -78,6 +78,8 @@ export interface KernelHost {
   dimensions(): Promise<Dim[]>
   drawing(withIso: boolean): Promise<DrawingData | null>
   exportBody(format: "step" | "stl", index?: number): Promise<Uint8Array | null>
+  /** Show a source-validated portable mesh before preparing native components. */
+  preparePreview?(path: string, tree: Tree, assets: ComponentSource["assets"], components: ComponentSource[], context: ContextSource | null): Promise<void>
   /** Files `import` features read (absent: this host can't read files). */
   setAssets?(list: { name: string; bytes: Uint8Array | null; error?: string }[]): Promise<void>
   /** What an assembly's components read (absent: this host can't read files). */
@@ -1136,9 +1138,11 @@ export class Engine {
     const key = JSON.stringify([doc.path, probe.signature, ctx?.key ?? null])
     if (key === this.assetsKeys.get(doc.path)) return false
     const full = await gather(files, doc.path, tree, [], true)
+    const context = doc.context ? ((await this.contextOf(doc, true))?.source ?? null) : null
+    await this.opts.kernel.preparePreview?.(doc.path, this.effective(doc, tree), full.assets, full.components, context)
     await this.opts.kernel.setAssets?.(full.assets)
     await this.opts.kernel.setComponents?.(full.components)
-    await this.opts.kernel.setContext?.(doc.context ? ((await this.contextOf(doc, true))?.source ?? null) : null)
+    await this.opts.kernel.setContext?.(context)
     this.assetsKeys.set(doc.path, key)
     return true
   }

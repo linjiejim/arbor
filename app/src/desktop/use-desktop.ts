@@ -227,6 +227,7 @@ export const asNote = (n: PartNote & { kind: "face" | "edge" }): Note => ({
   origins: n.origins,
   facts: n.facts,
   point: n.point,
+  part: n.part,
   selector: n.selector,
   smooth: n.smooth,
   sketch: n.sketch,
@@ -260,7 +261,7 @@ export function useDesktopNotes(
   const notes = doc?.notes
   // Only notes on a face or an edge have a pin on the model.
   const open = React.useMemo(() => (notes ?? []).filter((n): n is PartNote & { kind: "face" | "edge" } => n.status === "open" && n.kind !== "part"), [notes])
-  const pins: Pin[] = React.useMemo(() => open.map((n) => ({ n: n.n, point: n.point })), [open])
+  const pins: Pin[] = React.useMemo(() => open.map((n) => ({ n: n.n, point: n.point, part: n.part })), [open])
   const pending = React.useMemo(() => open.map(asNote), [open])
   const { setPins, locate } = studio
   React.useEffect(() => setPins(pins), [setPins, pins])
@@ -308,14 +309,14 @@ export function useDesktopNotes(
 
   /** Light up a note's face or edge on the model as it is now. */
   const show = React.useCallback(
-    async (a: { kind: "face" | "edge"; selector: Record<string, unknown> | null; n: number; point: number[] }) => {
+    async (a: { part?: string; kind: "face" | "edge"; selector: Record<string, unknown> | null; n: number; point: number[] }) => {
       const hashes = a.selector ? await locate(a.kind, a.selector) : null
       if (!hashes?.length) {
         setFocus(null)
         notify(`${a.kind === "face" ? "这个面" : "这条边"}已经变了，在现在的模型上找不到`)
         return
       }
-      setFocus({ kind: a.kind, hashes, pin: { n: a.n, point: a.point as Pin["point"] } })
+      setFocus({ kind: a.kind, hashes, pin: { n: a.n, point: a.point as Pin["point"], part: a.part } })
     },
     [locate],
   )

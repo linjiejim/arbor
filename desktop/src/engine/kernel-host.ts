@@ -13,6 +13,7 @@ import type { PickInfo } from "../../../app/src/studio/annotations"
 import type { KernelReply, KernelRequest } from "./kernel-thread"
 import { ComponentPool } from "./component-pool"
 import path from "node:path"
+import { ProjectPreview } from "./project-preview"
 import { AssemblyCache, assemblyKey } from "./assembly-cache"
 
 /** Same limit as the browser studio's worker. */
@@ -31,6 +32,8 @@ export class ThreadKernel implements KernelHost {
   private cache: Promise<AssemblyCache | null>
   private diagnosticWorkers = new Map<string, Worker>()
   private generations = new Map<string, number>()
+  private projectPreview = new ProjectPreview()
+  private writes = new Set<Promise<void>>()
   private preview: DisplayData | null = null
   private worker: Worker | null = null
   private started: Promise<void> | null = null
@@ -169,6 +172,15 @@ export class ThreadKernel implements KernelHost {
     if (prior) { this.diagnosticWorkers.delete(this.slot); void prior.terminate() }
   }
 
+  async preparePreview(file: string, tree: Tree, assets: ComponentSource["assets"], components: ComponentSource[], context: ContextSource | null) {
+    if (!tree.features.some((f) => f.op === "component")) return
+    const directory = await this.pool.directory
+    if (!directory) return
+    const key = assemblyKey([tree, assets ?? [], components, context])
+    const display = await this.projectPreview.read(file, key, path.basename(directory))
+    if (display) this.onPreview(display)
+  }
+
   async setAssets(list: { name: string; bytes: Uint8Array | null; error?: string }[]) {
     this.cancelDiagnostics()
     this.cur.assets = list
@@ -210,6 +222,14 @@ export class ThreadKernel implements KernelHost {
       const deferred = background && assembly
       const r = await this.call<BuildReport>("rebuild", [tree, { interferences: cached?.interferences, deferChecks: deferred }])
       this.cur.lastTree = tree
+      if (key && this.preview && !r.paramError && r.features.every((f) => f.state !== "error" && f.state !== "skipped")) {
+        const directory = await this.pool.directory
+        if (directory && path.isAbsolute(slot)) {
+          const write = this.projectPreview.write(slot, key, path.basename(directory), this.preview)
+          this.writes.add(write)
+          void write.finally(() => this.writes.delete(write))
+        }
+      }
       if (key && this.preview && !r.checksPending && !r.paramError && r.features.every((f) => f.state !== "error" && f.state !== "skipped")) {
         await cache?.put(key, { display: this.preview, interferences: r.interferences })
       }
@@ -294,6 +314,7 @@ export class ThreadKernel implements KernelHost {
 
   async dispose() {
     this.closed = true
+    await Promise.all(this.writes)
     await Promise.all([...this.diagnosticWorkers.values()].map((w) => w.terminate()))
     this.diagnosticWorkers.clear()
     await this.pool.dispose()

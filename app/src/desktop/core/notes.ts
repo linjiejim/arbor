@@ -35,6 +35,7 @@ export function newNote(file: NotesFile, pick: PickInfo | null, text: string): P
     where: pick.where,
     facts: pick.facts,
     origins: pick.origins,
+    part: pick.part,
     point: pick.point as V3,
     selector: pick.selector,
     sketch: pick.sketch,

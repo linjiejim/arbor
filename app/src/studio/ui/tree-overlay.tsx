@@ -34,6 +34,7 @@ export function TreeOverlay({
   rowActions,
   pointedFeature,
   selectedFeature,
+  locateStep,
   onSelectFeature,
   partsList = true,
   footer,
@@ -51,6 +52,7 @@ export function TreeOverlay({
   /** Buttons under a step (the desktop's assembly: show or hide a part, edit it in place). */
   pointedFeature?: string | null
   selectedFeature?: string | null
+  locateStep?: { id: string; request: number } | null
   onSelectFeature?: (id: string | null) => void
   rowActions?: (f: Feature) => React.ReactNode
   /** The list of parts with their eyes over the timeline (off when the steps carry them). */
@@ -82,6 +84,17 @@ export function TreeOverlay({
   React.useEffect(() => {
     if (rollback) list.current?.querySelector<HTMLElement>(`[data-step="${CSS.escape(rollback)}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" })
   }, [rollback])
+
+  React.useEffect(() => {
+    if (!selectedFeature) return
+    list.current?.querySelector<HTMLElement>(`[data-step="${CSS.escape(selectedFeature)}"]`)?.scrollIntoView({ block: "nearest", inline: "nearest" })
+  }, [selectedFeature])
+  React.useEffect(() => {
+    if (!locateStep) return
+    const step = list.current?.querySelector<HTMLElement>(`[data-step="${CSS.escape(locateStep.id)}"]`)
+    step?.scrollIntoView({ block: "nearest", inline: "center" })
+    step?.focus({ preventScroll: true })
+  }, [locateStep])
 
   const show = (f: Feature) => {
     setPeek(f.id)
@@ -226,6 +239,7 @@ export function TreeOverlay({
                   aria-expanded={pinned === f.id}
                   onMouseEnter={() => show(f)}
                   onFocus={() => show(f)}
+                  onBlur={(e) => { if (!e.currentTarget.parentElement?.contains(e.relatedTarget as Node | null)) hide() }}
                   aria-describedby={peek === f.id && !pinned ? "feature-peek" : undefined}
                   aria-current={active ? "step" : undefined}
                   className={cn(
@@ -233,7 +247,7 @@ export function TreeOverlay({
                     "transition-[background-color,color,border-color] duration-(--duration-fast) ease-out",
                     "hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground",
                     peek === f.id && "bg-muted text-foreground",
-                    (active || pinned === f.id) && "border-border bg-selected text-foreground",
+                    (active || pinned === f.id || selectedFeature === f.id) && "border-border bg-selected text-foreground",
                     (after || f.suppressed) && "opacity-50",
                   )}
                 >

@@ -17,6 +17,7 @@ export type Change = { rev: number; actor: Actor; at: number; summary: string; n
 
 /** A note the person pinned on a face or edge, for the agent to pick up. */
 export type PartNote = {
+  part?: string
   /** Stable id the agent uses: "n3". */
   id: string
   /** The number on the pin: 3. Never reused within a part. */
