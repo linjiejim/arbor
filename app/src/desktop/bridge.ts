@@ -25,6 +25,8 @@ export const arbor: ArborBridge =
     newPart: missing,
     newProject: missing,
     openProject: missing,
+    openProjectAt: missing,
+    recentProjects: () => Promise.resolve([]),
     pickFile: missing,
     reveal: missing,
     exportPart: missing,

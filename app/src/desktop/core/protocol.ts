@@ -145,6 +145,8 @@ export type AgentSetup = {
 }
 
 /** What the preload script exposes to the window as `window.arbor`. */
+export type RecentProject = { root: string; name: string }
+
 export interface ArborBridge {
   state(): Promise<{ snapshot: Snapshot; doc: DocState | null; pick: PickRequest | null }>
   subscribe(cb: (e: EngineEvent) => void): () => void
@@ -159,6 +161,10 @@ export interface ArborBridge {
   newProject(): Promise<string | null>
   /** Folder dialog, then open_project. */
   openProject(): Promise<string | null>
+  /** A project folder from the start page's list (in this window, or the one that has it open). */
+  openProjectAt(root: string): Promise<boolean>
+  /** Project folders opened lately that still exist, newest first. */
+  recentProjects(): Promise<RecentProject[]>
   /** File dialog for something to put in an assembly: a part or assembly file, or a STEP. */
   pickFile(kind: "part" | "step"): Promise<string | null>
   reveal(path: string): Promise<void>

@@ -10,6 +10,10 @@
 - AI 来自你自己的 agent：Arbor 不调用任何模型，也不需要 key。
 - 零件就是一个 `.arbor.json` 文件（特征树 JSON），可以放进 git、可以直接编辑；备注在旁边的 `.notes.json`。
 - 一个文件夹就是一个项目：左栏列出里面的装配和零件。「文件 → 新建项目」建一个文件夹，里面放同名的空装配和共享参数文件；装配的特征树底部「+ 零件」新建零件（放在 `parts/` 下，共用项目参数）、放进已有零件或 STEP。
+- 新建项目缺省放在 `~/.arbor/projects/` 下，不改名就用时间命名（`YYYYMMDDhhmmss`）。打开项目时优先打开和文件夹同名的装配。
+- 一个窗口一个项目，几个项目可以同时开、互不干扰：每个窗口有自己的引擎和内核线程。当前窗口已经有项目时，「新建项目」「打开项目」会开一个新窗口；同一个项目只在一个窗口里打开。「文件 → 新建窗口」（⌥⌘N）开一个空窗口。
+- 标题栏的首页按钮（⇧⌘H）关掉这个窗口的项目，回到首页；首页列出最近的项目。
+- ⌘= / ⌘- / ⌘0 缩放整个窗口，下次启动还是这个比例。装配里选中零件后按 H 隐藏，⇧H 显示全部隐藏的零件（选中零件的工具栏里也有这两个按钮）。
 
 ## 装好、跑起来
 
@@ -76,6 +80,8 @@ Claude Code / Codex ──MCP (stdio)──► arbor mcp ──HTTP 127.0.0.1─
 - **引擎**（`app/src/desktop/core/engine.ts`）管打开的零件、撤销、备注和全部命令；和平台无关，Electron 主进程和命令行用的是同一份。
 - **内核**在 Node 的 worker 线程里跑（`desktop/src/engine/kernel-thread.ts`），每个零件一个内核（最近用的 4 个），切回一个零件时直接用上次的结果，不重建；wasm 堆超过 1.4 GB 就换一个线程，只重放当前零件，其余零件下次用到时再建。
 - **`arbor mcp`** 每次调用都转给正在运行的 App，所以窗口里能看到每一步；App 没开时会自动启动它（不抢焦点）；启动不了就在自己进程里起一个无窗口的引擎（这时 `look` 和 `request_pick` 不可用）。
+- **多个窗口时调用发到哪**：发到这个项目所在的窗口（零件或文件夹在哪个窗口的项目里）；`open_project` 打开一个还没打开的项目时，用空窗口或新开一个窗口；其余情况留在这个 agent 上次用的窗口。所以两个 agent 各做各的项目，各在各的窗口里。窗口关掉后，agent 10 分钟内还在用的引擎会留着（`look` 会再开窗口），否则释放。
+- **无窗口模式**：`arbor mcp --headless`（或环境变量 `ARBOR_HEADLESS=1`）在 App 没运行时把它在后台启动，不显示窗口也不占 Dock，`look` 在隐藏的窗口里照常出图。运行 Arbor 或 `arbor open` 会把窗口叫出来；agent 调 `request_pick` 时也会弹出窗口。没人调用 30 分钟后自动退出。已经在运行的 App 不管是不是无窗口，都直接用它。
 - **谁改的都算**：agent、窗口里的你、直接改文件（编辑器、git），每次改动都记在「动态」里、都能撤销。agent 下一次调用时，结果开头会写「自你上次调用以来，用户改了：W 40 → 45」，避免它把你的改动改回去。
 - **发现**：App 启动时把端口和随机 token 写进 `~/.arbor/engine.json`（权限 600），把怎么启动自己写进 `~/.arbor/app.json`；只监听 127.0.0.1，并检查 Host 头。
 
@@ -111,7 +117,8 @@ arbor look box -o shots/                             # 需要窗口，会自动�
 arbor setup                                          # 打印接入各个 agent 的命令
 ```
 
-`--headless` 不连 App，在自己的进程里算（适合 CI 和脚本，这时要用 `--part` 指定零件）。
+- `--headless`：App 没运行时在后台启动它，不显示窗口（见上面的无窗口模式）。
+- `--no-app`：不连 App，在自己的进程里算（适合 CI 和脚本，这时要用 `--part` 指定零件；没有 `look`）。MCP 用环境变量 `ARBOR_NO_APP=1`。以前的 `--headless` 就是这个意思，0.5.0 起改名。
 
 ## 开发
 
@@ -120,8 +127,9 @@ cd app && npx vitest run src/tests/unit/desktop.test.ts   # 引擎的单元测�
 cd desktop && npm run check                               # 主进程、引擎、MCP、CLI 的类型检查
 node scripts/smoke-mcp.mjs                                 # 用官方 MCP 客户端走一遍（无窗口）
 node scripts/smoke-mcp.mjs --app                           # 连正在运行的 App，含 look 和 show
+ARBOR_HOME=/tmp/arbor-dev npm start                         # 和装好的 Arbor 互不影响（单实例锁、~/.arbor 都换成这个目录）
 npm start -- --remote-debugging-port=9223                  # 然后：
-node scripts/cdp.mjs shot out.png                          #   给窗口截图
+node scripts/cdp.mjs shot out.png                          #   给窗口截图（多个窗口：ARBOR_CDP_WINDOW=<序号>，cdp.mjs windows 列出）
 node scripts/cdp.mjs click 520 470                         #   在窗口里点（CSS 像素）
 ../.venv/bin/python -I resources/logo/make-logo.py         # 重新生成标志（SVG、网页用的路径、favicon）
 python3 -I scripts/make-icons.py                           # 从标志生成 App 图标

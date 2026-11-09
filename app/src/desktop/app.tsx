@@ -22,7 +22,7 @@ import { NoteComposer } from "./ui/note-composer"
 import { PartsSidebar } from "./ui/parts-sidebar"
 import { ActivityPanel, NotesPanel } from "./ui/side-panels"
 import { TitleBar } from "./ui/title-bar"
-import { Welcome } from "./ui/welcome"
+import { ProjectStart, Welcome } from "./ui/welcome"
 import { ModelLoading } from "./ui/model-loading"
 
 /** A note pinned on a face or an edge (not one about the whole part). */
@@ -132,9 +132,10 @@ export function DesktopApp() {
     <div className="flex h-dvh flex-col bg-background">
       <TitleBar snapshot={snapshot} doc={doc} pick={pick} onSetup={() => setSetupOpen(true)} sheet={sheet && Boolean(doc)} onSheet={setSheet} />
       <div className="flex min-h-0 flex-1">
-        <PartsSidebar snapshot={snapshot} instances={assembly ? assemblyParts : []} selected={selectedNames}
+        {/* The start page is just the start page: the sidebar comes with a project or an open file. */}
+        {(doc || snapshot?.project || snapshot?.parts.length || loading) && <PartsSidebar snapshot={snapshot} instances={assembly ? assemblyParts : []} selected={selectedNames}
           onSelect={(p, additive) => selectFeature(p.id, p.index, additive)}
-          onPoint={(p) => pointFeature(p?.id ?? null, p?.index)} />
+          onPoint={(p) => pointFeature(p?.id ?? null, p?.index)} />}
         <main className="relative min-h-0 min-w-0 flex-1" data-testid="model-viewport" data-document={path} data-pointed-part={pointed?.path === path ? pointed?.part ?? "" : ""} data-presented={Boolean(studio.display && presented === studio.display)} data-geometry-state={!studio.display ? "loading" : studio.display.provisional ? "preview" : "ready"}>
           {doc ? (
             <>
@@ -177,7 +178,15 @@ export function DesktopApp() {
                   <DrawingSheet studio={studio} title={doc.name} />
                 </div>
               )}
-              <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex flex-col items-center gap-2 px-56">
+            </>
+          ) : (
+            !loading && (snapshot?.project ? <ProjectStart name={snapshot.project.name} /> : <Welcome onSetup={() => setSetupOpen(true)} />)
+          )}
+          {/* Loading and recomputing sit at the top with the agent's banners, out of the model's way. */}
+          <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex flex-col items-center gap-2 pr-80 pl-16">
+            {loading && <ModelLoading load={loading} visible={Boolean(doc?.path === loading.path && studio.display?.mesh)} />}
+            {doc && (
+              <>
                 {pick && <PickBanner request={pick} elsewhere={pick.path !== path} />}
                 {show && show.path === path && !pick && <ShowBanner request={show} onClose={clearShow} />}
                 {doc.report?.checksError && <Banner tone="info" icon={<Boxes />}>后台检查失败：{doc.report.checksError}。可继续查看，精确结果暂不可用。</Banner>}
@@ -188,12 +197,9 @@ export function DesktopApp() {
                   </Banner>
                 )}
                 {!pick && doc.context && <ContextBanner doc={doc} />}
-              </div>
-            </>
-          ) : (
-            !loading && <Welcome onSetup={() => setSetupOpen(true)} />
-          )}
-          {loading && <ModelLoading load={loading} visible={Boolean(doc?.path === loading.path && studio.display?.mesh)} />}
+              </>
+            )}
+          </div>
         </main>
         {doc && (
           <Tabs value={tab} onValueChange={setTab} className="relative flex w-[380px] shrink-0 flex-col border-l max-xl:w-[340px]">

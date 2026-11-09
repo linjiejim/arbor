@@ -10,8 +10,10 @@ import { Link } from "../engine/backend"
 declare const __ARBOR_VERSION__: string
 
 export async function runMcp(distDir: URL) {
-  const headless = process.env.ARBOR_HEADLESS === "1"
-  const link = new Link({ noApp: headless, launch: !headless && process.env.ARBOR_NO_LAUNCH !== "1", headless: true, distDir, log: (m) => process.stderr.write(`[arbor] ${m}\n`) })
+  // ARBOR_HEADLESS: start the app without windows; ARBOR_NO_APP: an engine in this process only (no look, no picks).
+  const noApp = process.env.ARBOR_NO_APP === "1"
+  const hidden = process.env.ARBOR_HEADLESS === "1"
+  const link = new Link({ noApp, hidden, launch: !noApp && process.env.ARBOR_NO_LAUNCH !== "1", fallback: true, distDir, log: (m) => process.stderr.write(`[arbor] ${m}\n`) })
   const tools = agentCommands().map((c) => ({ name: c.name, description: c.description, inputSchema: inputJsonSchema(c) as { type: "object" } }))
 
   const server = new Server({ name: "arbor", title: "Arbor", version: __ARBOR_VERSION__ }, { capabilities: { tools: {} }, instructions: AGENT_GUIDE })

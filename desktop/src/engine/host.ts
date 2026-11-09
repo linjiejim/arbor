@@ -3,7 +3,7 @@
 import os from "node:os"
 import { Engine, type Screen } from "../../../app/src/desktop/core/engine"
 import { nodeFiles } from "./files"
-import { readRecent, writeRecent } from "./home"
+import { addRecent, readRecent } from "./home"
 import { ThreadKernel } from "./kernel-host"
 
 /** `distDir`: the folder with kernel/kernel-thread.mjs (the build output). */
@@ -13,6 +13,6 @@ export function startEngine(opts: { distDir: URL; screen?: () => Screen | null; 
     opts.onKernel?.()
     engine?.kernelChanged()
   }, (display) => engine?.kernelPreview(display), (path, report) => engine?.kernelDiagnostics(path, report))
-  engine = new Engine({ kernel, files: nodeFiles, screen: opts.screen, recent: readRecent(), onRecent: writeRecent, home: os.homedir() })
+  engine = new Engine({ kernel, files: nodeFiles, screen: opts.screen, recent: readRecent(), onRecent: (paths) => paths[0] && addRecent(paths[0]), home: os.homedir() })
   return { engine, kernel }
 }

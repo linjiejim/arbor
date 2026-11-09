@@ -1,6 +1,6 @@
 // `arbor`: the command line. `arbor mcp` is the MCP server; the rest call the
 // same engine commands from a shell or a script. Talks to the running app
-// when there is one (the person sees the change), otherwise runs headless.
+// when there is one (the person sees the change), otherwise runs in-process.
 import { spawn } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
@@ -31,7 +31,9 @@ const HELP = `arbor ${__ARBOR_VERSION__}：让 coding agent 在 Arbor 里建参�
 
 选项：
   --part <零件>   命令作用在哪个零件（缺省是 App 里当前的零件）
-  --headless      不连 App，在这个进程里起一个没有窗口的引擎
+  --headless      App 没在运行时在后台启动它，不显示窗口（look 照常出图）；
+                  arbor mcp --headless 让 agent 这样用
+  --no-app        不连 App，在这个进程里起一个没有窗口的引擎（适合 CI；没有 look）
   --json          输出 JSON
 
 例子：
@@ -40,15 +42,16 @@ const HELP = `arbor ${__ARBOR_VERSION__}：让 coding agent 在 Arbor 里建参�
   arbor check box '{"size":[80,50,30]}'
 `
 
-type Flags = { part?: string; headless: boolean; json: boolean; out?: string }
+type Flags = { part?: string; headless: boolean; noApp: boolean; json: boolean; out?: string }
 
 function parseArgs(argv: string[]) {
-  const flags: Flags = { headless: false, json: false }
+  const flags: Flags = { headless: false, noApp: false, json: false }
   const rest: string[] = []
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === "--part") flags.part = argv[++i]
     else if (a === "--headless") flags.headless = true
+    else if (a === "--no-app") flags.noApp = true
     else if (a === "--json") flags.json = true
     else if (a === "-o" || a === "--out") flags.out = argv[++i]
     else rest.push(a)
@@ -87,7 +90,7 @@ function print(res: CommandResult, flags: Flags) {
 }
 
 async function withLink<T>(flags: Flags, launch: boolean, fn: (link: Link) => Promise<T>) {
-  const link = new Link({ noApp: flags.headless, launch: launch && !flags.headless, headless: true, distDir, log: (m) => process.stderr.write(`${m}\n`) })
+  const link = new Link({ noApp: flags.noApp, hidden: flags.headless, launch: !flags.noApp && (launch || flags.headless), fallback: true, distDir, log: (m) => process.stderr.write(`${m}\n`) })
   try {
     return await fn(link)
   } finally {
@@ -101,6 +104,7 @@ async function main() {
   const { flags, rest } = parseArgs(process.argv.slice(2))
   const [cmd, ...args] = rest
   if (flags.headless) process.env.ARBOR_HEADLESS = "1"
+  if (flags.noApp) process.env.ARBOR_NO_APP = "1"
 
   switch (cmd) {
     case undefined:

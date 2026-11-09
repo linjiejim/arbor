@@ -20,10 +20,12 @@ export interface Backend {
 export type ConnectOptions = {
   /** Start the app when it isn't running. */
   launch: boolean
-  /** Never use the app, even when it runs (`--headless`). */
+  /** Start it without windows (`--headless`): it runs in the background, `look` still renders. */
+  hidden?: boolean
+  /** Never use the app, even when it runs (`--no-app`). */
   noApp?: boolean
   /** Fall back to an in-process engine (no window: no look, no picks). */
-  headless: boolean
+  fallback: boolean
   /** The build output folder (has kernel/kernel-thread.mjs). */
   distDir: URL
   log?: (msg: string) => void
@@ -72,15 +74,15 @@ class LocalBackend implements Backend {
   }
 }
 
-/** Start the app in the background (it shows its window without taking focus). */
-export function launchApp(): boolean {
+/** Start the app in the background: its window shows without taking focus, or not at all when `hidden`. */
+export function launchApp(hidden = false): boolean {
   const app = readAppInfo()
   if (!app) return false
   const env = { ...process.env }
   // We may be running as Node inside Electron; the app must not.
   delete env.ELECTRON_RUN_AS_NODE
   try {
-    const child = spawn(app.exec, [...app.args, "--from-agent"], { detached: true, stdio: "ignore", env })
+    const child = spawn(app.exec, [...app.args, "--from-agent", ...(hidden ? ["--headless"] : [])], { detached: true, stdio: "ignore", env })
     child.on("error", () => {})
     child.unref()
     return true
@@ -103,13 +105,13 @@ export async function connect(opts: ConnectOptions): Promise<Backend> {
   if (opts.noApp) return new LocalBackend(opts.distDir)
   const running = await runningApp()
   if (running) return new AppBackend(running)
-  if (opts.launch && launchApp()) {
+  if (opts.launch && launchApp(opts.hidden)) {
     opts.log?.("正在启动 Arbor App…")
     const info = await waitForApp(30_000)
     if (info) return new AppBackend(info)
     opts.log?.("Arbor App 没有在 30 秒内启动")
   }
-  if (opts.headless) return new LocalBackend(opts.distDir)
+  if (opts.fallback) return new LocalBackend(opts.distDir)
   throw new Error("Arbor App 没在运行。先打开 Arbor（或运行 arbor open），再试一次。")
 }
 
