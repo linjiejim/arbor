@@ -330,6 +330,22 @@ export class Engine {
     return doc ? this.state(doc) : null
   }
 
+  /** The project folder, if any: the app sends an agent's calls about files in it to this engine. */
+  get projectRoot() {
+    return this.project?.root ?? null
+  }
+
+  /** This engine has the file open, or it lies in its project. */
+  owns(path: string) {
+    const p = this.partKey(path)
+    return this.docs.has(p) || Boolean(this.project && inside(this.project.root, p))
+  }
+
+  /** Nothing open: a window on the start page, free to take a project. */
+  get empty() {
+    return !this.project && this.docs.size === 0 && !this.loading
+  }
+
   get recentParts() {
     return [...this.recent]
   }
@@ -415,6 +431,7 @@ export class Engine {
       if (name === "scan_project") return await this.rescan()
       if (name === "add_part") return await this.addPart(input as { name?: string; file?: string }, ctx)
       if (name === "close_part") return this.closePart(this.partKey(String(input.path)))
+      if (name === "close_project") return this.closeProject()
       const doc = await this.resolveDoc(ctx)
       if (!doc) return fail("还没有打开零件：先用 open_part（path 写零件文件，新零件加 create: true）。")
       // Catch up with the file first: an editor may have saved it a moment ago (the watcher is debounced).
@@ -826,11 +843,16 @@ export class Engine {
         created = `新建了装配 ${baseName(sk.assembly)}${hadParams ? `，用已有的参数文件 ${baseName(sk.params)}` : ` 和参数文件 ${baseName(sk.params)}`}。`
       }
     } else if (list === null) return fail(`没有这个文件夹：${root}。要新建就设 create=true。`)
+    // Another project: what was open from the last one goes (else the window keeps showing it, and its sidebar mixes both).
+    if (this.project?.root !== root) {
+      for (const p of [...this.docs.keys()]) if (!inside(root, p)) this.closePart(p, false)
+    }
     this.project = await scanProject(files, root, this.scanCache)
-    // A single top-level assembly is what the project is about: open it.
+    // The top-level assembly is what the project is about: the only one, or the one named after the folder.
     const top = this.project.entries.filter((e) => e.kind === "assembly" && e.folder === "")
-    if (top.length === 1) {
-      const r = await this.openPart({ path: top[0].path }, ctx)
+    const main = top.length === 1 ? top[0] : top.find((e) => e.name === baseName(root))
+    if (main) {
+      const r = await this.openPart({ path: main.path }, ctx)
       if (!r.ok) return r
     } else this.emitSnapshot()
     return {
@@ -878,7 +900,17 @@ export class Engine {
     return res
   }
 
-  private closePart(path: string): CommandResult {
+  /** The window's 「回到首页」: every open file closed (files untouched), no project. */
+  private closeProject(): CommandResult {
+    for (const p of [...this.docs.keys()]) this.closePart(p, false)
+    this.project = null
+    this.active = null
+    this.sessions.clear()
+    this.emitSnapshot()
+    return { ok: true, text: "已关闭项目。" }
+  }
+
+  private closePart(path: string, emit = true): CommandResult {
     const doc = this.docs.get(path)
     if (!doc) return { ok: true, text: "没有打开这个零件。" }
     doc.unwatch()
@@ -888,6 +920,8 @@ export class Engine {
     this.assetsKeys.delete(path)
     for (const [s, p] of this.sessions) if (p === path) this.sessions.delete(s)
     if (this.active === path) this.active = [...this.docs.keys()].pop() ?? null
+    if (this.pending?.request.path === path) this.settlePick(null)
+    if (!emit) return { ok: true, text: "已关闭。" }
     const next = this.active ? this.docs.get(this.active) : null
     if (next) this.emitDoc(next)
     else this.emitSnapshot()

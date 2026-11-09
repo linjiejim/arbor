@@ -463,6 +463,30 @@ export function StudioViewport({
   }, [viewer])
 
   const selectionNames = selectedParts.flatMap((i) => display?.parts?.[i] ? [display.parts[i].name] : [])
+  // H hides the selected parts, ⇧H brings every hidden one back (the eyes in the tree do one at a time).
+  const hideSelected = () => {
+    if (!onParts || !selectionNames.length) return
+    onParts({ ...view, hidden: new Set([...view.hidden, ...selectedParts]) })
+    onSelectFeature?.(null)
+  }
+  const showAll = () => onParts?.({ ...view, hidden: new Set() })
+  const hideKeys = React.useRef({ hideSelected, showAll })
+  React.useEffect(() => {
+    hideKeys.current = { hideSelected, showAll }
+  })
+  const canHide = Boolean(onParts && display?.parts)
+  React.useEffect(() => {
+    if (!canHide) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "KeyH" || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return
+      if ((e.target as HTMLElement | null)?.closest?.("input, textarea, select, [contenteditable=true], [role=dialog], [role=menu]")) return
+      e.preventDefault()
+      if (e.shiftKey) hideKeys.current.showAll()
+      else hideKeys.current.hideSelected()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [canHide])
   const focusMatches = !!view.focus && selectionNames.length === view.focus.parts.length && selectionNames.every((n) => view.focus!.parts.includes(n))
   return (
     <Viewport className="absolute inset-0" onReady={onReady} triadBesideCube>
@@ -470,16 +494,18 @@ export function StudioViewport({
         <Button size="sm" variant={showChanges ? "secondary" : "ghost"} aria-pressed={showChanges} onClick={() => setShowChanges((v) => !v)}>查看变更</Button>
         {showChanges && <span className="pr-2">新增：绿色 · 修改：橙色</span>}
       </div>
-      {onParts && display?.parts && (selectedParts.length > 0 || view.focus) && (
+      {onParts && display?.parts && (selectedParts.length > 0 || view.focus || view.hidden.size > 0) && (
         <div role="toolbar" aria-label="选中零件" className="absolute bottom-24 left-3 z-20 flex max-w-[calc(100%_-_1.5rem)] flex-wrap items-center gap-1 rounded-md border bg-background/95 p-1 shadow-popover">
           <span className="max-w-40 truncate px-2 text-caption" title={selectionNames.join("、")}>
-            {selectionNames.length > 1 ? `已选 ${selectionNames.length} 个零件` : selectionNames[0] ?? `${view.focus?.mode === "ghost" ? "保留实体" : "已隔离"} ${view.focus?.parts.length ?? 0} 个零件`}
+            {selectionNames.length > 1 ? `已选 ${selectionNames.length} 个零件` : selectionNames[0] ?? (view.focus ? `${view.focus.mode === "ghost" ? "保留实体" : "已隔离"} ${view.focus.parts.length} 个零件` : `已隐藏 ${view.hidden.size} 个零件`)}
           </span>
+          <Button size="sm" variant="ghost" disabled={!selectionNames.length} title="H" onClick={hideSelected}>隐藏</Button>
           <Button size="sm" variant={focusMatches && view.focus?.mode === "isolate" ? "secondary" : "ghost"} aria-pressed={focusMatches && view.focus?.mode === "isolate"} disabled={!selectionNames.length} onClick={() => onParts({ ...view, focus: focusMatches && view.focus?.mode === "isolate" ? undefined : { parts: selectionNames, mode: "isolate" } })}>隔离零件</Button>
           <Button size="sm" variant={focusMatches && view.focus?.mode === "ghost" ? "secondary" : "ghost"} aria-pressed={focusMatches && view.focus?.mode === "ghost"} disabled={!selectionNames.length} onClick={() => onParts({ ...view, focus: focusMatches && view.focus?.mode === "ghost" ? undefined : { parts: selectionNames, mode: "ghost" } })}>其余透明</Button>
           <Button size="sm" variant="ghost" disabled={!onLocateStep} onClick={onLocateStep}>定位步骤</Button>
           {selectionNames.length > 0 && <Button size="sm" variant="ghost" onClick={() => onSelectFeature?.(null)}>清除选择</Button>}
           {view.focus && <Button size="sm" variant="ghost" onClick={() => onParts({ ...view, focus: undefined })}>恢复显示</Button>}
+          {view.hidden.size > 0 && <Button size="sm" variant="ghost" title="⇧H" onClick={showAll}>显示隐藏的 {view.hidden.size} 个</Button>}
         </div>
       )}
       {kernel.phase === "loading" && (

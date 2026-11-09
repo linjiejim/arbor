@@ -3,14 +3,14 @@
 import { randomBytes, timingSafeEqual } from "node:crypto"
 import http from "node:http"
 import type { AddressInfo } from "node:net"
-import type { Engine } from "../../../app/src/desktop/core/engine"
-import type { CallContext } from "../../../app/src/desktop/core/protocol"
+import type { CallContext, CommandResult } from "../../../app/src/desktop/core/protocol"
 
 export type CallBody = { command: string; input: unknown; ctx: Omit<CallContext, "actor"> }
 
 const MAX_BODY = 32 * 1024 * 1024
 
-export async function serveEngine(engine: Engine, version: string) {
+/** `run`: where an agent's call goes (the app has one engine per window and picks one). */
+export async function serveEngine(run: (command: string, input: unknown, ctx: CallContext) => Promise<CommandResult>, version: string) {
   const token = randomBytes(24).toString("hex")
   const expected = Buffer.from(`Bearer ${token}`)
   let port = 0
@@ -41,7 +41,7 @@ export async function serveEngine(engine: Engine, version: string) {
         return send(400, { error: "bad json" })
       }
       const { session, cwd, part } = body.ctx ?? {}
-      const result = await engine.run(String(body.command), body.input, { actor: "agent", session, cwd, part })
+      const result = await run(String(body.command), body.input, { actor: "agent", session, cwd, part })
       send(200, result)
     })
   })

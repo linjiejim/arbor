@@ -15,6 +15,7 @@ export function useNow(ms = 5000) {
 const COMMAND_LABELS: Record<string, string> = {
   guide: "读说明",
   open_part: "打开零件",
+  open_project: "打开项目",
   list_parts: "看零件列表",
   get_state: "读模型状态",
   set_params: "改参数",

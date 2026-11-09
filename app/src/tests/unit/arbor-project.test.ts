@@ -179,6 +179,46 @@ describe("projects in the engine", () => {
     expect((await engine.run("add_part", { name: "x" }, AGENT)).text).toMatch(/没有这个命令/)
   })
 
+  it("another project closes what was open from the last one, and opens the assembly named after its folder", async () => {
+    const mem = memFiles()
+    mem.disk.set("/home/jim/work/a/a.arbor-asm.json", tree(1))
+    mem.disk.set("/home/jim/work/b/b.arbor-asm.json", tree(1))
+    mem.disk.set("/home/jim/work/b/exploded.arbor-asm.json", tree(1))
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files, home: HOME })
+    await engine.run("open_project", { path: "/home/jim/work/a" }, USER)
+    expect(engine.snapshot().active).toBe("/home/jim/work/a/a.arbor-asm.json")
+    await engine.run("open_project", { path: "/home/jim/work/b" }, USER)
+    const snap = engine.snapshot()
+    expect(snap.project?.root).toBe("/home/jim/work/b")
+    expect(snap.active).toBe("/home/jim/work/b/b.arbor-asm.json")
+    expect(snap.parts.map((p) => p.path)).toEqual(["/home/jim/work/b/b.arbor-asm.json"])
+    expect(engine.owns("/home/jim/work/b/exploded.arbor-asm.json")).toBe(true)
+    expect(engine.owns("/home/jim/work/a/a.arbor-asm.json")).toBe(false)
+  })
+
+  it("several top-level assemblies, none named after the folder: nothing stays open from before", async () => {
+    const mem = memFiles()
+    mem.disk.set("/home/jim/work/a/a.arbor-asm.json", tree(1))
+    mem.disk.set("/home/jim/work/c/one.arbor-asm.json", tree(1))
+    mem.disk.set("/home/jim/work/c/two.arbor-asm.json", tree(1))
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files, home: HOME })
+    await engine.run("open_project", { path: "/home/jim/work/a" }, USER)
+    await engine.run("open_project", { path: "/home/jim/work/c" }, USER)
+    expect(engine.snapshot().active).toBeNull()
+    expect(engine.snapshot().parts).toEqual([])
+    expect(engine.docState()).toBeNull()
+  })
+
+  it("close_project is the window's way home: no project, nothing open", async () => {
+    const engine = new Engine({ kernel: new DirectKernel(), files: memFiles().files, home: HOME })
+    await engine.run("open_project", { path: "pen", create: true }, USER)
+    expect(engine.empty).toBe(false)
+    expect((await engine.run("close_project", {}, AGENT)).text).toMatch(/没有这个命令/)
+    expect((await engine.run("close_project", {}, USER)).ok).toBe(true)
+    expect(engine.snapshot()).toMatchObject({ project: null, active: null, parts: [] })
+    expect(engine.empty).toBe(true)
+  })
+
   it("list_parts lists the whole project, open or not; without a project, the open parts", async () => {
     const mem = memFiles()
     mem.disk.set("/home/jim/work/pen/pen.arbor-asm.json", tree(1))

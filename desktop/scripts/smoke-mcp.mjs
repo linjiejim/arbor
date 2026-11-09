@@ -22,7 +22,7 @@ const transport = new StdioClientTransport({
   args: ["mcp"],
   cwd: work,
   // Headless runs keep their recent-parts list out of ~/.arbor.
-  env: { ...process.env, ...(withApp ? {} : { ARBOR_HEADLESS: "1", ARBOR_HOME: path.join(work, ".arbor") }) },
+  env: { ...process.env, ...(withApp ? {} : { ARBOR_NO_APP: "1", ARBOR_HOME: path.join(work, ".arbor") }) },
   stderr: "inherit",
 })
 const client = new Client({ name: "arbor-smoke", version: "0.0.0" })

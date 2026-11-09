@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Download, Plug, Redo2, RotateCw, Undo2 } from "lucide-react"
+import { Download, House, Plug, Redo2, RotateCw, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
 import { StatusDot } from "@/components/ui/badge"
@@ -33,6 +33,19 @@ export function TitleBar({
     <header className={cn("flex h-12 shrink-0 items-center gap-2 border-b px-3 select-none [-webkit-app-region:drag]", mac && "pl-22")}>
       <ArborMark />
       <span className="text-body font-semibold">Arbor</span>
+      {(doc || snapshot?.project) && (
+        <IconButton label="回到首页（⇧⌘H）" size="icon-sm" className="[-webkit-app-region:no-drag]" onClick={() => void arbor.call("close_project", {})}>
+          <House />
+        </IconButton>
+      )}
+      {snapshot?.project && snapshot.project.name !== doc?.name && (
+        <>
+          <span className="text-faint-foreground">/</span>
+          <span className="max-w-48 truncate text-body text-muted-foreground" title={snapshot.project.root}>
+            {snapshot.project.name}
+          </span>
+        </>
+      )}
       {doc && (
         <>
           <span className="text-faint-foreground">/</span>
@@ -60,25 +73,29 @@ export function TitleBar({
       )}
       <div className="ml-auto flex items-center gap-1 [-webkit-app-region:no-drag]">
         <UpdateStatusButton />
-        <IconButton label="撤销（⌘Z）" disabled={!doc?.canUndo} onClick={() => call("undo")}>
-          <Undo2 />
-        </IconButton>
-        <IconButton label="重做（⇧⌘Z）" disabled={!doc?.canRedo} onClick={() => call("redo")}>
-          <Redo2 />
-        </IconButton>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <IconButton label="导出" disabled={!doc}>
-              <Download />
+        {doc && (
+          <>
+            <IconButton label="撤销（⌘Z）" disabled={!doc?.canUndo} onClick={() => call("undo")}>
+              <Undo2 />
             </IconButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => void arbor.exportPart("step")}>导出 STEP…</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void arbor.exportPart("stl")}>导出 STL…</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void arbor.exportPart("py")}>导出 build123d 代码…</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void arbor.exportPart("json")}>导出特征树 JSON…</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            <IconButton label="重做（⇧⌘Z）" disabled={!doc?.canRedo} onClick={() => call("redo")}>
+              <Redo2 />
+            </IconButton>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <IconButton label="导出" disabled={!doc}>
+                  <Download />
+                </IconButton>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => void arbor.exportPart("step")}>导出 STEP…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void arbor.exportPart("stl")}>导出 STL…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void arbor.exportPart("py")}>导出 build123d 代码…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void arbor.exportPart("json")}>导出特征树 JSON…</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        )}
         <Button size="sm" variant="secondary" className="ml-1" onClick={onSetup}>
           <Plug />
           接入 Agent

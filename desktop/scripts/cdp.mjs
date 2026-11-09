@@ -6,11 +6,18 @@
 //   node scripts/cdp.mjs click <x> <y>       click at CSS pixels
 //   node scripts/cdp.mjs type "<text>"       type into the focused field
 //   node scripts/cdp.mjs logs                console messages from now for 3 seconds
+//   node scripts/cdp.mjs windows             list the windows (one per project)
+// With several windows, ARBOR_CDP_WINDOW=<n> (from `windows`) picks one; the first by default.
 const port = Number(process.env.ARBOR_CDP_PORT ?? 9223)
 const [cmd, arg] = process.argv.slice(2)
 
 const pages = await (await fetch(`http://127.0.0.1:${port}/json`)).json()
-const page = pages.find((p) => p.type === "page" && /desktop\.html/.test(p.url))
+const windows = pages.filter((p) => p.type === "page" && /desktop\.html/.test(p.url))
+if (cmd === "windows") {
+  windows.forEach((p, i) => console.log(i, p.title))
+  process.exit(0)
+}
+const page = windows[Number(process.env.ARBOR_CDP_WINDOW ?? 0)]
 if (!page) throw new Error(`no Arbor window on port ${port}: ${pages.map((p) => p.url).join(", ")}`)
 
 const ws = new WebSocket(page.webSocketDebuggerUrl)

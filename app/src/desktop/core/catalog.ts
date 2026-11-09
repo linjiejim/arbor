@@ -213,6 +213,12 @@ const own: CommandSpec[] = [
     input: z.object({ path: z.string() }),
   },
   {
+    name: "close_project",
+    audience: "user",
+    description: "关闭项目和全部打开的文件（文件不动），窗口回到首页。",
+    input: z.object({}),
+  },
+  {
     name: "scan_project",
     audience: "user",
     description: "重新扫描项目文件夹（窗口回到前台时）。",
