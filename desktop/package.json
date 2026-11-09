@@ -1,7 +1,7 @@
 {
   "name": "arbor",
   "productName": "Arbor",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Desktop workbench where a local coding agent builds parametric parts over MCP or a CLI, and you watch, tweak and annotate.",
   "private": true,
   "license": "MIT",

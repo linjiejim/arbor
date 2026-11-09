@@ -38,7 +38,7 @@ import { describeError, explain, InputError } from "./errors"
 import { normalizeText, textDrawing } from "./fonts"
 import { measure, type MeasureResult, type MeasureSpec, type MeasureTarget } from "./measure"
 import { closest, narrowSpot, overlapVolume, relation, TOUCH } from "./proximity"
-import { compoundOf, countOf, edgesOf, facesOf, solidsOf } from "./topo"
+import { bounded, compoundOf, countOf, edgesOf, facesOf, solidsOf } from "./topo"
 import { dimensionsOf, type Dim, type Frame, type StepGeom } from "./dims"
 import { cylinderAxis, runChecks, type CheckBodies, type CheckResult } from "./check"
 import { pathPoints, planeFace, ribTool, tapered, thinProfile, untilNext } from "./features2"
@@ -952,13 +952,13 @@ export class Kernel {
     const step = this.lastBuilt(index === undefined ? this.steps.length : index + 1)
     if (!step?.body) return null
     const parts = step.parts && step.parts.length > 1 ? step.parts : null
-    if (!parts) return format === "step" ? step.body.blobSTEP() : (step.body.blobSTL({ binary: true }) as Blob)
+    if (!parts) return format === "step" ? step.body.blobSTEP() : stlOf(step.body, step.mainName ?? "零件")
     if (format === "step") {
       const blob = exportSTEP(parts.map((p) => ({ shape: p.body, name: p.name })))
       return new Blob([stepAscii(await blob.text())], { type: "application/STEP" })
     }
     const files = await Promise.all(
-      parts.map(async (p) => ({ name: `${p.name.replace(/[\\/:*?"<>|]/g, "_")}.stl`, data: new Uint8Array(await (p.body.blobSTL({ binary: true }) as Blob).arrayBuffer()) })),
+      parts.map(async (p) => ({ name: `${p.name.replace(/[\\/:*?"<>|]/g, "_")}.stl`, data: new Uint8Array(await stlOf(p.body, p.name).arrayBuffer()) })),
     )
     return zipStore(files)
   }
@@ -1254,7 +1254,14 @@ export class Kernel {
     return 2 * Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) + 10
   }
 
-  private apply(
+  /** One feature on one body. A new body has every face bounded, so it meshes (see `bounded`). */
+  private apply(f: Feature, prev: Step | null, warnings: string[]): ApplyOut {
+    const out = this.applyOp(f, prev, warnings)
+    if (out.body && out.body !== prev?.body) out.body = bounded(out.body)
+    return out
+  }
+
+  private applyOp(
     f: Feature,
     prev: Step | null,
     warnings: string[],
@@ -1708,8 +1715,8 @@ export class Kernel {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const slab = (drawRectangle(4 * big, 4 * big).sketchOnPlane(pl) as any).extrude(2 * big) as Shape3D
     pl.delete()
-    const upper = target.intersect(slab)
-    const lower = target.cut(slab)
+    const upper = bounded(target.intersect(slab))
+    const lower = bounded(target.cut(slab))
     slab.delete()
     const vol = (x: Shape3D) => measureShapeVolumeProperties(x).volume
     const [vl, vu] = [vol(lower), vol(upper)]
@@ -2389,6 +2396,18 @@ function count(v: number, min: number, what: string): number {
   if (Math.abs(v - r) > 1e-6 || r < min) throw new InputError(`${what}要是不小于 ${min} 的整数，现在是 ${fmt(v)}`)
   if (r > MAX_COUNT) throw new InputError(`${what}最多 ${MAX_COUNT}，现在是 ${r}`)
   return r
+}
+
+/**
+ * Binary STL of a body. Chords stay within 0.01 mm of the surface, ten times finer than a 0.1 mm print
+ * layer; replicad's default of 0.001 mm made a 1.9 mm O-ring 5 MB and a whole assembly 160 MB.
+ */
+function stlOf(body: Shape3D, name: string): Blob {
+  try {
+    return body.blobSTL({ binary: true, tolerance: 0.01, angularTolerance: 0.1 }) as Blob
+  } catch (e) {
+    throw new Error(`「${name}」没能三角化成 STL（${describeError(e).message}）；可以先导出 STEP`)
+  }
 }
 
 function unified(tool: Shape3D): Shape3D {
