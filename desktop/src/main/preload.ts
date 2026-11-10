@@ -32,6 +32,15 @@ const bridge: TurneryBridge = {
   openProjectAt: (root) => ipcRenderer.invoke("turnery:open-project-at", root),
   recentProjects: () => ipcRenderer.invoke("turnery:recent-projects"),
   openExample: () => ipcRenderer.invoke("turnery:open-example"),
+  models: () => ipcRenderer.invoke("turnery:models"),
+  saveModel: (input) => ipcRenderer.invoke("turnery:models-save", input),
+  assistantSend: (id, messages) => ipcRenderer.invoke("turnery:assistant-send", id, messages),
+  assistantStop: (id) => ipcRenderer.invoke("turnery:assistant-stop", id),
+  onAssistant: (listener) => {
+    const handle = (_e: unknown, id: string, chunk: unknown) => listener(id, chunk)
+    ipcRenderer.on("turnery:assistant", handle)
+    return () => ipcRenderer.removeListener("turnery:assistant", handle)
+  },
   pickFile: (kind) => ipcRenderer.invoke("turnery:pick-file", kind),
   reveal: (path) => ipcRenderer.invoke("turnery:reveal", path),
   exportPart: (format) => ipcRenderer.invoke("turnery:export", format),

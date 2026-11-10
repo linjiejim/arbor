@@ -1,6 +1,6 @@
 # Turnery：内置助手（侧边栏里直接对话建模）
 
-- 状态：草稿，待确认
+- 状态：四步里前三步已实现（2026-11-10，待确认项按建议方案，Jim 授权）；第 4 步的打磨和对话的保存没做
 - 日期：2026-11-10
 - 范围：桌面版窗口右侧加一个「对话」栏。主进程里用 AI SDK 跑工具循环，工具就是引擎的命令表。配好模型和 key 之后，不接 Claude Code、Codex 也能在 Turnery 里建模和改模型。
 - 不在范围：ACP（把外部 agent 拉进侧边栏，另议）；文件和 shell 工具；云端账号、公共额度；网页工作台的改动。
@@ -179,3 +179,28 @@ codex 审查（一轮，3 条，都已修并加了测试）：
 真模型验证（DeepSeek `deepseek-flash`，无窗口）：「建一个 80×50×30 的盒子，壁厚 2，四角 M3 螺纹孔，建完核对尺寸」，43 秒做完，核对全过，自己导出了 STEP 和 STL。带 `$defs` 的工具定义被接受。输入 51 万 token，其中 93% 命中缓存。
 
 没做：10 题评测没有跑；其他 provider 一家都没试；`safeStorage` 没接。
+
+### 第 3 步：对话栏（2026-11-10，已实现）
+
+- 主进程 `desktop/src/main/assistant.ts`：`turnery:assistant-send`（开始一轮）、`turnery:assistant`（把 UI 消息流一块块发给窗口，`null` 结束）、`turnery:assistant-stop`、`turnery:models`、`turnery:models-save`。模型请求走 Electron 的 `net.fetch`。key 不出主进程。
+- 流的构造放在 `app/src/desktop/core/assistant.ts` 的 `assistantStream()`：主进程的代码不直接 import `ai`（从 `desktop/src` 裸 import 解析不到，也避免打包两份）。
+- 窗口：`use-assistant.ts`（`useChat` 加走 IPC 的 transport）、`ui/assistant-panel.tsx`（对话、每个命令一行、看图的缩略图、停止）、`ui/model-settings.tsx`（服务商、模型名、地址、key、能不能看图）。右侧面板多一个「对话」页签，保持挂载，切到别的页签时这一轮照常进行。
+- key：macOS 未签名时明文存（文件 600），对话框里写明；签名后（构建时定义 `__TURNERY_SIGNED__`）或在 Windows、Linux 上有系统密钥库时用 `safeStorage` 加密。
+
+和设计不一样的地方：
+
+- 没有「试一下」按钮，配错了在第一次对话时报出来（报错会带上服务端的原话）。
+- 对话只留在窗口里，关窗口就没了；没有按项目存到 `~/.turnery/chats/`。
+- 面板没有接可拖宽；消息和工具卡片是新写的精简版，没有复用网页工作台的那一套。
+
+验证：源码构建、全新主目录、DeepSeek `deepseek-flash`（key 走环境变量）。在示例外壳上说「把 USB-C 开口加宽到 12，再核对一遍，告诉我哪些要求还满足」：对话栏里依次出现 12 个命令的卡片，参数 `usb_w` 变成 12，模型更新，助手用表格报告 5 项核对仍然满足，并说明开口宽度没法用现成的核对项直接量；标题栏显示「助手 刚刚看模型」。截图在 `docs/media/window-assistant.png`。
+
+设置对话框另用一个假 key 走了一遍：保存后 `providers.json` 权限是 600、对话栏显示选中的模型，发消息时显示「模型的 key 无效或没有权限」并带上服务端的原话。
+
+没验证：停止按钮；DeepSeek 以外的任何一家；Windows 和 Linux。
+
+### 还没做（第 4 步和遗留）
+
+- 对话按项目保存；整轮撤销；token 用量显示；参考图；「试一下」。
+- 10 题评测；其他 provider 的兼容性（尤其是带 `$defs` 的工具定义）。
+- 签名后切到 `safeStorage` 并迁移明文 key。

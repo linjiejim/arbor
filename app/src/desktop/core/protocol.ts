@@ -168,6 +168,15 @@ export interface TurneryBridge {
   recentProjects(): Promise<RecentProject[]>
   /** Open the example that ships with the app (a copy under ~/.turnery/projects). */
   openExample(): Promise<boolean>
+  /** The built-in assistant's model settings (never the keys themselves). */
+  models(): Promise<ModelSettings>
+  /** Choose a preset and what to use from it. `key`: left out = keep the stored one; a string replaces it ("" forgets it). */
+  saveModel(input: { preset: string; model?: string; baseURL?: string; vision?: boolean | null; key?: string }): Promise<ModelSettings>
+  /** Start a turn of the built-in assistant; its stream arrives through onAssistant under the same id. */
+  assistantSend(id: string, messages: unknown[]): Promise<void>
+  assistantStop(id: string): Promise<void>
+  /** Chunks of a turn's UI message stream; `null` ends it. */
+  onAssistant(listener: (id: string, chunk: unknown | null) => void): () => void
   /** File dialog for something to put in an assembly: a part or assembly file, or a STEP. */
   pickFile(kind: "part" | "step"): Promise<string | null>
   reveal(path: string): Promise<void>
@@ -203,6 +212,10 @@ export type MenuAction = "undo" | "redo" | "agent-setup" | "focus"
 export type ExportFormat = "step" | "stl" | "3mf" | "py" | "json"
 
 export type { BuildReport, DisplayData, PickInfo, Tree }
+
+/** What the model settings dialog shows for one provider preset. */
+export type ModelPreset = { id: string; name: string; defaultModel: string; defaultBaseURL: string; defaultVision: boolean; keyless: boolean; model: string; baseURL: string; vision: boolean | null; hasKey: boolean; keyNote: string }
+export type ModelSettings = { current: string | null; presets: ModelPreset[]; keysEncrypted: boolean }
 
 export const PRODUCT = "Turnery"
 /** File name endings Turnery owns. */

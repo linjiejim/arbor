@@ -15,6 +15,7 @@ import { useReselect } from "@/studio/use-reselect"
 import { turnery } from "./bridge"
 import type { DocState, PartNote, PickRequest, ShowRequest } from "./core/protocol"
 import { asNote, useDesktopNotes, useDesktopStudio, useEngine } from "./use-desktop"
+import { AssistantPanel } from "./ui/assistant-panel"
 import { AgentSetupDialog } from "./ui/agent-setup"
 import { AddPartMenu, ComponentActions } from "./ui/assembly"
 import { NoteComposer } from "./ui/note-composer"
@@ -206,12 +207,17 @@ export function DesktopApp() {
               <TabsTrigger value="notes">
                 备注{doc.notes.some((n) => n.status === "open") ? ` ${doc.notes.filter((n) => n.status === "open").length}` : ""}
               </TabsTrigger>
+              <TabsTrigger value="chat">对话</TabsTrigger>
               <TabsTrigger value="activity">动态</TabsTrigger>
               <TabsTrigger value="params">参数</TabsTrigger>
               <TabsTrigger value="code">代码</TabsTrigger>
             </TabsList>
             <TabsContent value="notes" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
               <NotesPanel doc={doc} onLocate={(n) => onSpot(n) && void notes.show(asNote(n))} onWrite={() => notes.setCompose("")} />
+            </TabsContent>
+            {/* Kept mounted: a turn in progress goes on while another tab is shown. */}
+            <TabsContent value="chat" forceMount className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
+              <AssistantPanel />
             </TabsContent>
             <TabsContent value="activity" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
               <ActivityPanel doc={doc} snapshot={snapshot} />

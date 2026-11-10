@@ -31,7 +31,7 @@ The design choices behind that:
 - **The agent can look and measure.** `look` renders views, sections and close-ups for it. `measure` returns distances from the kernel. It does not have to trust its own arithmetic, and neither do you.
 - **Requirements are stored and re-checked.** `check` turns "80×50×28, 2 mm walls, four M3 holes" into items the kernel measures after every change: size, wall thickness, hole count and diameter, clearances to an imported board, gaps between parts.
 - **Two-way with you.** Click a face, write "USB-C opening here, 6 mm above the floor", and the agent's next call sees the note with the face and coordinates. The agent can also ask you to click the face it is unsure about.
-- **Your agent, your subscription.** Turnery calls no model and needs no API key.
+- **Your agent, your subscription.** With Claude Code or Codex connected, Turnery calls no model and needs no API key. Without one, the built-in assistant uses a model and key you choose.
 
 ## What a session looks like
 
@@ -110,6 +110,22 @@ The `intent` reads: "the posts run from the floor to the ceiling; after the spli
 4. Tell the agent what to build. Start with "use turnery to…".
 
 No agent yet? The first time Turnery starts it opens the example above. Change `t` in the parameter panel and watch the check list.
+
+### Or use the built-in assistant
+
+The 对话 (chat) tab in the window runs the same tools with a model you pick: DeepSeek, OpenRouter, Anthropic, OpenAI, Gemini, Moonshot, Zhipu, DashScope, SiliconFlow, a local Ollama, or any OpenAI-compatible endpoint. It can call Turnery's modeling commands and nothing else: no other files, no shell. Your key stays on your machine, outside the project folder.
+
+![The built-in assistant widening an opening and re-running the checks](docs/media/window-assistant.png)
+
+The same loop runs from a terminal, with or without the window:
+
+```bash
+turnery model use deepseek
+```
+
+```bash
+turnery ask "make the walls 3 mm and check again" --part box
+```
 
 The app updates itself from GitHub Releases; update packages are verified against a key built into the app.
 
