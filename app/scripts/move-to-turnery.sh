@@ -23,15 +23,14 @@ backup() {
   cp -a "$CF" "/root/deploy-backups/Caddyfile.backup-$TS"
 }
 reload_or_restore() {
-  if caddy validate --config "$CF" --adapter caddyfile >/dev/null 2>&1; then
-    chown -R caddy:caddy /var/log/caddy
-    systemctl reload caddy
-  else
-    cp -a "/root/deploy-backups/Caddyfile.backup-$TS" "$CF"
-    chown -R caddy:caddy /var/log/caddy
-    echo "Caddyfile 校验没通过，已经恢复原样。"
-    exit 1
+  chown -R caddy:caddy /var/log/caddy
+  if caddy validate --config "$CF" --adapter caddyfile >/dev/null 2>&1 && systemctl reload caddy; then
+    return 0
   fi
+  # Not valid, or valid and not taken: back to the file Caddy is running, so a re-run starts over.
+  cp -a "/root/deploy-backups/Caddyfile.backup-$TS" "$CF"
+  echo "Caddyfile 校验或重载没通过，已经恢复原样。"
+  exit 1
 }
 
 case "${1:-}" in

@@ -74,13 +74,15 @@ jobs:
             ln -sfn $API /root/turnery/api/current.tmp && mv -Tf /root/turnery/api/current.tmp /root/turnery/api/current
             mkdir -p /root/turnery/api/logs /root/turnery/api/data
             # The move from /root/arbor (2026-11-10): the old process holds the same port, so it
-            # stops first and its share data comes along. Nothing to do once it is gone.
+            # stops first and its share data comes along. It is forgotten only after the copy, so a
+            # run that broke off in between copies again. Nothing to do once it is gone.
             # app/scripts/move-to-turnery.sh prepare puts the secrets in place; without them stop here.
             test -f /root/turnery/shared/.env
             source ~/.nvm/nvm.sh >/dev/null
             if pm2 describe arbor-api >/dev/null 2>&1; then
-              pm2 delete arbor-api >/dev/null
+              pm2 stop arbor-api >/dev/null
               cp -an /root/arbor/api/data/. /root/turnery/api/data/
+              pm2 delete arbor-api >/dev/null
             fi
             source ~/.nvm/nvm.sh >/dev/null && pm2 startOrReload $API/ecosystem.config.cjs --update-env && pm2 save >/dev/null
             ln -sfn $REL /srv/turnery/current.tmp && mv -Tf /srv/turnery/current.tmp /srv/turnery/current
