@@ -5,7 +5,8 @@ import http from "node:http"
 import type { AddressInfo } from "node:net"
 import type { CallContext, CommandResult } from "../../../app/src/desktop/core/protocol"
 
-export type CallBody = { command: string; input: unknown; ctx: Omit<CallContext, "actor"> }
+/** `actor` may only say which kind of agent is calling; a person's or a file's change never comes this way. */
+export type CallBody = { command: string; input: unknown; ctx: Omit<CallContext, "actor"> & { actor?: "agent" | "assistant" } }
 
 const MAX_BODY = 32 * 1024 * 1024
 
@@ -40,8 +41,8 @@ export async function serveEngine(run: (command: string, input: unknown, ctx: Ca
       } catch {
         return send(400, { error: "bad json" })
       }
-      const { session, cwd, part } = body.ctx ?? {}
-      const result = await run(String(body.command), body.input, { actor: "agent", session, cwd, part })
+      const { session, cwd, part, actor } = body.ctx ?? {}
+      const result = await run(String(body.command), body.input, { actor: actor === "assistant" ? "assistant" : "agent", session, cwd, part })
       send(200, result)
     })
   })

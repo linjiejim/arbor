@@ -1,6 +1,6 @@
 // ~/.turnery: how the MCP server and the CLI find the running app (engine.json),
 // how they can start it (app.json), and the recently opened parts.
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
@@ -31,6 +31,13 @@ export function adoptLegacyHome(legacy = path.join(os.homedir(), ".arbor")): boo
     renameSync(legacy, HOME)
   } catch {
     return false
+  }
+  // Parts elsewhere may name files in there by the old path (a component, a shared parameter file):
+  // the old name stays as a link, so they still resolve.
+  try {
+    symlinkSync(HOME, legacy, "dir")
+  } catch {
+    /* they will report the missing file */
   }
   for (const stale of ["engine.json", "app.json"]) rmSync(file(stale), { force: true })
   for (const name of ["recent.json", "recent-projects.json"]) {

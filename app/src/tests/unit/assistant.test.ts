@@ -103,6 +103,35 @@ describe("turnery: the built-in assistant", () => {
     expect(calls).toEqual(["open_part", "set_params"])
   }, 60_000)
 
+  it("follows open_part: the commands after it go to the part just opened, not the one the turn started on", async () => {
+    const engine = freshEngine()
+    await engine.run("open_part", { path: "first", create: true }, ASSISTANT)
+    const tools = assistantTools({ engine, ctx: { ...ASSISTANT, part: "/work/first.turnery.json" } })
+    const call = (name: string, input: unknown) => (tools[name] as unknown as { execute: (i: unknown) => Promise<CommandResult> }).execute(input)
+    expect((await call("open_part", { path: "second", create: true })).ok).toBe(true)
+    expect((await call("set_params", { set: { L: 7 } })).ok).toBe(true)
+    const second = (await engine.run("get_state", {}, { ...AGENT, part: "/work/second.turnery.json" })).text
+    expect(second).toContain("参数：L = 7")
+    expect((await engine.run("get_state", {}, { ...AGENT, part: "/work/first.turnery.json" })).text).not.toContain("L = 7")
+  }, 60_000)
+
+  it("runs nothing more once the turn is stopped", async () => {
+    const engine = freshEngine()
+    await engine.run("open_part", { path: "box", create: true }, ASSISTANT)
+    const stop = new AbortController()
+    const ran: string[] = []
+    const tools = assistantTools({ engine, ctx: ASSISTANT, abortSignal: stop.signal, onCall: (c) => ran.push(c.name) })
+    const call = (name: string, input: unknown) => (tools[name] as unknown as { execute: (i: unknown) => Promise<CommandResult> }).execute(input)
+    // Two calls of one step: the second is queued behind the first when the person presses stop.
+    const first = call("set_params", { set: { L: 5 } })
+    const second = call("set_params", { set: { L: 9 } })
+    stop.abort()
+    await first.catch(() => undefined)
+    await expect(second).rejects.toThrow("已停止")
+    expect((await engine.run("get_state", {}, AGENT)).text).not.toContain("L = 9")
+    expect(ran.length).toBeLessThanOrEqual(1)
+  }, 60_000)
+
   it("offers every agent command but the guide, and only hands images to a model that can see", () => {
     const engine = freshEngine()
     const tools = assistantTools({ engine, ctx: ASSISTANT })

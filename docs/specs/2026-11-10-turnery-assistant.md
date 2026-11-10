@@ -161,3 +161,21 @@ turnery ask "建一个 80×50×30 的盒子，壁厚 2" --part box --no-app     
 全部 356 个单元测试、类型检查、lint 通过；`smoke-mcp.mjs`（无窗口）通过。
 
 没做：真模型一次都没跑过；带 `$defs` 的工具定义各家收不收没有验证；第 2–4 步。
+
+### 第 2 步：模型配置和命令行（2026-11-10，已实现）
+
+待确认项按建议方案走（Jim 2026-11-10 授权）。
+
+- `app/src/desktop/core/providers.ts`：11 个预设和 `languageModel()`。DeepSeek 用自己的 provider 并打开思考（低强度），Anthropic 用自己的，其余都走 OpenAI 兼容。只有 DeepSeek、OpenRouter、Anthropic 填了缺省模型名；其余要用户自己填，不替人猜。
+- `desktop/src/engine/models.ts`：`~/.turnery/providers.json`（600）。key 的来源依次是环境变量 `TURNERY_API_KEY_<预设>`、文件里的密文（要调用方给解密器）、文件里的明文。命令行没有系统钥匙串可用，只写明文；应用签名之后再接 `safeStorage`。
+- 命令行：`turnery model`、`turnery model use <预设> [模型名]`、`turnery model key <预设>`（从标准输入读）、`turnery ask "<一句话>"`。连着 App 时每一步在窗口里看得到；`--no-app` 时没有看图。核对有 ✗ 时退出码为 1。
+- 引擎的 RPC 多带一个 `actor`，只能是 `agent` 或 `assistant`。
+
+codex 审查（一轮，3 条，都已修并加了测试）：
+- 助手 `open_part` 之后的命令仍然落在这一轮开始时的零件上：现在跟着 `open_part` 走。
+- 停止之后，同一步里排在后面的命令还会执行：现在执行前先看是否已停止。
+- 接管 `~/.arbor` 之后，别处按旧路径引用里面文件的零件会找不到：旧名字留一个指向新目录的链接。
+
+真模型验证（DeepSeek `deepseek-flash`，无窗口）：「建一个 80×50×30 的盒子，壁厚 2，四角 M3 螺纹孔，建完核对尺寸」，43 秒做完，核对全过，自己导出了 STEP 和 STL。带 `$defs` 的工具定义被接受。输入 51 万 token，其中 93% 命中缓存。
+
+没做：10 题评测没有跑；其他 provider 一家都没试；`safeStorage` 没接。

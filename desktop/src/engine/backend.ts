@@ -9,7 +9,7 @@ import { readAppInfo, readEngineInfo, type EngineInfo } from "./home"
 import { startEngine } from "./host"
 import type { CallBody } from "./rpc"
 
-export type Ctx = Omit<CallContext, "actor">
+export type Ctx = Omit<CallContext, "actor"> & { actor?: "agent" | "assistant" }
 
 export interface Backend {
   readonly kind: "app" | "local"

@@ -4,6 +4,9 @@
 import { spawn } from "node:child_process"
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { runAssistant } from "../../../app/src/desktop/core/assistant"
+import { keyEnvOf, languageModel, presetOf, PRESETS } from "../../../app/src/desktop/core/providers"
+import { currentModel, listModels, setKey, useModel } from "../engine/models"
 import { COMMANDS, agentCommands, inputJsonSchema } from "../../../app/src/desktop/core/catalog"
 import { normalizePartPath, partName } from "../../../app/src/desktop/core/engine"
 import type { CommandResult } from "../../../app/src/desktop/core/protocol"
@@ -28,6 +31,10 @@ const HELP = `turnery ${__TURNERY_VERSION__}：让 coding agent 在 Turnery 里�
   turnery check <零件> [JSON]         重建并核对需求（不需要窗口）
   turnery export <零件> <输出文件>    导出 .step / .stl / .py / .json
   turnery look <零件> [-o 目录]       渲染视图 PNG（需要 App，会自动启动）
+  turnery ask "<一句话>"              让内置助手来做（用 turnery model 选好的模型）；核对有 ✗ 时退出码为 1
+  turnery model                       现在用哪个模型、key 从哪来、有哪些预设
+  turnery model use <预设> [模型名]   选模型（--base-url <地址>、--vision / --no-vision）
+  turnery model key <预设>            从标准输入读 key 存起来（空行 = 删掉）；也可以设环境变量 TURNERY_API_KEY_<预设>
 
 选项：
   --part <零件>   命令作用在哪个零件（缺省是 App 里当前的零件）
@@ -35,6 +42,7 @@ const HELP = `turnery ${__TURNERY_VERSION__}：让 coding agent 在 Turnery 里�
                   turnery mcp --headless 让 agent 这样用
   --no-app        不连 App，在这个进程里起一个没有窗口的引擎（适合 CI；没有 look）
   --json          输出 JSON
+  --max-steps <n> ask：最多调多少次命令（缺省 30）
 
 例子：
   turnery call open_part path=box create=true
@@ -42,7 +50,7 @@ const HELP = `turnery ${__TURNERY_VERSION__}：让 coding agent 在 Turnery 里�
   turnery check box '{"size":[80,50,30]}'
 `
 
-type Flags = { part?: string; headless: boolean; noApp: boolean; json: boolean; out?: string }
+type Flags = { part?: string; headless: boolean; noApp: boolean; json: boolean; out?: string; baseUrl?: string; vision?: boolean; maxSteps?: number }
 
 function parseArgs(argv: string[]) {
   const flags: Flags = { headless: false, noApp: false, json: false }
@@ -54,6 +62,10 @@ function parseArgs(argv: string[]) {
     else if (a === "--no-app") flags.noApp = true
     else if (a === "--json") flags.json = true
     else if (a === "-o" || a === "--out") flags.out = argv[++i]
+    else if (a === "--base-url") flags.baseUrl = argv[++i]
+    else if (a === "--vision") flags.vision = true
+    else if (a === "--no-vision") flags.vision = false
+    else if (a === "--max-steps") flags.maxSteps = Number(argv[++i])
     else rest.push(a)
   }
   return { flags, rest }
@@ -193,6 +205,62 @@ async function main() {
           delete res.images
         }
         print(res, flags)
+      })
+      return
+    }
+    case "model": {
+      const [sub, preset, name] = args
+      if (sub === "use") {
+        if (!preset || !presetOf(preset)) throw new Error(`要写预设：turnery model use <预设> [模型名]。可选：${PRESETS.map((p) => p.id).join("、")}`)
+        useModel({ preset, model: name, baseURL: flags.baseUrl, vision: flags.vision })
+      } else if (sub === "key") {
+        if (!preset || !presetOf(preset)) throw new Error(`要写预设：turnery model key <预设>，key 从标准输入读`)
+        setKey(preset, readFileSync(0, "utf8").split("\n")[0] ?? "")
+        process.stdout.write(`已保存到 ~/.turnery/providers.json（明文，文件权限 600）。\n`)
+        return
+      } else if (sub) throw new Error("用法：turnery model [use <预设> [模型名] | key <预设>]")
+      const { current, models } = listModels()
+      const KEY: Record<string, string> = { env: "环境变量", encrypted: "已加密保存", plain: "明文保存（权限 600）", none: "还没有 key", "not-needed": "不需要 key" }
+      const chosen = models.find((m) => m.current)
+      if (chosen) {
+        const p = presetOf(chosen.preset)!
+        process.stdout.write(`现在用：${p.name} · ${chosen.model || p.model || "（还没填模型名）"}${chosen.baseURL ? ` · ${chosen.baseURL}` : ""} · key：${KEY[chosen.key]}\n\n`)
+      } else process.stdout.write(`还没有选模型${current ? `（${current} 不在预设里）` : ""}。\n\n`)
+      process.stdout.write(`预设（turnery model use <预设> [模型名]）：\n${PRESETS.map((p) => `  ${p.id.padEnd(12)}${p.name}${p.model ? `，缺省 ${p.model}` : "，要自己填模型名"}${p.keyless ? "，不需要 key" : `，key：${keyEnvOf(p.id)}`}`).join("\n")}\n`)
+      return
+    }
+    case "ask": {
+      const text = args.join(" ").trim()
+      if (!text) throw new Error('要写想让它做什么：turnery ask "把壁厚改成 3，再核对一遍"')
+      const chosen = currentModel()
+      if (!chosen) throw new Error("还没有选模型：turnery model use deepseek（或别的预设，turnery model 看有哪些）")
+      const resolved = languageModel(chosen.config, chosen.key)
+      if ("error" in resolved) throw new Error(resolved.error)
+      await withLink(flags, !flags.noApp, async (link) => {
+        const cwd = process.cwd()
+        const part = flags.part ? normalizePartPath(flags.part, cwd) : undefined
+        const engine = { run: (name: string, input: unknown, ctx: { part?: string }) => link.call(name, input, { cwd, part: ctx.part, actor: "assistant" }) }
+        let failing = false
+        process.stderr.write(`${resolved.label}\n`)
+        const res = await runAssistant({
+          engine,
+          model: resolved.model,
+          messages: [{ role: "user", content: text }],
+          ctx: { actor: "assistant", cwd, part },
+          // Views come from the window: without the app there is nothing to show the model.
+          vision: resolved.vision && (await link.kind) !== "local",
+          maxSteps: flags.maxSteps,
+          providerOptions: resolved.providerOptions,
+          onCall: ({ name, result }) => {
+            if (name === "check") failing = /^✗/m.test(result.text)
+            process.stderr.write(`  ${result.ok ? "✓" : "✗"} ${name}  ${result.text.split("\n")[0].slice(0, 100)}\n`)
+          },
+        })
+        for await (const delta of res.textStream) process.stdout.write(delta)
+        process.stdout.write("\n")
+        const usage = await res.totalUsage
+        process.stderr.write(`用量：输入 ${usage.inputTokens ?? "?"}（其中缓存 ${usage.inputTokenDetails?.cacheReadTokens ?? 0}），输出 ${usage.outputTokens ?? "?"} token\n`)
+        if (failing) process.exitCode = 1
       })
       return
     }

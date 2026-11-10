@@ -85,6 +85,7 @@ Turnery 的窗口和网站共用上面「随网站发布」的前端组件（Rea
 | --- | --- | --- | --- | --- |
 | Electron（含 Chromium、Node.js） | 45.2.3 | MIT；Chromium 各组件的许可见安装包里的 `LICENSES.chromium.html` | 桌面应用外壳 | <https://github.com/electron/electron> |
 | `@modelcontextprotocol/sdk` | 1.32.2 | MIT | `turnery mcp` 的 MCP 服务 | <https://github.com/modelcontextprotocol/typescript-sdk> |
+| `@ai-sdk/openai-compatible`、`@ai-sdk/anthropic`、`@ai-sdk/deepseek`、`ai` | 3.0.87 / 4.0.99 / 3.0.80 / 7.0 | Apache-2.0 | 内置助手调用模型（`turnery ask`） | <https://github.com/vercel/ai> |
 | replicad-opencascadejs | 1.1.0 | LGPL-2.1-only | 几何内核，见上一节 | 同上 |
 
 - **OpenCascade 的 wasm 怎么分发**：和网站一样是单独的文件，在 `Turnery.app/Contents/Resources/app/dist/vendor/opencascade/`（`replicad_single.js` + `replicad_single.wasm`，旁边附 `LICENSE`）。安装包不打 asar，替换这两个文件就能换成自己编译的版本。
