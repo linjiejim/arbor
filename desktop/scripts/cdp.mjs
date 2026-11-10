@@ -5,6 +5,7 @@
 //   node scripts/cdp.mjs js "<expression>"   evaluate in the page, print the result
 //   node scripts/cdp.mjs click <x> <y>       click at CSS pixels
 //   node scripts/cdp.mjs hover <x> <y>       move the pointer there (CSS pixels)
+//   node scripts/cdp.mjs drag <x> <y> <x2> <y2>  press, move in steps, let go (CSS pixels)
 //   node scripts/cdp.mjs type "<text>"       type into the focused field
 //   node scripts/cdp.mjs logs                console messages from now for 3 seconds
 //   node scripts/cdp.mjs windows             list the windows (one per project)
@@ -61,6 +62,14 @@ if (cmd === "shot") {
   const [x, y] = [Number(arg), Number(process.argv[4])]
   await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y })
   console.log(`hovering ${x},${y}`)
+} else if (cmd === "drag") {
+  // `drag <x> <y> <x2> <y2>`: a held-down move, in ten steps (what moves or sizes a panel).
+  const [x, y, x2, y2] = [arg, ...process.argv.slice(4, 7)].map(Number)
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y })
+  await send("Input.dispatchMouseEvent", { type: "mousePressed", x, y, button: "left", clickCount: 1, buttons: 1 })
+  for (let i = 1; i <= 10; i++) await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: x + ((x2 - x) * i) / 10, y: y + ((y2 - y) * i) / 10, button: "left", buttons: 1 })
+  await send("Input.dispatchMouseEvent", { type: "mouseReleased", x: x2, y: y2, button: "left", clickCount: 1, buttons: 0 })
+  console.log(`dragged ${x},${y} → ${x2},${y2}`)
 } else if (cmd === "type") {
   await send("Input.insertText", { text: arg })
   console.log("typed")
@@ -69,6 +78,6 @@ if (cmd === "shot") {
   await new Promise((r) => setTimeout(r, 3000))
   for (const e of events.filter((e) => e.method === "Runtime.consoleAPICalled")) console.log(e.params.type, ...e.params.args.map((a) => a.value ?? a.description))
 } else {
-  console.log("usage: cdp.mjs shot <file> | js <expression> | click <x> <y> | hover <x> <y> | type <text> | logs")
+  console.log("usage: cdp.mjs shot <file> | js <expression> | click <x> <y> | hover <x> <y> | drag <x> <y> <x2> <y2> | type <text> | logs")
 }
 ws.close()

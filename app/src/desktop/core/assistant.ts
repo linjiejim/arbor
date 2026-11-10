@@ -118,5 +118,22 @@ export async function assistantStream(run: Omit<AssistantRun, "messages"> & { me
   const tools = assistantTools({ engine: run.engine, ctx: run.ctx, vision: run.vision })
   const messages = await convertToModelMessages(trimMessages(run.messages), { tools, ignoreIncompleteToolCalls: true })
   const result = await runAssistant({ ...run, messages })
-  return result.toUIMessageStream({ sendReasoning: true, onError: run.onError }) as ReadableStream<unknown>
+  // The turn's token use rides on the answer's metadata: the window shows it under the answer.
+  return result.toUIMessageStream({
+    sendReasoning: true,
+    onError: run.onError,
+    messageMetadata: ({ part }) => (part.type === "finish" ? { usage: usageOf(part.totalUsage) } : undefined),
+  }) as ReadableStream<unknown>
+}
+
+/** Tokens a turn used, as the window shows them. */
+export type TurnUsage = { input: number; output: number; cached: number; reasoning: number }
+
+export function usageOf(u: { inputTokens?: number; outputTokens?: number; inputTokenDetails?: { cacheReadTokens?: number }; outputTokenDetails?: { reasoningTokens?: number }; cachedInputTokens?: number; reasoningTokens?: number } | undefined): TurnUsage {
+  return {
+    input: u?.inputTokens ?? 0,
+    output: u?.outputTokens ?? 0,
+    cached: u?.inputTokenDetails?.cacheReadTokens ?? u?.cachedInputTokens ?? 0,
+    reasoning: u?.outputTokenDetails?.reasoningTokens ?? u?.reasoningTokens ?? 0,
+  }
 }

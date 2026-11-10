@@ -1,32 +1,36 @@
 import * as React from "react"
-import { Download, House, Plug, Redo2, RotateCw, Undo2 } from "lucide-react"
+import { Download, House, MessageSquare, Plug, Redo2, RotateCw, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
 import { StatusDot } from "@/components/ui/badge"
 import { Segmented } from "@/components/ui/segmented"
+import { Spinner } from "@/components/ui/spinner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { turnery } from "../bridge"
 import type { DocState, PickRequest, Snapshot, UpdateStatus } from "../core/protocol"
 import { TurneryMark } from "@/components/turnery-mark"
+import { useAssistant } from "../use-assistant"
 import { ago, commandLabel, useNow } from "./words"
 
 /** The window's top bar; on macOS it is also the title bar (drag to move, traffic lights on the left). */
 export function TitleBar({
   snapshot,
   doc,
-  pick,
   onSetup,
   sheet,
   onSheet,
+  chat,
 }: {
   snapshot: Snapshot | null
   doc: DocState | null
-  pick: PickRequest | null
   onSetup: () => void
   /** 「工程图」 over the 3D view. */
   sheet: boolean
   onSheet: (on: boolean) => void
+  /** The built-in assistant's button: shows or puts away the conversation; spins while a turn runs. */
+  chat: { open: boolean; onToggle: () => void }
 }) {
+  const busy = useAssistant().busy
   const mac = turnery.platform === "darwin"
   const call = (name: string) => void turnery.call(name, {}, doc?.path)
   return (
@@ -52,12 +56,8 @@ export function TitleBar({
           <span className="truncate text-body" title={doc.path}>
             {doc.name}
           </span>
-          <span className="font-mono text-caption text-faint-foreground tabular max-md:hidden">第 {doc.rev} 版</span>
         </>
       )}
-      <div className="ml-3 min-w-0 max-lg:hidden">
-        <AgentStatus snapshot={snapshot} pick={pick} />
-      </div>
       {doc && (
         <Segmented
           size="sm"
@@ -97,7 +97,11 @@ export function TitleBar({
             </DropdownMenu>
           </>
         )}
-        <Button size="sm" variant="secondary" className="ml-1" onClick={onSetup}>
+        <Button size="sm" variant={chat.open ? "secondary" : "ghost"} className="ml-1" aria-pressed={chat.open} onClick={chat.onToggle}>
+          {busy ? <Spinner /> : <MessageSquare />}
+          对话
+        </Button>
+        <Button size="sm" variant="secondary" onClick={onSetup}>
           <Plug />
           接入 Agent
         </Button>
@@ -107,24 +111,24 @@ export function TitleBar({
 }
 
 /** What the agent is doing right now, or when it last did something. */
-export function AgentStatus({ snapshot, pick }: { snapshot: Snapshot | null; pick: PickRequest | null }) {
+export function AgentStatus({ snapshot, pick, className }: { snapshot: Snapshot | null; pick: PickRequest | null; className?: string }) {
   const now = useNow()
   const a = snapshot?.agent
   const who = a?.who === "assistant" ? "助手" : "Agent"
-  if (pick) return <StatusDot tone="warning">{who} 在等你点选</StatusDot>
+  if (pick) return <StatusDot tone="warning" className={className}>{who} 在等你点选</StatusDot>
   if (a?.busy && a.tool)
     return (
-      <StatusDot tone="info">
+      <StatusDot tone="info" className={className}>
         {who} 正在{commandLabel(a.tool)}…
       </StatusDot>
     )
   if (a?.at && a.tool)
     return (
-      <StatusDot tone="success" className="text-muted-foreground">
+      <StatusDot tone="success" className={cn("text-muted-foreground", className)}>
         {who} {ago(a.at, now)}{commandLabel(a.tool)}
       </StatusDot>
     )
-  return <StatusDot className="text-muted-foreground">等 agent 连上</StatusDot>
+  return <StatusDot className={cn("text-muted-foreground", className)}>没有 agent 在动</StatusDot>
 }
 
 function useUpdateStatus() {

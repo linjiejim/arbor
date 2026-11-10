@@ -41,6 +41,11 @@ const bridge: TurneryBridge = {
     ipcRenderer.on("turnery:assistant", handle)
     return () => ipcRenderer.removeListener("turnery:assistant", handle)
   },
+  chats: (scope) => ipcRenderer.invoke("turnery:chats", scope),
+  chatRead: (id) => ipcRenderer.invoke("turnery:chat-read", id),
+  chatSave: (record, base) => ipcRenderer.invoke("turnery:chat-save", record, base),
+  chatRename: (id, title) => ipcRenderer.invoke("turnery:chat-rename", id, title),
+  chatDelete: (id) => ipcRenderer.invoke("turnery:chat-delete", id),
   pickFile: (kind) => ipcRenderer.invoke("turnery:pick-file", kind),
   reveal: (path) => ipcRenderer.invoke("turnery:reveal", path),
   exportPart: (format) => ipcRenderer.invoke("turnery:export", format),
