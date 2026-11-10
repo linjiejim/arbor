@@ -459,3 +459,17 @@ describe("appearance: where restyling must not cut corners (review)", () => {
     k.dispose()
   })
 })
+
+describe("appearance: the site's tool builds once", () => {
+  it("sets a colour with a single rebuild", async () => {
+    const { executeTool } = await import("@/studio/apply")
+    const k = new Kernel()
+    let builds = 0
+    const port = { rebuild: async (t: Tree) => (builds++, k.rebuild(t)), inspect: async () => "" }
+    k.rebuild(shell)
+    const run = await executeTool(port, shell, "set_appearance", { parts: ["上盖"], color: "orange" })
+    expect(run.output.ok).toBe(true)
+    expect(builds).toBe(1)
+    k.dispose()
+  })
+})
