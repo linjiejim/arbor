@@ -39,7 +39,7 @@ const COMMAND_LABELS: Record<string, string> = {
 /** 「做拉伸」「核对需求」 */
 export const commandLabel = (name: string) => COMMAND_LABELS[name] ?? (name in OP_NAMES ? `做${OP_NAMES[name as FeatureOp]}` : name)
 
-export const ACTOR_LABEL: Record<Actor, string> = { agent: "Agent", user: "你", file: "文件" }
+export const ACTOR_LABEL: Record<Actor, string> = { agent: "Agent", assistant: "助手", user: "你", file: "文件" }
 
 /** 「刚刚」「12 秒前」「3 分钟前」 */
 export function ago(at: number, now: number) {

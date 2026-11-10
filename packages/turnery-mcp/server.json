@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.linjiejim/turnery",
+  "description": "Parametric CAD for coding agents: feature tree, kernel-checked requirements. Needs Turnery.app.",
+  "repository": { "url": "https://github.com/linjiejim/turnery", "source": "github", "subfolder": "packages/turnery-mcp" },
+  "version": "0.5.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "turnery-mcp",
+      "version": "0.5.1",
+      "transport": { "type": "stdio" },
+      "runtimeHint": "npx"
+    }
+  ]
+}

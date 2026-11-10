@@ -14,17 +14,17 @@ const out = await mkdtemp(path.join(root, ".tmp/assembly-ui-"))
 const project = path.join(out, "project")
 await mkdir(project)
 const cube = (size) => ({ params: {}, features: [{ id: "sk", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: size, h: size }] }, { id: "body", op: "extrude", sketch: "sk", distance: size }] })
-await writeFile(path.join(project, "outer.arbor.json"), JSON.stringify(cube(20)))
-await writeFile(path.join(project, "inner.arbor.json"), JSON.stringify(cube(4)))
-const assembly = path.join(project, "selection.arbor-asm.json")
+await writeFile(path.join(project, "outer.turnery.json"), JSON.stringify(cube(20)))
+await writeFile(path.join(project, "inner.turnery.json"), JSON.stringify(cube(4)))
+const assembly = path.join(project, "selection.turnery-asm.json")
 await writeFile(assembly, JSON.stringify({ params: {}, features: [
-  { id: "outer", op: "component", file: "outer.arbor.json", name: "外壳", at: [-18, 0, 0] },
-  { id: "inner", op: "component", file: "inner.arbor.json", name: "内部件", at: [-18, 0, 8] },
-  { id: "right", op: "component", file: "outer.arbor.json", name: "右侧件", at: [18, 0, 0] },
+  { id: "outer", op: "component", file: "outer.turnery.json", name: "外壳", at: [-18, 0, 0] },
+  { id: "inner", op: "component", file: "inner.turnery.json", name: "内部件", at: [-18, 0, 8] },
+  { id: "right", op: "component", file: "outer.turnery.json", name: "右侧件", at: [18, 0, 0] },
 ] }))
 const errors = [], checks = []
 const started = performance.now()
-const app = await _electron.launch({ executablePath: path.join(root, "desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"), args: [path.join(root, "desktop"), `--user-data-dir=${path.join(out, "profile")}`, "--open", process.argv[2] ? path.resolve(process.argv[2]) : assembly], env: { ...process.env, ARBOR_HOME: path.join(out, "home") }, timeout: 30_000 })
+const app = await _electron.launch({ executablePath: path.join(root, "desktop/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron"), args: [path.join(root, "desktop"), `--user-data-dir=${path.join(out, "profile")}`, "--open", process.argv[2] ? path.resolve(process.argv[2]) : assembly], env: { ...process.env, TURNERY_HOME: path.join(out, "home") }, timeout: 30_000 })
 let page
 try {
   page = await app.firstWindow()
@@ -41,7 +41,7 @@ try {
     checks.push({ check: "empty-cache first rendered preview", ms: paintMs, state })
     await page.screenshot({ path: path.join(out, "first-preview.png") })
     await expect(viewport).toHaveAttribute("data-geometry-state", "ready", { timeout: 60_000 })
-    await page.evaluate((file) => window.arbor.call("open_part", { path: file }), assembly)
+    await page.evaluate((file) => window.turnery.call("open_part", { path: file }), assembly)
   }
   await expect(viewport).toHaveAttribute("data-document", assembly)
   await expect(viewport).toHaveAttribute("data-geometry-state", "ready", { timeout: 30_000 })
@@ -129,7 +129,7 @@ try {
   await expect(page.getByRole("textbox", { name: "标注备注" })).toBeVisible()
   await page.getByRole("textbox", { name: "标注备注" }).fill("爆炸状态的内部件验收")
   await tool("记下备注").click()
-  const state = await page.evaluate(() => window.arbor.state())
+  const state = await page.evaluate(() => window.turnery.state())
   const note = state.doc.notes.find((n) => n.text === "爆炸状态的内部件验收")
   if (!note || note.part !== "内部件" || note.point[2] < 8 || note.point[2] > 12 || Math.abs(note.point[0] + 18) > 2.01) throw new Error(`Exploded note has wrong native coordinates: ${JSON.stringify(note)}`)
   await page.screenshot({ path: path.join(out, "exploded-internal-note.png") })
@@ -147,7 +147,7 @@ try {
     await search.fill("right")
     await expect(results.getByRole("button")).toHaveCount(1)
     await expect(row("右侧件")).toBeVisible()
-    await search.fill("OUTER.ARBOR")
+    await search.fill("OUTER.TURNERY")
     await expect(results.getByRole("button")).toHaveCount(2)
     await row("右侧件").click()
     await search.fill("内部 INNER")
@@ -190,12 +190,12 @@ try {
     await expect(row("右侧件")).toHaveAttribute("aria-pressed", "true")
     checks.push({ check: `${mode}: search name/file/step, retain selection across filtering, multi-isolate/ghost/restore, Shift add/remove` })
   }
-  const afterSelection = await page.evaluate(() => window.arbor.state())
+  const afterSelection = await page.evaluate(() => window.turnery.state())
   if (afterSelection.doc.path !== assembly || afterSelection.doc.rev !== state.doc.rev || JSON.stringify(afterSelection.doc.tree) !== JSON.stringify(state.doc.tree)) throw new Error("Selection changed the model or active document")
   await expect(tool("回到最新")).toHaveCount(0)
   if (process.argv[2]) {
     const target = path.resolve(process.argv[2])
-    await page.evaluate((file) => window.arbor.call("open_part", { path: file }), target)
+    await page.evaluate((file) => window.turnery.call("open_part", { path: file }), target)
     await expect(viewport).toHaveAttribute("data-document", target)
     await expect(viewport).toHaveAttribute("data-geometry-state", "ready", { timeout: 60_000 })
     await page.waitForTimeout(900)
@@ -223,7 +223,7 @@ try {
       checks.push({ check: "41-part Dyson: search and isolate both shells in assembled/exploded views, transparent context and restore preserve explode" })
     }
   }
-  await page.evaluate((file) => window.arbor.call("open_part", { path: file }), path.join(project, "outer.arbor.json"))
+  await page.evaluate((file) => window.turnery.call("open_part", { path: file }), path.join(project, "outer.turnery.json"))
   await expect(page.getByRole("region", { name: "装配零件", exact: true })).toHaveCount(0)
   checks.push({ check: "opening a part collapses the bottom assembly-instance section" })
   if (errors.length) throw new Error(errors.join("\n"))

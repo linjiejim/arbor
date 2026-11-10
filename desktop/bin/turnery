@@ -1,0 +1,15 @@
+#!/bin/sh
+# The turnery command (and MCP server: `turnery mcp`) from a source checkout, run
+# with the Node that ships inside Electron, so nothing else needs installing.
+SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
+DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
+ELECTRON="$DIR/node_modules/electron/dist/$(cat "$DIR/node_modules/electron/path.txt" 2>/dev/null)"
+if [ ! -x "$ELECTRON" ]; then
+  echo "turnery: 找不到 Electron，先在 $DIR 里运行 npm install" >&2
+  exit 1
+fi
+if [ ! -f "$DIR/dist/cli.mjs" ]; then
+  echo "turnery: 还没有构建，先在 $DIR 里运行 npm run build" >&2
+  exit 1
+fi
+TURNERY_BIN="$SELF" ELECTRON_RUN_AS_NODE=1 exec "$ELECTRON" "$DIR/dist/cli.mjs" "$@"

@@ -24,7 +24,7 @@ async function boardStep(w = 60, d = 40, h = 10) {
 
 const AGENT: CallContext = { actor: "agent", session: "s1", cwd: "/work" }
 const USER: CallContext = { actor: "user" }
-const PART = "/work/box.arbor.json"
+const PART = "/work/box.turnery.json"
 
 async function boxEngine(screen?: Screen) {
   const mem = memFiles()
@@ -45,7 +45,7 @@ beforeAll(async () => {
   await initNodeKernel()
 }, 60_000)
 
-describe("arbor: paths and catalog", () => {
+describe("turnery: paths and catalog", () => {
   it("publishes loading and a preview before open resolves, then clears loading on success and failure", async () => {
     const mem = memFiles()
     const tree = { params: {}, features: [{ id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 12, h: 10 }] }, { id: "e", op: "extrude", sketch: "s", distance: 5 }] }
@@ -75,7 +75,7 @@ describe("arbor: paths and catalog", () => {
     expect((await opening).ok).toBe(true)
     expect(engine.snapshot().loading).toBeNull()
     expect(engine.docState()?.preview).toBeUndefined()
-    expect((await engine.openForUser("/work/missing.arbor.json")).ok).toBe(false)
+    expect((await engine.openForUser("/work/missing.turnery.json")).ok).toBe(false)
     expect(engine.snapshot().active).toBe(PART)
     expect(engine.snapshot().loading).toBeNull()
     engine.dispose()
@@ -83,13 +83,37 @@ describe("arbor: paths and catalog", () => {
   })
 
   it("normalizes part paths and derives names", () => {
-    expect(normalizePartPath("parts/box", "/work")).toBe("/work/parts/box.arbor.json")
+    expect(normalizePartPath("parts/box", "/work")).toBe("/work/parts/box.turnery.json")
     expect(normalizePartPath("/abs/x.json")).toBe("/abs/x.json")
     // `..` is left to the file system: after a symlinked folder it means the target's parent.
-    expect(normalizePartPath("./parts/../box", "/work/")).toBe("/work/parts/../box.arbor.json")
+    expect(normalizePartPath("./parts/../box", "/work/")).toBe("/work/parts/../box.turnery.json")
     expect(normalizePartPath("/work//a/./b.json")).toBe("/work/a/b.json")
+    expect(partName("/a/b/lid.turnery.json")).toBe("lid")
+    expect(notesPath("/a/lid.turnery.json")).toBe("/a/lid.notes.json")
+  })
+
+  it("still opens parts and assemblies saved under the name the app had before (.arbor.json)", async () => {
     expect(partName("/a/b/lid.arbor.json")).toBe("lid")
+    expect(partName("/a/pen.arbor-asm.json")).toBe("pen")
     expect(notesPath("/a/lid.arbor.json")).toBe("/a/lid.notes.json")
+    expect(notesPath("/a/pen.arbor-asm.json")).toBe("/a/pen.asm.notes.json")
+    expect(normalizePartPath("/work/lid.arbor.json")).toBe("/work/lid.arbor.json")
+    const mem = memFiles()
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files })
+    const tree = { params: { L: 10 }, features: [{ id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: "L", h: 5 }] }, { id: "e", op: "extrude", sketch: "s", distance: 3 }] }
+    await mem.files.write("/old/parts/base.arbor.json", JSON.stringify(tree))
+    await mem.files.write("/old/old.arbor-asm.json", JSON.stringify({ params: {}, features: [{ id: "c1", op: "component", file: "parts/base.arbor.json", name: "base" }] }))
+    const opened = await engine.run("open_project", { path: "/old" }, AGENT)
+    expect(opened.ok, opened.text).toBe(true)
+    expect(opened.text).toContain("old.arbor-asm.json")
+    expect(opened.text).toContain("parts/base.arbor.json")
+    // The assembly named after the folder opens, old ending or not, and edits go back to the same file.
+    const state = await engine.run("get_state", {}, AGENT)
+    expect(state.text).toContain("base")
+    const part = await engine.run("open_part", { path: "/old/parts/base.arbor.json" }, AGENT)
+    expect(part.ok, part.text).toBe(true)
+    expect((await engine.run("set_params", { set: { L: 12 } }, AGENT)).ok).toBe(true)
+    expect(JSON.parse((await mem.files.read("/old/parts/base.arbor.json"))!).params.L).toBe(12)
   })
 
   it("turns every command's input into a JSON schema, and keeps window-only commands from agents", () => {
@@ -110,15 +134,22 @@ describe("arbor: paths and catalog", () => {
       const defs = (s.$defs ?? {}) as Record<string, unknown>
       for (const m of text.matchAll(/"\$ref":"#\/\$defs\/(\w+)"/g)) expect(defs[m[1]], `${c.name} → ${m[1]}`).toBeTruthy()
     }
-    // Was ~236 000 characters with every selector inlined; set_tree alone was ~100 000.
-    expect(total).toBeLessThan(90_000)
+    // Was ~236 000 characters with every selector inlined (set_tree alone ~100 000), then ~86 000 with
+    // selectors under $defs. Now a selector's `not` only says "same fields", and anything else written
+    // twice in one tool (a path's and a polyline's points, the two ends of a distance) is hoisted too.
+    expect(total).toBeLessThan(64_000)
     const byName = (n: string) => JSON.stringify(inputJsonSchema(agentCommands().find((c) => c.name === n)!)).length
     expect(byName("set_tree")).toBeLessThan(4_000)
-    expect(byName("check")).toBeLessThan(15_000)
+    expect(byName("check")).toBeLessThan(9_000)
+    const sketch = inputJsonSchema(agentCommands().find((c) => c.name === "sketch")!)
+    expect(Object.keys(sketch.$defs as object)).toContain("Points")
+    expect(JSON.stringify(sketch)).toContain("倒圆角的拐角")
     // Field descriptions survive (they are the agent's documentation).
     const fillet = JSON.stringify(inputJsonSchema(agentCommands().find((c) => c.name === "fillet")!))
     expect(fillet).toContain("沿这个方向最靠外的边")
     expect(fillet).toContain('"$ref":"#/$defs/EdgeSelector"')
+    expect(fillet).toContain("字段和上面一样")
+    expect(fillet).not.toMatch(/"not":\{[^}]*"properties"/)
   })
 
   it("still validates a whole tree strictly behind the short set_tree schema", async () => {
@@ -138,7 +169,7 @@ describe("arbor: paths and catalog", () => {
   })
 })
 
-describe("arbor: the engine", () => {
+describe("turnery: the engine", () => {
   it("builds through tools, writes the file, and reports state", async () => {
     const { run, disk } = await boxEngine()
     const text = disk.get(PART) as string
@@ -230,7 +261,7 @@ describe("arbor: the engine", () => {
 
   it("treats one file reached by different paths as one part", async () => {
     const { engine, run } = await boxEngine()
-    await run("open_part", { path: "parts/../box.arbor.json" })
+    await run("open_part", { path: "parts/../box.turnery.json" })
     expect(engine.snapshot().parts).toHaveLength(1)
   }, 30_000)
 
@@ -344,13 +375,13 @@ describe("arbor: the engine", () => {
 
   it("refuses look without a window, and window-only commands from the agent", async () => {
     const { run } = await boxEngine()
-    expect((await run("look", {})).text).toMatch(/先打开 Arbor App/)
+    expect((await run("look", {})).text).toMatch(/先打开 Turnery App/)
     expect((await run("add_note", { pick: {}, text: "x" })).text).toMatch(/没有这个命令/)
   }, 30_000)
 })
 
-describe("arbor: importing STEP", () => {
-  const CASE = "/work/case.arbor.json"
+describe("turnery: importing STEP", () => {
+  const CASE = "/work/case.turnery.json"
 
   /** An open-top case around the board: inside 61 × 41, floor at z = 0, walls t. The board sits 1 mm up. */
   async function caseEngine() {
@@ -460,12 +491,12 @@ describe("arbor: importing STEP", () => {
     expect(missing.text).toMatch(/找不到 \/work\/nope\.step/)
     const web = new DirectKernel()
     const r = await web.rebuild({ params: {}, features: [{ id: "i", op: "import", file: "board.step" }] })
-    expect(r.features[0].message).toMatch(/只能在桌面版 Arbor 里用/)
+    expect(r.features[0].message).toMatch(/只能在桌面版 Turnery 里用/)
     web.dispose()
   }, 60_000)
 })
 
-describe("arbor: each part keeps its last build", () => {
+describe("turnery: each part keeps its last build", () => {
   it("switches between parts without rebuilding them, and rebuilds one that was dropped to make room", async () => {
     const { KERNEL_SLOTS } = await import("@/desktop/core/direct-kernel")
     const mem = memFiles()

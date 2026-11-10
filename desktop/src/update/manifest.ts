@@ -1,12 +1,12 @@
-// The update manifest (`arbor-update.json`, one per GitHub release) and its signatures.
-// Each platform's archive is signed with Arbor's own ed25519 key: the signature covers the
+// The update manifest (`turnery-update.json`, one per GitHub release) and its signatures.
+// Each platform's archive is signed with Turnery's own ed25519 key: the signature covers the
 // version, the platform and the archive's SHA-256 and size, so an installed copy only accepts
 // an archive made for that version. The public half is built into the app (public-key.ts);
-// the private half is the repository secret ARBOR_UPDATE_KEY and never leaves the release job.
+// the private half is the repository secret TURNERY_UPDATE_KEY and never leaves the release job.
 import { createPrivateKey, createPublicKey, sign, verify } from "node:crypto"
 
 export type UpdateAsset = {
-  /** Where the archive (a zip of Arbor.app) is downloaded from. */
+  /** Where the archive (a zip of Turnery.app) is downloaded from. */
   url: string
   sha256: string
   size: number
@@ -27,7 +27,7 @@ export const platformKey = (platform: string = process.platform, arch: string = 
 
 /** What a signature covers. Changing it means every installed copy rejects the new releases. */
 export function statement(version: string, platform: string, asset: Pick<UpdateAsset, "sha256" | "size">) {
-  return `arbor-update\n${version}\n${platform}\n${asset.sha256}\n${asset.size}\n`
+  return `turnery-update\n${version}\n${platform}\n${asset.sha256}\n${asset.size}\n`
 }
 
 const VERSION = /^(\d+)\.(\d+)\.(\d+)$/

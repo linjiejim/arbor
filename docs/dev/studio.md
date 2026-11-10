@@ -64,7 +64,7 @@ app/routes/studio-share.tsx   分享链接的只读页 /studio/s/:id
 
 桌面视口默认“查看与选择”：悬浮联动右侧步骤信息，单击固定，Esc 取消。“标注”在左侧工具栏单独切换，与测量互斥。项目列表采用单行，数量靠右；装配时间线的操作在悬浮或键盘聚焦时替换名称。
 
-成功重建装配后，自动在模型旁写入 `*.arbor-asm.preview`。它是带校验和的压缩 JSON 网格，随整个项目目录一起复制即可跨目录使用，不依赖本机 `ARBOR_HOME`。完整依赖内容或内核版本变化时跳过旧预览并重新生成；损坏、缺失或只读目录不阻断打开。预览先显示，精确几何后台恢复；加载提示持续到当前网格实际绘制，预览期间仍可旋转、选件、隔离和透明查看。
+成功重建装配后，自动在模型旁写入 `*.turnery-asm.preview`。它是带校验和的压缩 JSON 网格，随整个项目目录一起复制即可跨目录使用，不依赖本机 `TURNERY_HOME`。完整依赖内容或内核版本变化时跳过旧预览并重新生成；损坏、缺失或只读目录不阻断打开。预览先显示，精确几何后台恢复；加载提示持续到当前网格实际绘制，预览期间仍可旋转、选件、隔离和透明查看。
 
 选件工具栏支持隔离、其余透明、恢复显示及定位步骤；定位只滚动并聚焦时间线，不回滚模型。爆炸视图的拾取按显示位置寻找零件，再还原到装配坐标交给精确内核。标注保存零件身份和装配坐标，图钉随爆炸位移移动；隐藏或隔离时同步隐藏相应图钉。爆炸视图中的测量需先恢复装配位置。
 
@@ -72,7 +72,7 @@ app/routes/studio-share.tsx   分享链接的只读页 /studio/s/:id
 
 桌面构建后可运行 `node desktop/scripts/verify-assembly.mjs [带预览的装配路径]`。脚本使用临时项目和独立配置目录，检查首次绘制、悬浮、隔离、透明、步骤定位、标注切换及爆炸内部件选取，并在 `.tmp/assembly-ui-*` 保存截图、trace 和结果。传入路径的项目会正常刷新其派生预览文件。
 
-性能复测须使用空的 `ARBOR_HOME`，并分别记录完整网格到达、交互就绪和精确检查结束；避免与测试套件或其他 CPU 密集任务并行。`ARBOR_PROFILE=1` 会输出各零件准备耗时。
+性能复测须使用空的 `TURNERY_HOME`，并分别记录完整网格到达、交互就绪和精确检查结束；避免与测试套件或其他 CPU 密集任务并行。`TURNERY_PROFILE=1` 会输出各零件准备耗时。
 
 ## 一次对话怎么走
 
@@ -102,7 +102,7 @@ STUDIO_MOCK=1 npm run dev:api     # 对话 API，用脚本模型，不需要 key
 真模型（和线上一样走 OpenRouter，或者直连 DeepSeek）：
 
 ```bash
-node --env-file=$HOME/.config/arbor/openrouter.env node_modules/.bin/tsx server/index.ts
+node --env-file=$HOME/.config/turnery/openrouter.env node_modules/.bin/tsx server/index.ts
 DEEPSEEK_API_KEY=sk-… npm run dev:api
 ```
 
@@ -248,7 +248,7 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
 ## 特征树格式
 
 - 参数：`{ "L": 80, "inner": "L - 2*t" }`，任何数值字段都可以写参数名或表达式。
-- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`rib`、`split`；还有只在桌面版 Arbor 里用的 `import`（读 STEP 文件，`tools.ts` 的 `DESKTOP_OPS`，不给网页助教；网页内核遇到它会报错），见 `docs/specs/2026-11-07-arbor-desktop.md`。
+- 特征：`sketch`、`extrude`、`revolve`、`fillet`、`chamfer`、`shell`、`hole`、`linear_pattern`、`circular_pattern`、`mirror`、`sweep`、`loft`、`draft`、`rib`、`split`；还有只在桌面版 Turnery 里用的 `import`（读 STEP 文件，`tools.ts` 的 `DESKTOP_OPS`，不给网页助教；网页内核遇到它会报错），见 `docs/specs/2026-11-07-turnery-desktop.md`。
 - 拉伸的几种写法（`kernel/features2.ts`）：
   - `distance`、`through`、`until` 三者正好写一个。`until: "next"`：拉得很长，加料时减去实体、切除时与实体求交，只留贴着草图平面的那几块，所以挡住它的面是斜的、弯的都行；`until: { face }`：平行的面就是算好的距离，斜面用 replicad 的 `extrudeUntil`。
   - `thin`：封闭轮廓用 `Drawing.offset` 偏出一圈（向外偏时凸角会变圆）；开放的线（草图图形 `path`，圆弧按 5 µm 离散）按折线偏移、端头平齐，`inside` 是线拐弯的那一侧。
@@ -288,7 +288,7 @@ DEEPSEEK_API_KEY=sk-… npm run dev:api
 
 ```bash
 cd app
-node --env-file=$HOME/.config/arbor/deepseek.env node_modules/.bin/tsx scripts/studio-eval.ts            # 全部 10 题
+node --env-file=$HOME/.config/turnery/deepseek.env node_modules/.bin/tsx scripts/studio-eval.ts            # 全部 10 题
 node --env-file=… node_modules/.bin/tsx scripts/studio-eval.ts flange mug --thinking=disabled
 ```
 

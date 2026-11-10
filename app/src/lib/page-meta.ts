@@ -17,7 +17,7 @@ export type PageMeta = {
   description: string
 }
 
-export const SITE_NAME = "Arbor"
+export const SITE_NAME = "Turnery"
 export const SITE_TAGLINE = "工业建模互动课"
 
 /** Pages with a fixed path, in sitemap order. */
@@ -48,7 +48,7 @@ export const STATIC_PAGES: Record<string, PageMeta> = {
   },
   "/desktop": {
     title: "桌面版",
-    description: "Arbor 桌面版：让本机的 coding agent（Claude Code、Codex）通过 MCP 建参数化零件，项目和装配、导入 STEP、自动核对尺寸和间隙。macOS。",
+    description: "Turnery 桌面版：让本机的 coding agent（Claude Code、Codex）通过 MCP 建参数化零件，项目和装配、导入 STEP、自动核对尺寸和间隙。macOS。",
   },
 }
 

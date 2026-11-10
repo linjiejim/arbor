@@ -10,7 +10,7 @@ import type { BuildReport } from "@/studio/kernel/build"
 // Exercise the actual worker routing/lifecycle without loading a second OCCT
 // build in the unit suite. The independent checker deliberately stays busy.
 it("keeps interaction responsive during checks, remaps hashes, rejects stale results and reports worker failures", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "arbor-background-"))
+  const dir = await mkdtemp(path.join(tmpdir(), "turnery-background-"))
   const file = path.join(dir, "worker.mjs")
   await writeFile(file, `
     import { parentPort as p } from 'node:worker_threads';

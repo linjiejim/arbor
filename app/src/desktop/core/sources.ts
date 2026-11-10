@@ -8,7 +8,11 @@ import { z } from "zod"
 import { Num } from "../../studio/dsl"
 import type { Files } from "./engine"
 
-export const ASM_EXT = ".arbor-asm.json"
+export const ASM_EXT = ".turnery-asm.json"
+/** Assemblies written before the rename from Arbor. */
+export const LEGACY_ASM_EXT = ".arbor-asm.json"
+/** The assembly ending a path carries, new or old (null: neither). */
+export const asmExtOf = (path: string) => [ASM_EXT, LEGACY_ASM_EXT].find((e) => path.toLowerCase().endsWith(e)) ?? null
 export const PARAMS_EXT = ".params.json"
 /** Sub-assemblies nest at most this deep. */
 export const MAX_DEPTH = 4
@@ -75,7 +79,7 @@ export function sharedText(s: Pick<Shared, "params" | "notes">) {
   return `${JSON.stringify(out, null, 2)}\n`
 }
 
-export const isAssembly = (path: string) => path.toLowerCase().endsWith(ASM_EXT)
+export const isAssembly = (path: string) => asmExtOf(path) !== null
 const isStep = (file: string) => /\.(step|stp)$/i.test(file)
 
 /** What a tree reads from disk, for the kernel: imports' bytes and components (recursively). */

@@ -1,5 +1,5 @@
 /** Site-wide settings. */
-export const REPO_URL: string = "https://github.com/linjiejim/arbor"
+export const REPO_URL: string = "https://github.com/linjiejim/turnery"
 
 /** Public origin, for absolute URLs in link previews and the sitemap (no trailing slash). */
 export const SITE_URL = "https://arbor.linjiejim.com"

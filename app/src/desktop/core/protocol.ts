@@ -1,4 +1,4 @@
-// Arbor: the desktop workbench. Types shared by the engine (Electron main
+// Turnery: the desktop workbench. Types shared by the engine (Electron main
 // process, or in-process in the CLI), the preload bridge, the renderer and the
 // MCP / CLI front ends. No runtime code beyond constants.
 import type { PickInfo } from "../../studio/annotations"
@@ -10,7 +10,8 @@ import type { LookSection, LookShot } from "../../studio/look-plan"
 export type V3 = [number, number, number]
 
 /** Who changed the model: the coding agent (MCP / CLI), the person in the window, or someone editing the file. */
-export type Actor = "agent" | "user" | "file"
+/** `agent` is an outside agent over MCP or the CLI; `assistant` is the one built into the window. */
+export type Actor = "agent" | "assistant" | "user" | "file"
 
 /** One line of the activity list. `note`: about a note, not the tree (no new version). */
 export type Change = { rev: number; actor: Actor; at: number; summary: string; note?: "added" | "changed"; seq?: number }
@@ -71,7 +72,7 @@ export type DocState = {
   error?: string
 }
 
-export type AgentActivity = { busy: boolean; tool: string | null; at: number | null }
+export type AgentActivity = { busy: boolean; tool: string | null; at: number | null; who?: "agent" | "assistant" }
 
 /** A file of the project folder, for the sidebar: open ones carry their notes. */
 export type ProjectFile = {
@@ -136,7 +137,7 @@ export type KernelCall =
   | { op: "export"; format: "step" | "stl"; index?: number }
 
 export type AgentSetup = {
-  /** The `arbor` command on this machine. */
+  /** The `turnery` command on this machine. */
   bin: string
   claude: string
   codex: string
@@ -144,10 +145,10 @@ export type AgentSetup = {
   json: string
 }
 
-/** What the preload script exposes to the window as `window.arbor`. */
+/** What the preload script exposes to the window as `window.turnery`. */
 export type RecentProject = { root: string; name: string }
 
-export interface ArborBridge {
+export interface TurneryBridge {
   state(): Promise<{ snapshot: Snapshot; doc: DocState | null; pick: PickRequest | null }>
   subscribe(cb: (e: EngineEvent) => void): () => void
   call(command: string, input: Record<string, unknown>, part?: string): Promise<CommandResult>
@@ -165,6 +166,8 @@ export interface ArborBridge {
   openProjectAt(root: string): Promise<boolean>
   /** Project folders opened lately that still exist, newest first. */
   recentProjects(): Promise<RecentProject[]>
+  /** Open the example that ships with the app (a copy under ~/.turnery/projects). */
+  openExample(): Promise<boolean>
   /** File dialog for something to put in an assembly: a part or assembly file, or a STEP. */
   pickFile(kind: "part" | "step"): Promise<string | null>
   reveal(path: string): Promise<void>
@@ -201,7 +204,11 @@ export type ExportFormat = "step" | "stl" | "py" | "json"
 
 export type { BuildReport, DisplayData, PickInfo, Tree }
 
-export const PRODUCT = "Arbor"
-/** File name endings Arbor owns. */
-export const PART_EXT = ".arbor.json"
+export const PRODUCT = "Turnery"
+/** File name endings Turnery owns. */
+export const PART_EXT = ".turnery.json"
+/** Parts written before the rename from Arbor: still opened, listed and saved under their old name. */
+export const LEGACY_PART_EXT = ".arbor.json"
+/** The part ending a path carries, new or old (null: neither). */
+export const partExtOf = (path: string) => [PART_EXT, LEGACY_PART_EXT].find((e) => path.endsWith(e)) ?? null
 export const NOTES_EXT = ".notes.json"

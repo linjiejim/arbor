@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
 import { StateView } from "@/components/ui/state"
 import { Hint } from "@/components/hint"
-import { arbor } from "../bridge"
+import { turnery } from "../bridge"
 import type { Actor, DocState, PartNote, Snapshot } from "../core/protocol"
 import { AgentStatus } from "./title-bar"
 import { ACTOR_LABEL, ago, useNow } from "./words"
@@ -16,7 +16,7 @@ export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate
   const [filter, setFilter] = React.useState<"open" | "all">("open")
   const open = doc.notes.filter((n) => n.status === "open")
   const list = (filter === "open" ? open : [...doc.notes].sort((a, b) => Number(a.status === "resolved") - Number(b.status === "resolved") || b.n - a.n)).slice()
-  const update = (n: PartNote, input: Record<string, unknown>) => void arbor.call("update_note", { id: n.id, ...input }, doc.path)
+  const update = (n: PartNote, input: Record<string, unknown>) => void turnery.call("update_note", { id: n.id, ...input }, doc.path)
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-2">
@@ -32,7 +32,6 @@ export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate
         />
         <div className="flex items-center gap-1">
           <Hint
-            step={4}
             label="备注怎么用"
             align="end"
             tips={["在模型上单击一个面或一条边，写下要改什么。", "关于整个零件的，点「写一条」。", "agent 用 get_notes 读备注，改完会写一句回复。"]}
@@ -111,7 +110,7 @@ export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate
   )
 }
 
-const ACTOR_TONE: Record<Actor, "info" | "neutral" | "outline"> = { agent: "info", user: "neutral", file: "outline" }
+const ACTOR_TONE: Record<Actor, "info" | "neutral" | "outline"> = { agent: "info", assistant: "info", user: "neutral", file: "outline" }
 
 /** Who changed the part and how, newest first. */
 export function ActivityPanel({ doc, snapshot }: { doc: DocState; snapshot: Snapshot | null }) {

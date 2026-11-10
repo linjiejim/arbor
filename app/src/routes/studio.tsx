@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from "react-router"
 import { ArrowLeft, CircleAlert, Download, Ellipsis, Share2, Undo2, X } from "lucide-react"
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog"
 import { Drawer, DrawerBody, DrawerContent, DrawerHeader } from "@/components/ui/drawer"
-import { Tour } from "@/components/hint"
 import { practiceById, type Practice } from "@/content/practice"
 import { PracticeCard } from "@/studio/ui/practice-card"
 import { Button, IconButton } from "@/components/ui/button"
@@ -146,15 +145,15 @@ export function StudioPage() {
     if (format === "py") {
       const { code, problems } = buildCode(studio.tree)
       if (problems.length) return notify.error(`有 ${problems.length} 处不能安全地写成代码，没有导出：${problems[0]}`)
-      return saveBlob(new Blob([code], { type: "text/x-python" }), "arbor-model.py")
+      return saveBlob(new Blob([code], { type: "text/x-python" }), "turnery-model.py")
     }
     const blob = format === "json" ? new Blob([JSON.stringify(studio.tree, null, 2)], { type: "application/json" }) : await studio.exportBody(format)
     if (!blob) return notify("还没有实体可以导出")
-    saveBlob(blob, `arbor-model.${format === "stl" && blob.type === "application/zip" ? "zip" : format}`)
+    saveBlob(blob, `turnery-model.${format === "stl" && blob.type === "application/zip" ? "zip" : format}`)
   }
 
   return (
-    <Tour page="studio" ready={ready}>
+    <>
     <div className="flex h-dvh flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-2">
         <IconButton label="返回首页" onClick={() => navigate("/")}>
@@ -337,7 +336,7 @@ export function StudioPage() {
         }}
       />
     </div>
-    </Tour>
+    </>
   )
 }
 

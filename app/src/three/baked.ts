@@ -7,7 +7,7 @@ import type { MaterialKit } from "./materials"
 import type { OpId } from "@/content/ops"
 
 /**
- * Models baked offline from build123d (models/arborbake). A manifest describes
+ * Models baked offline from build123d (models/turnerybake). A manifest describes
  * the feature tree and the parameter sandbox; each parameter combination is
  * one GLB whose top-level nodes are the steps of the feature tree.
  *

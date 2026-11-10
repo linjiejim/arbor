@@ -40,7 +40,7 @@ const meta = await load("src/lib/page-meta.ts")
 const { SITE_URL } = await load("src/lib/site.ts")
 const models = JSON.parse(await readFile(path.join(dist, "models", "index.json"), "utf8"))
 
-const OG_IMAGE = { path: "/og.png", width: 1200, height: 630, alt: "Arbor：看懂每一个特征是怎么长出来的。图中马克杯的把手由扫掠生成" }
+const OG_IMAGE = { path: "/og.png", width: 1200, height: 630, alt: "Turnery：看懂每一个特征是怎么长出来的。图中马克杯的把手由扫掠生成" }
 
 /** @type {{ path: string, title: string | null, description: string }[]} */
 const pages = [

@@ -1,5 +1,5 @@
 // A portable, derived project artifact. It travels with the assembly, unlike
-// ARBOR_HOME caches. The complete dependency key prevents stale geometry flashes.
+// TURNERY_HOME caches. The complete dependency key prevents stale geometry flashes.
 import { createHash, randomUUID } from "node:crypto"
 import { readFile, rename, rm, writeFile } from "node:fs/promises"
 import { gzip, gunzip } from "node:zlib"

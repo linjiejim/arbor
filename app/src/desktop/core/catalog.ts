@@ -1,6 +1,6 @@
 // Every command the engine runs, registered once: name, description, zod
 // input. The MCP server lists the agent's ones as tools, the CLI exposes them
-// as `arbor call <name>`, and the window uses the user's ones over IPC.
+// as `turnery call <name>`, and the window uses the user's ones over IPC.
 import { z } from "zod"
 import { EdgeSelector, FaceSelector, Num, PlaneRef, Tree } from "../../studio/dsl"
 import { SYSTEM_PROMPT } from "../../studio/prompt"
@@ -31,18 +31,18 @@ const own: CommandSpec[] = [
   {
     name: "guide",
     audience: "agent",
-    description: "Arbor 的建模说明：工作流程、坐标约定、选择器写法。第一次用 Arbor 时先读一遍。",
+    description: "Turnery 的建模说明：工作流程、坐标约定、选择器写法。第一次用 Turnery 时先读一遍。",
     input: z.object({}),
   },
   {
     name: "open_part",
     audience: "both",
     description:
-      "打开一个零件文件（*.arbor.json，就是特征树 JSON）或装配文件（*.arbor-asm.json），之后的命令都作用在它上面；Arbor 窗口会切到它。文件不存在时要新建就设 create=true，可以用 template 从现成的特征树开始。写 context（装配文件）就是在装配里改这个零件：装配里的其他零件按相对位置半透明地显示在旁边，可以 look、measure、check 它们（只读）；不写 context 再打开一次就退出。",
+      "打开一个零件文件（*.turnery.json，就是特征树 JSON）或装配文件（*.turnery-asm.json），之后的命令都作用在它上面；Turnery 窗口会切到它。文件不存在时要新建就设 create=true，可以用 template 从现成的特征树开始。写 context（装配文件）就是在装配里改这个零件：装配里的其他零件按相对位置半透明地显示在旁边，可以 look、measure、check 它们（只读）；不写 context 再打开一次就退出。",
     input: z.object({
-      path: z.string().describe("零件文件路径，相对当前目录或绝对路径，例如 parts/box.arbor.json；装配用 .arbor-asm.json 结尾"),
+      path: z.string().describe("零件文件路径，相对当前目录或绝对路径，例如 parts/box.turnery.json；装配用 .turnery-asm.json 结尾"),
       create: z.boolean().optional().describe("文件不存在时新建"),
-      context: z.string().optional().describe("在这个装配（.arbor-asm.json）里改这个零件：装配里要有一个 component 的 file 是它"),
+      context: z.string().optional().describe("在这个装配（.turnery-asm.json）里改这个零件：装配里要有一个 component 的 file 是它"),
       template: z
         .enum(STARTERS.map((s) => s.id) as [string, ...string[]])
         .optional()
@@ -53,7 +53,7 @@ const own: CommandSpec[] = [
     name: "open_project",
     audience: "both",
     description:
-      "把一个文件夹作为项目打开：窗口左栏列出里面的装配和零件。create=true 时新建这个文件夹，并放一个同名的空装配（*.arbor-asm.json）和共享参数文件（*.params.json），然后打开装配。多个零件组成的东西先建项目。",
+      "把一个文件夹作为项目打开：窗口左栏列出里面的装配和零件。create=true 时新建这个文件夹，并放一个同名的空装配（*.turnery-asm.json）和共享参数文件（*.params.json），然后打开装配。多个零件组成的东西先建项目。",
     input: z.object({
       path: z.string().describe("项目文件夹，相对当前目录或绝对路径，例如 pen"),
       create: z.boolean().optional().describe("文件夹不存在或还没有装配时新建"),
@@ -102,7 +102,7 @@ const own: CommandSpec[] = [
     name: "look",
     audience: "agent",
     description:
-      "在 Arbor 窗口里渲染当前模型的视图图片给你看，检查形状、位置和方向。窗口里未处理的备注会画成编号圆点。建完一个零件、改完备注指的地方，都要看一次。小的细节用 focus 放大，里面的结构用 section 剖开看；最后一步改动很小时会自动加一张特写。结果里写着每张图 1 px 多少 mm。",
+      "在 Turnery 窗口里渲染当前模型的视图图片给你看，检查形状、位置和方向。窗口里未处理的备注会画成编号圆点。建完一个零件、改完备注指的地方，都要看一次。小的细节用 focus 放大，里面的结构用 section 剖开看；最后一步改动很小时会自动加一张特写。结果里写着每张图 1 px 多少 mm。",
     input: z.object({
       views: z.array(z.enum(VIEWS)).optional().describe("缺省 iso、front、top、right；写了 section 时缺省是正对截面的那一张加 iso；写了 focus 时缺省 iso、front"),
       highlight: z.string().optional().describe("高亮这个特征生成的面"),
@@ -157,7 +157,7 @@ const own: CommandSpec[] = [
     name: "get_notes",
     audience: "both",
     description:
-      "读用户在 Arbor 窗口里点在面或边上的备注：编号、写了什么、选中的是什么、一个已验证只选中它的选择器、草图坐标。直接用备注给的选择器，不要自己另写。",
+      "读用户在 Turnery 窗口里点在面或边上的备注：编号、写了什么、选中的是什么、一个已验证只选中它的选择器、草图坐标。直接用备注给的选择器，不要自己另写。",
     input: z.object({ status: z.enum(["open", "all"]).optional().describe("缺省只看未处理的") }),
   },
   {
@@ -174,7 +174,7 @@ const own: CommandSpec[] = [
     name: "request_pick",
     audience: "agent",
     description:
-      "请用户在 Arbor 窗口里点一个面或一条边，等用户点完返回它是什么和一个已验证的选择器。说不清用户指的是哪里时用它，比自己猜准。",
+      "请用户在 Turnery 窗口里点一个面或一条边，等用户点完返回它是什么和一个已验证的选择器。说不清用户指的是哪里时用它，比自己猜准。",
     input: z.object({
       prompt: z.string().max(200).describe("显示给用户的一句话，例如「点一下要开孔的那个面」"),
       kind: z.enum(["face", "edge", "any"]).optional(),
@@ -184,7 +184,7 @@ const own: CommandSpec[] = [
   {
     name: "show",
     audience: "agent",
-    description: "在 Arbor 窗口里高亮一个特征、一组面或边，指给用户看（例如「我说的是这两条边」）。clear=true 取消高亮。",
+    description: "在 Turnery 窗口里高亮一个特征、一组面或边，指给用户看（例如「我说的是这两条边」）。clear=true 取消高亮。",
     input: z.object({
       feature: z.string().optional().describe("高亮这个特征生成的面"),
       faces: FaceSelector.optional(),
@@ -227,7 +227,7 @@ const own: CommandSpec[] = [
   {
     name: "add_part",
     audience: "user",
-    description: "往当前装配里加零件：name 新建 parts/<name>.arbor.json 并在装配里编辑它；file 放一个已有的零件、装配或 STEP。",
+    description: "往当前装配里加零件：name 新建 parts/<name>.turnery.json 并在装配里编辑它；file 放一个已有的零件、装配或 STEP。",
     input: z.object({ name: z.string().optional(), file: z.string().optional() }),
   },
 ]
@@ -278,6 +278,69 @@ function refShared(node: unknown, defs: [string, Json][], used: Set<string>): un
   return Object.fromEntries(Object.entries(node as Json).map(([k, v]) => [k, refShared(v, defs, used)]))
 }
 
+/**
+ * A selector's `not` lists every field of the selector a second time. In the tool list it only says so:
+ * the engine still validates what the agent writes against the full schema.
+ */
+function shortNot(def: Json): Json {
+  const props = def.properties as Json | undefined
+  const not = props?.not as Json | undefined
+  if (!props || !not?.properties) return def
+  return { ...def, properties: { ...props, not: { type: "object", description: `${String(not.description ?? "")}；字段和上面一样（不含 not、expect）` } } }
+}
+
+type Slot = { parent: Record<string | number, unknown>; key: string | number; hint: string }
+/** Every place under `s` that holds a sub-schema (not the `properties` maps themselves, not the entries of `$defs`). */
+function schemaSlots(s: Json, out: Slot[] = [], hint = ""): Slot[] {
+  const visit = (parent: Record<string | number, unknown>, key: string | number, h: string, candidate: boolean) => {
+    const v = parent[key]
+    if (!v || typeof v !== "object" || Array.isArray(v)) return
+    if (candidate) out.push({ parent, key, hint: h })
+    schemaSlots(v as Json, out, h)
+  }
+  if (s.properties && typeof s.properties === "object") for (const name of Object.keys(s.properties)) visit(s.properties as Json, name, name, true)
+  if (s.$defs && typeof s.$defs === "object") for (const name of Object.keys(s.$defs)) visit(s.$defs as Json, name, name, false)
+  for (const k of ["anyOf", "oneOf", "allOf"]) if (Array.isArray(s[k])) (s[k] as unknown[]).forEach((_, i) => visit(s[k] as Record<number, unknown>, i, hint, true))
+  if (Array.isArray(s.items)) s.items.forEach((_, i) => visit(s.items as Record<number, unknown>, i, hint, true))
+  else if (s.items) visit(s, "items", hint, true)
+  if (s.additionalProperties && typeof s.additionalProperties === "object") visit(s, "additionalProperties", hint, true)
+  return out
+}
+
+/**
+ * Sub-schemas written out more than once in one tool (the point list of a path and of a polyline, the
+ * two ends of a distance) move under `$defs`, largest saving first. Nothing is lost: only repeats go.
+ */
+function hoistRepeats(schema: Json): Json {
+  const defs = (schema.$defs ?? {}) as Json
+  for (let round = 0; round < 16; round++) {
+    const seen = new Map<string, { n: number; hint: string }>()
+    for (const slot of schemaSlots(schema)) {
+      const node = slot.parent[slot.key] as Json
+      if ("$ref" in node) continue
+      const text = JSON.stringify(node)
+      if (text.length < 120) continue
+      const e = seen.get(text)
+      if (e) e.n++
+      else seen.set(text, { n: 1, hint: slot.hint })
+    }
+    let best: { text: string; hint: string; saving: number } | null = null
+    for (const [text, { n, hint }] of seen) {
+      const saving = (n - 1) * text.length - n * 28
+      if (n > 1 && saving > 100 && (!best || saving > best.saving)) best = { text, hint, saving }
+    }
+    if (!best) break
+    const hint = best.hint.replace(/[^A-Za-z0-9]/g, "")
+    const base = (hint.length > 1 ? hint : "Target").replace(/^./, (c) => c.toUpperCase())
+    let name = base
+    for (let i = 2; name in defs; i++) name = `${base}${i}`
+    for (const slot of schemaSlots(schema)) if (JSON.stringify(slot.parent[slot.key]) === best.text) slot.parent[slot.key] = { $ref: `#/$defs/${name}` }
+    defs[name] = JSON.parse(best.text)
+  }
+  if (Object.keys(defs).length) schema.$defs = defs
+  return schema
+}
+
 let defsCache: { raw: [string, Json][]; out: Map<string, Json> } | null = null
 /** The shared schemas as generated (to match against) and as written out (smaller ones inside referenced). */
 function sharedDefs() {
@@ -286,7 +349,7 @@ function sharedDefs() {
   const out = new Map(
     raw.map(([name, def], i) => {
       const { description, ...body } = def
-      const inner = refShared(body, raw.slice(i + 1), new Set()) as Json
+      const inner = shortNot(refShared(body, raw.slice(i + 1), new Set()) as Json)
       return [name, description ? { ...inner, description } : inner]
     }),
   )
@@ -321,8 +384,8 @@ export function inputJsonSchema(spec: CommandSpec): Record<string, unknown> {
   const result = refShared(s, raw, used) as Json
   // A shared schema may refer to a smaller one (a plane reference holds a face selector).
   for (const name of [...used]) for (const m of JSON.stringify(defs.get(name)).matchAll(/#\/\$defs\/(\w+)/g)) used.add(m[1])
-  if (used.size) result.$defs = Object.fromEntries(SHARED_DEFS.filter(([n]) => used.has(n)).map(([n]) => [n, defs.get(n)]))
-  return result
+  if (used.size) result.$defs = structuredClone(Object.fromEntries(SHARED_DEFS.filter(([n]) => used.has(n)).map(([n]) => [n, defs.get(n)])))
+  return hoistRepeats(result)
 }
 
 /** Inputs that name files: resolved against the caller's directory before they reach the engine. */
@@ -334,9 +397,9 @@ function promptSections(names: string[]) {
   return blocks.filter((b) => names.some((n) => b.startsWith(`## ${n}`))).join("\n\n")
 }
 
-export const AGENT_GUIDE = `# Arbor：用工具建参数化零件
+export const AGENT_GUIDE = `# Turnery：用工具建参数化零件
 
-零件是一棵特征树（JSON 文件 *.arbor.json）：参数表 + 有序的特征（草图、拉伸、旋转、圆角、抽壳、孔、阵列……），几何由 OpenCascade 内核算出。几个零件可以组成装配（*.arbor-asm.json），共用一个参数文件。用户在 Arbor 窗口里实时看到你的每一步，可以拖参数、改特征、在面或边上留备注。
+零件是一棵特征树（JSON 文件 *.turnery.json）：参数表 + 有序的特征（草图、拉伸、旋转、圆角、抽壳、孔、阵列……），几何由 OpenCascade 内核算出。几个零件可以组成装配（*.turnery-asm.json），共用一个参数文件。用户在 Turnery 窗口里实时看到你的每一步，可以拖参数、改特征、在面或边上留备注。
 
 这份说明较长；如果你看到的被截断了，先调用 guide 读全文（尤其是「零件和装配」「曲面和精细形状」两节）。
 
@@ -366,10 +429,10 @@ ${promptSections(["数值", "坐标与基准面", "扫掠、放样、拔模", "�
 | 最多 3 件紧密配合、共用很多尺寸的零件（笔尖和笔舌、盒子和盖板） | 单文件：加料时 part 写一个新名字 |
 | 要复用的零件、标准件、外购件（STEP）、超过 3 件，或者体积大、要分开维护 | 多文件装配 |
 - 单文件新建零件：加料（拉伸、旋转、扫掠、放样）写 part: "笔尖"，名字还不存在就新建一个零件，不和别的料合并（重叠会给 ⚠）。第一次加料写的 part 就是主体的名字；没写的话，主体叫「主体」。之后写 part 只改那个零件；修形、刻字只切它自己。
-- 项目：多个零件组成的东西，先 open_project（path 写文件夹名，create: true），会建好同名的空装配和共享参数文件并打开装配。零件放在 parts/ 下（open_part path: "pen/parts/笔杆.arbor.json" create: true），再在装配里用 component 放进来。list_parts 列出项目里的全部文件。
-- 装配：每个零件一个文件（*.arbor.json），装配是 *.arbor-asm.json（open_part create: true 新建）。装配里只放 component：file 写零件文件、子装配或 .step 外购件，name 是它在装配里的名字，rotate、at 摆位置（先转后移，可以写参数），或者用 mates 贴合（见下一节）。装配不能放几何特征：要改形状就 open_part 打开那个零件。
+- 项目：多个零件组成的东西，先 open_project（path 写文件夹名，create: true），会建好同名的空装配和共享参数文件并打开装配。零件放在 parts/ 下（open_part path: "pen/parts/笔杆.turnery.json" create: true），再在装配里用 component 放进来。list_parts 列出项目里的全部文件。
+- 装配：每个零件一个文件（*.turnery.json），装配是 *.turnery-asm.json（open_part create: true 新建）。装配里只放 component：file 写零件文件、子装配或 .step 外购件，name 是它在装配里的名字，rotate、at 摆位置（先转后移，可以写参数），或者用 mates 贴合（见下一节）。装配不能放几何特征：要改形状就 open_part 打开那个零件。
 - 共用尺寸：share_params 让零件和装配用同一个共享参数文件（*.params.json，move 把已有参数移进去）。共享参数以文件为准，set_params 改到它们会写回文件，用到它的零件一起重建。
-- 在装配里改零件：open_part 带 context: "pen.arbor-asm.json"，装配里的其他零件按相对位置半透明地显示在旁边；look 能看到它们，measure 的 part、check 的 gap / clearance / interference 能写它们的名字。不带 context 再打开一次就退出。
+- 在装配里改零件：open_part 带 context: "pen.turnery-asm.json"，装配里的其他零件按相对位置半透明地显示在旁边；look 能看到它们，measure 的 part、check 的 gap / clearance / interference 能写它们的名字。不带 context 再打开一次就退出。
 - 装配建好后：check 用 gap 核对该贴上的地方、interference 核对不该相交的地方；look 用 hide 和 section 看里面；export 出 step、stl（多零件打包成 zip）和 bom（零件清单）。
 
 ## 标准件和贴合摆放

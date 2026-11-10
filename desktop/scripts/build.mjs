@@ -1,6 +1,6 @@
-// Builds Arbor into desktop/dist:
+// Builds Turnery into desktop/dist:
 //   main.mjs, preload.cjs      Electron main process and the window's bridge
-//   cli.mjs                    `arbor` (MCP server included)
+//   cli.mjs                    `turnery` (MCP server included)
 //   kernel/kernel-thread.mjs   the OpenCascade worker thread
 //   fonts/, vendor/opencascade/   what the kernel loads at runtime
 //   renderer/                  the window (Vite, from app/desktop.html)
@@ -39,7 +39,7 @@ const common = {
   mainFields: ["module", "main"],
   plugins: [appAlias],
   external: ["electron"],
-  define: { __ARBOR_VERSION__: JSON.stringify(pkg.version) },
+  define: { __TURNERY_VERSION__: JSON.stringify(pkg.version) },
 }
 
 /**
@@ -70,6 +70,9 @@ await Promise.all([
 // kernel/fonts.ts loads `new URL("../fonts/…", import.meta.url)`: next to kernel/.
 await mkdir(path.join(dist, "fonts"), { recursive: true })
 for (const f of ["text-latin.ttf", "text-sc.ttf", "OFL.txt"]) await cp(path.join(appDir, "src/studio/fonts", f), path.join(dist, "fonts", f))
+// The example the welcome page opens; main.ts copies it to ~/.turnery/projects before opening it.
+await mkdir(path.join(dist, "examples/sensor-enclosure"), { recursive: true })
+await cp(path.join(appDir, "../examples/sensor-enclosure/enclosure.turnery.json"), path.join(dist, "examples/sensor-enclosure/enclosure.turnery.json"))
 // OpenCascade (LGPL-2.1): its wasm stays a separate, replaceable file, as on the site.
 const oc = path.join(appDir, "node_modules/replicad-opencascadejs")
 const ocOut = path.join(dist, "vendor/opencascade")
@@ -87,12 +90,12 @@ const run = (args, env = {}) =>
 
 if (!dev) {
   await run(["build", "--config", "vite.desktop.config.ts"])
-  console.log(`built Arbor ${pkg.version} → ${path.relative(process.cwd(), dist) || "."}`)
+  console.log(`built Turnery ${pkg.version} → ${path.relative(process.cwd(), dist) || "."}`)
 } else {
-  const port = Number(process.env.ARBOR_DEV_PORT ?? 5288)
+  const port = Number(process.env.TURNERY_DEV_PORT ?? 5288)
   const server = spawn(vite, ["--config", "vite.desktop.config.ts", "--port", String(port), "--strictPort"], { cwd: appDir, stdio: "inherit" })
   await new Promise((r) => setTimeout(r, 1500))
   const electron = path.join(root, "node_modules/.bin/electron")
-  const app = spawn(electron, ["."], { cwd: root, stdio: "inherit", env: { ...process.env, ARBOR_RENDERER_URL: `http://localhost:${port}/desktop.html` } })
+  const app = spawn(electron, ["."], { cwd: root, stdio: "inherit", env: { ...process.env, TURNERY_RENDERER_URL: `http://localhost:${port}/desktop.html` } })
   app.on("exit", () => server.kill())
 }

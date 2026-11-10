@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""App icons from the mark (resources/logo/arbor-mark.svg, made by make-logo.py):
+"""App icons from the mark (resources/logo/turnery-mark.svg, made by make-logo.py):
 the mark on a light rounded tile, placed on Apple's icon grid (an 824 px tile on
 a 1024 px transparent canvas, with a soft shadow). Writes:
   resources/icon.png     1024 px, for electron-builder and the window
@@ -16,7 +16,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
-MARK = ROOT / "resources/logo/arbor-mark.svg"
+MARK = ROOT / "resources/logo/turnery-mark.svg"
 OUT = ROOT / "resources"
 
 CANVAS = 1024

@@ -1,10 +1,10 @@
-// ~/.arbor: how the MCP server and the CLI find the running app (engine.json),
+// ~/.turnery: how the MCP server and the CLI find the running app (engine.json),
 // how they can start it (app.json), and the recently opened parts.
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 
-export const HOME = process.env.ARBOR_HOME || path.join(os.homedir(), ".arbor")
+export const HOME = process.env.TURNERY_HOME || path.join(os.homedir(), ".turnery")
 
 /** Where the app's engine listens. Written by the app at launch, removed when it quits. */
 export type EngineInfo = { port: number; token: string; pid: number; version: string; startedAt: number }
@@ -12,6 +12,44 @@ export type EngineInfo = { port: number; token: string; pid: number; version: st
 export type AppInfo = { exec: string; args: string[] }
 
 const file = (name: string) => path.join(HOME, name)
+
+/**
+ * Before the rename the app was called Arbor and kept its state in ~/.arbor. The first start of
+ * Turnery takes that folder over (recent projects, settings, the projects made there), unless the old
+ * app is still running or TURNERY_HOME points somewhere else. Paths remembered inside follow the move.
+ */
+export function adoptLegacyHome(legacy = path.join(os.homedir(), ".arbor")): boolean {
+  if (process.env.TURNERY_HOME || existsSync(HOME) || !existsSync(legacy)) return false
+  try {
+    const running = JSON.parse(readFileSync(path.join(legacy, "engine.json"), "utf8")) as EngineInfo
+    process.kill(running.pid, 0)
+    return false // the old app is alive and using it
+  } catch {
+    /* no engine.json, or its process is gone */
+  }
+  try {
+    renameSync(legacy, HOME)
+  } catch {
+    return false
+  }
+  // Parts elsewhere may name files in there by the old path (a component, a shared parameter file):
+  // the old name stays as a link, so they still resolve.
+  try {
+    symlinkSync(HOME, legacy, "dir")
+  } catch {
+    /* they will report the missing file */
+  }
+  for (const stale of ["engine.json", "app.json"]) rmSync(file(stale), { force: true })
+  for (const name of ["recent.json", "recent-projects.json"]) {
+    try {
+      const text = readFileSync(file(name), "utf8")
+      writeFileSync(file(name), text.split(JSON.stringify(legacy).slice(1, -1)).join(JSON.stringify(HOME).slice(1, -1)))
+    } catch {
+      /* not there */
+    }
+  }
+  return true
+}
 
 function readJson<T>(name: string): T | null {
   try {
@@ -58,6 +96,6 @@ export function projectStamp(d = new Date()) {
 }
 
 /** The app's own preferences (checkboxes in the app menu; the window zoom). */
-export type AppSettings = { autoUpdate: boolean; zoom?: number }
+export type AppSettings = { autoUpdate: boolean; zoom?: number; /** The example was opened once on the first start. */ exampleShown?: boolean }
 export const readSettings = (): AppSettings => ({ autoUpdate: true, ...readJson<Partial<AppSettings>>("settings.json") })
 export const writeSettings = (s: AppSettings) => writeJson("settings.json", s, 0o644)

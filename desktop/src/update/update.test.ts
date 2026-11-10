@@ -14,11 +14,11 @@ const keys = generateKeyPairSync("ed25519")
 const priv = keys.privateKey.export({ type: "pkcs8", format: "pem" }).toString()
 const pub = keys.publicKey.export({ type: "spki", format: "pem" }).toString()
 
-const tmp = mkdtempSync(path.join(os.tmpdir(), "arbor-update-test-"))
+const tmp = mkdtempSync(path.join(os.tmpdir(), "turnery-update-test-"))
 after(() => rmSync(tmp, { recursive: true, force: true }))
 
 function manifestFor(version: string, bytes: Buffer, platform = "darwin-arm64", key = priv): UpdateManifest {
-  const asset = { url: "https://example.invalid/Arbor.zip", sha256: createHash("sha256").update(bytes).digest("hex"), size: bytes.length }
+  const asset = { url: "https://example.invalid/Turnery.zip", sha256: createHash("sha256").update(bytes).digest("hex"), size: bytes.length }
   return { version, platforms: { [platform]: { ...asset, signature: signAsset(version, platform, asset, key) } } }
 }
 
@@ -77,16 +77,16 @@ describe("download", () => {
   })
 })
 
-/** A fake Arbor.app: Info.plist, an executable, and a symlink like the frameworks have. */
+/** A fake Turnery.app: Info.plist, an executable, and a symlink like the frameworks have. */
 function fakeApp(dir: string, version: string, id = BUNDLE_ID) {
-  const app = path.join(dir, "Arbor.app")
+  const app = path.join(dir, "Turnery.app")
   mkdirSync(path.join(app, "Contents/MacOS"), { recursive: true })
   const plist = path.join(app, "Contents/Info.plist")
   execFileSync("/usr/bin/plutil", ["-create", "xml1", plist])
   execFileSync("/usr/bin/plutil", ["-insert", "CFBundleIdentifier", "-string", id, plist])
   execFileSync("/usr/bin/plutil", ["-insert", "CFBundleShortVersionString", "-string", version, plist])
-  writeFileSync(path.join(app, "Contents/MacOS/Arbor"), `#!/bin/sh\necho ${version}\n`, { mode: 0o755 })
-  symlinkSync("MacOS/Arbor", path.join(app, "Contents/Current"))
+  writeFileSync(path.join(app, "Contents/MacOS/Turnery"), `#!/bin/sh\necho ${version}\n`, { mode: 0o755 })
+  symlinkSync("MacOS/Turnery", path.join(app, "Contents/Current"))
   return app
 }
 
@@ -94,11 +94,11 @@ const mac = process.platform === "darwin"
 
 describe("install", { skip: !mac && "macOS only" }, () => {
   it("finds the bundle around the executable", () => {
-    assert.equal(bundleOf("/Applications/Arbor.app/Contents/MacOS/Arbor"), "/Applications/Arbor.app")
+    assert.equal(bundleOf("/Applications/Turnery.app/Contents/MacOS/Turnery"), "/Applications/Turnery.app")
     assert.equal(bundleOf("/usr/local/bin/electron"), null)
   })
   it("refuses to update from a disk image", () => {
-    assert.match(cannotReplace("/Volumes/Arbor/Arbor.app") ?? "", /拖进「应用程序」/)
+    assert.match(cannotReplace("/Volumes/Turnery/Turnery.app") ?? "", /拖进「应用程序」/)
     assert.match(cannotReplace(null) ?? "", /打包好/)
   })
 
@@ -110,23 +110,23 @@ describe("install", { skip: !mac && "macOS only" }, () => {
 
     const src = path.join(tmp, "src")
     fakeApp(src, "0.2.0")
-    const zip = path.join(tmp, "Arbor-0.2.0.zip")
-    execFileSync("/usr/bin/ditto", ["-c", "-k", "--keepParent", path.join(src, "Arbor.app"), zip])
+    const zip = path.join(tmp, "Turnery-0.2.0.zip")
+    execFileSync("/usr/bin/ditto", ["-c", "-k", "--keepParent", path.join(src, "Turnery.app"), zip])
 
     await assert.rejects(unpack(zip, path.join(stagingDir(installed), "new"), "0.3.0"), /是 0.2.0/)
     const fresh = await unpack(zip, path.join(stagingDir(installed), "new"), "0.2.0")
     swapBundles(installed, fresh)
-    assert.equal(execFileSync(path.join(installed, "Contents/MacOS/Arbor")).toString().trim(), "0.2.0")
+    assert.equal(execFileSync(path.join(installed, "Contents/MacOS/Turnery")).toString().trim(), "0.2.0")
     assert.equal(execFileSync(path.join(installed, "Contents/Current")).toString().trim(), "0.2.0")
     assert.ok(!existsSync(fresh))
   })
 
-  it("refuses a bundle that isn't Arbor", async () => {
+  it("refuses a bundle that isn't Turnery", async () => {
     const src = path.join(tmp, "other")
     fakeApp(src, "0.2.0", "com.example.other")
     const zip = path.join(tmp, "other.zip")
-    execFileSync("/usr/bin/ditto", ["-c", "-k", "--keepParent", path.join(src, "Arbor.app"), zip])
-    await assert.rejects(unpack(zip, path.join(tmp, "other-out"), "0.2.0"), /不是 Arbor/)
+    execFileSync("/usr/bin/ditto", ["-c", "-k", "--keepParent", path.join(src, "Turnery.app"), zip])
+    await assert.rejects(unpack(zip, path.join(tmp, "other-out"), "0.2.0"), /不是 Turnery/)
   })
 
   it("puts the old bundle back when the new one can't be moved in", () => {
@@ -135,6 +135,6 @@ describe("install", { skip: !mac && "macOS only" }, () => {
     const installed = fakeApp(apps, "0.1.0")
     mkdirSync(stagingDir(installed))
     assert.throws(() => swapBundles(installed, path.join(stagingDir(installed), "missing.app")))
-    assert.equal(execFileSync(path.join(installed, "Contents/MacOS/Arbor")).toString().trim(), "0.1.0")
+    assert.equal(execFileSync(path.join(installed, "Contents/MacOS/Turnery")).toString().trim(), "0.1.0")
   })
 })

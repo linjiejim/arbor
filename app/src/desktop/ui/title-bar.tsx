@@ -5,9 +5,9 @@ import { Button, IconButton } from "@/components/ui/button"
 import { StatusDot } from "@/components/ui/badge"
 import { Segmented } from "@/components/ui/segmented"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { arbor } from "../bridge"
+import { turnery } from "../bridge"
 import type { DocState, PickRequest, Snapshot, UpdateStatus } from "../core/protocol"
-import { ArborMark } from "@/components/arbor-mark"
+import { TurneryMark } from "@/components/turnery-mark"
 import { ago, commandLabel, useNow } from "./words"
 
 /** The window's top bar; on macOS it is also the title bar (drag to move, traffic lights on the left). */
@@ -27,14 +27,14 @@ export function TitleBar({
   sheet: boolean
   onSheet: (on: boolean) => void
 }) {
-  const mac = arbor.platform === "darwin"
-  const call = (name: string) => void arbor.call(name, {}, doc?.path)
+  const mac = turnery.platform === "darwin"
+  const call = (name: string) => void turnery.call(name, {}, doc?.path)
   return (
     <header className={cn("flex h-12 shrink-0 items-center gap-2 border-b px-3 select-none [-webkit-app-region:drag]", mac && "pl-22")}>
-      <ArborMark />
-      <span className="text-body font-semibold">Arbor</span>
+      <TurneryMark />
+      <span className="text-body font-semibold">Turnery</span>
       {(doc || snapshot?.project) && (
-        <IconButton label="回到首页（⇧⌘H）" size="icon-sm" className="[-webkit-app-region:no-drag]" onClick={() => void arbor.call("close_project", {})}>
+        <IconButton label="回到首页（⇧⌘H）" size="icon-sm" className="[-webkit-app-region:no-drag]" onClick={() => void turnery.call("close_project", {})}>
           <House />
         </IconButton>
       )}
@@ -88,10 +88,10 @@ export function TitleBar({
                 </IconButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onSelect={() => void arbor.exportPart("step")}>导出 STEP…</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void arbor.exportPart("stl")}>导出 STL…</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void arbor.exportPart("py")}>导出 build123d 代码…</DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => void arbor.exportPart("json")}>导出特征树 JSON…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void turnery.exportPart("step")}>导出 STEP…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void turnery.exportPart("stl")}>导出 STL…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void turnery.exportPart("py")}>导出 build123d 代码…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void turnery.exportPart("json")}>导出特征树 JSON…</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </>
@@ -109,12 +109,18 @@ export function TitleBar({
 export function AgentStatus({ snapshot, pick }: { snapshot: Snapshot | null; pick: PickRequest | null }) {
   const now = useNow()
   const a = snapshot?.agent
-  if (pick) return <StatusDot tone="warning">Agent 在等你点选</StatusDot>
-  if (a?.busy && a.tool) return <StatusDot tone="info">Agent 正在{commandLabel(a.tool)}…</StatusDot>
+  const who = a?.who === "assistant" ? "助手" : "Agent"
+  if (pick) return <StatusDot tone="warning">{who} 在等你点选</StatusDot>
+  if (a?.busy && a.tool)
+    return (
+      <StatusDot tone="info">
+        {who} 正在{commandLabel(a.tool)}…
+      </StatusDot>
+    )
   if (a?.at && a.tool)
     return (
       <StatusDot tone="success" className="text-muted-foreground">
-        Agent {ago(a.at, now)}{commandLabel(a.tool)}
+        {who} {ago(a.at, now)}{commandLabel(a.tool)}
       </StatusDot>
     )
   return <StatusDot className="text-muted-foreground">等 agent 连上</StatusDot>
@@ -124,8 +130,8 @@ function useUpdateStatus() {
   const [status, setStatus] = React.useState<UpdateStatus>({ phase: "idle" })
   React.useEffect(() => {
     let alive = true
-    const off = arbor.onUpdate(setStatus)
-    void arbor.update().then((s) => alive && setStatus(s))
+    const off = turnery.onUpdate(setStatus)
+    void turnery.update().then((s) => alive && setStatus(s))
     return () => {
       alive = false
       off()
@@ -139,7 +145,7 @@ function UpdateStatusButton() {
   const status = useUpdateStatus()
   if (status.phase === "ready")
     return (
-      <Button size="sm" variant="primary" className="mr-1" onClick={() => void arbor.restartToUpdate()}>
+      <Button size="sm" variant="primary" className="mr-1" onClick={() => void turnery.restartToUpdate()}>
         <RotateCw />
         重启以更新到 {status.version}
       </Button>

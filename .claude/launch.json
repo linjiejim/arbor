@@ -1,6 +1,6 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "arbor", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "dev"], "port": 5287 }
+    { "name": "turnery", "runtimeExecutable": "npm", "runtimeArgs": ["--prefix", "app", "run", "dev"], "port": 5287 }
   ]
 }

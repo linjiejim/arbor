@@ -1,6 +1,6 @@
 {
   "sourceDirs": ["src"],
-  "themeFiles": ["src/styles/jim-theme.css", "src/styles/arbor-theme.css"],
+  "themeFiles": ["src/styles/jim-theme.css", "src/styles/turnery-theme.css"],
   "presetFiles": ["src/styles/presets"],
   "uiDirs": ["src/components/ui"],
   "ignore": []

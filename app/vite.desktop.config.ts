@@ -3,7 +3,7 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 
-// The window of Arbor, the desktop app (../desktop): another entry of this
+// The window of Turnery, the desktop app (../desktop): another entry of this
 // app, with the same React, design system and studio components. Built into
 // ../desktop/dist/renderer by `npm run build` there.
 export default defineConfig({

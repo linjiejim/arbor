@@ -1,8 +1,8 @@
-// Drives `arbor mcp` with the official MCP client, the way a coding agent
+// Drives `turnery mcp` with the official MCP client, the way a coding agent
 // does: list the tools, build a flange, check it, export it, read notes.
 //
 //   node scripts/smoke-mcp.mjs          headless (no window): every tool but look / request_pick
-//   node scripts/smoke-mcp.mjs --app    through the running Arbor app (started if needed), look included
+//   node scripts/smoke-mcp.mjs --app    through the running Turnery app (started if needed), look included
 //
 // Leaves the part in a temporary folder and prints where.
 import assert from "node:assert/strict"
@@ -15,17 +15,17 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const withApp = process.argv.includes("--app")
-const work = await mkdtemp(path.join(os.tmpdir(), "arbor-smoke-"))
+const work = await mkdtemp(path.join(os.tmpdir(), "turnery-smoke-"))
 
 const transport = new StdioClientTransport({
-  command: path.join(root, "bin/arbor"),
+  command: path.join(root, "bin/turnery"),
   args: ["mcp"],
   cwd: work,
-  // Headless runs keep their recent-parts list out of ~/.arbor.
-  env: { ...process.env, ...(withApp ? {} : { ARBOR_NO_APP: "1", ARBOR_HOME: path.join(work, ".arbor") }) },
+  // Headless runs keep their recent-parts list out of ~/.turnery.
+  env: { ...process.env, ...(withApp ? {} : { TURNERY_NO_APP: "1", TURNERY_HOME: path.join(work, ".turnery") }) },
   stderr: "inherit",
 })
-const client = new Client({ name: "arbor-smoke", version: "0.0.0" })
+const client = new Client({ name: "turnery-smoke", version: "0.0.0" })
 await client.connect(transport)
 
 let step = 0
@@ -42,11 +42,11 @@ const { tools } = await client.listTools()
 console.log(`${tools.length} tools: ${tools.map((t) => t.name).join(", ")}`)
 assert.ok(tools.length >= 30, "all agent commands are listed")
 assert.ok(!tools.some((t) => t.name === "add_note"), "window-only commands stay hidden")
-assert.match(client.getInstructions() ?? "", /Arbor/, "the server sends its guide as instructions")
+assert.match(client.getInstructions() ?? "", /Turnery/, "the server sends its guide as instructions")
 
 const open = await call("open_part", { path: "parts/flange", create: true })
 assert.ok(!open.isError)
-assert.match(open.text, /parts\/flange\.arbor\.json/)
+assert.match(open.text, /parts\/flange\.turnery\.json/)
 
 await call("set_params", { set: { D: 90, T: 10, d: 20, pcd: 70, hd: 8, n: 6 }, notes: { D: "外径", T: "厚", d: "中心孔", pcd: "螺栓孔分布圆", hd: "螺栓孔径", n: "螺栓孔数" } })
 await call("sketch", { id: "sk1", name: "外圆", on: { plane: "XY" }, shapes: [{ type: "circle", d: "D" }] })
@@ -84,7 +84,7 @@ await call("export", { path: "out/flange.py" })
 assert.match(await readFile(path.join(work, "out/flange.py"), "utf8"), /from build123d import/)
 
 // Someone edits the file directly (the agent's own editor, git…): the engine picks it up and says so.
-const file = path.join(work, "parts/flange.arbor.json")
+const file = path.join(work, "parts/flange.turnery.json")
 const tree = JSON.parse(await readFile(file, "utf8"))
 tree.params.n = 8
 await writeFile(file, JSON.stringify(tree, null, 2))
@@ -115,18 +115,18 @@ assert.ok(!(await call("open_part", { path: "pen/cap", create: true })).isError)
 assert.ok(!(await call("share_params", { file: "pen.params.json" })).isError)
 await call("sketch", { id: "s", on: { plane: "XY" }, shapes: [{ type: "circle", d: "D+2" }] })
 await call("extrude", { id: "e", sketch: "s", distance: 20 })
-const asm = await call("open_part", { path: "pen/pen.arbor-asm.json", create: true })
+const asm = await call("open_part", { path: "pen/pen.turnery-asm.json", create: true })
 assert.match(asm.text, /已新建装配/)
 await call("share_params", { file: "pen.params.json" })
-assert.ok(!(await call("component", { id: "barrel", name: "笔杆", file: "barrel.arbor.json" })).isError)
-assert.ok(!(await call("component", { id: "cap", name: "笔帽", file: "cap.arbor.json", at: [0, 0, "L"] })).isError)
+assert.ok(!(await call("component", { id: "barrel", name: "笔杆", file: "barrel.turnery.json" })).isError)
+assert.ok(!(await call("component", { id: "cap", name: "笔帽", file: "cap.turnery.json", at: [0, 0, "L"] })).isError)
 const fit = await call("check", { items: [{ id: "seat", said: "笔帽压在笔杆上", kind: "gap", a: { part: "笔帽" }, b: { part: "笔杆" }, max: 0 }] })
 assert.ok(!fit.text.includes("✗"), fit.text)
 const longer = await call("set_params", { set: { L: 70 } })
 assert.match(longer.text, /共享参数（pen\.params\.json）：L = 70/)
 assert.ok(!(await call("export", { path: "out/pen-bom.md" })).isError)
 assert.match(await readFile(path.join(work, "out/pen-bom.md"), "utf8"), /笔帽/)
-const inCtx = await call("open_part", { path: "pen/barrel", context: "pen/pen.arbor-asm.json" })
+const inCtx = await call("open_part", { path: "pen/barrel", context: "pen/pen.turnery-asm.json" })
 assert.match(inCtx.text, /在装配「pen」里编辑/)
 if (withApp) {
   const close = await call("look", { focus: { part: "笔帽" }, section: { plane: "XZ", offset: 0 } })
@@ -136,15 +136,15 @@ if (withApp) {
 
 // A project: a folder with an empty assembly and a parameter file; parts go under parts/ and into the assembly.
 const proj = await call("open_project", { path: "lamp", create: true })
-assert.match(proj.text, /新建了装配 lamp\.arbor-asm\.json/)
+assert.match(proj.text, /新建了装配 lamp\.turnery-asm\.json/)
 assert.ok(!(await call("open_part", { path: "lamp/parts/base", create: true })).isError)
 await call("sketch", { id: "s", on: { plane: "XY" }, shapes: [{ type: "circle", d: 80 }] })
 await call("extrude", { id: "e", sketch: "s", distance: 12 })
-await call("open_part", { path: "lamp/lamp.arbor-asm.json" })
-assert.ok(!(await call("component", { id: "base", name: "底座", file: "parts/base.arbor.json" })).isError)
+await call("open_part", { path: "lamp/lamp.turnery-asm.json" })
+assert.ok(!(await call("component", { id: "base", name: "底座", file: "parts/base.turnery.json" })).isError)
 const listed = await call("list_parts")
 assert.match(listed.text, /项目 lamp/)
-assert.match(listed.text, /parts\/base\.arbor\.json（零件）：2 个特征/)
+assert.match(listed.text, /parts\/base\.turnery\.json（零件）：2 个特征/)
 
 await client.close()
 console.log(`\nMCP smoke passed (${withApp ? "with the app" : "headless"}). Part: ${file}`)

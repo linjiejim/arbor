@@ -9,7 +9,7 @@ import { readAppInfo, readEngineInfo, type EngineInfo } from "./home"
 import { startEngine } from "./host"
 import type { CallBody } from "./rpc"
 
-export type Ctx = Omit<CallContext, "actor">
+export type Ctx = Omit<CallContext, "actor"> & { actor?: "agent" | "assistant" }
 
 export interface Backend {
   readonly kind: "app" | "local"
@@ -36,7 +36,7 @@ async function alive(info: EngineInfo | null): Promise<EngineInfo | null> {
   try {
     const res = await fetch(`http://127.0.0.1:${info.port}/health`, { signal: AbortSignal.timeout(1500) })
     const body = (await res.json()) as { name?: string; pid?: number }
-    return res.ok && body.name === "arbor" && body.pid === info.pid ? info : null
+    return res.ok && body.name === "turnery" && body.pid === info.pid ? info : null
   } catch {
     return null
   }
@@ -53,7 +53,7 @@ class AppBackend implements Backend {
       headers: { "content-type": "application/json", authorization: `Bearer ${this.info.token}` },
       body: JSON.stringify({ command, input, ctx } satisfies CallBody),
     })
-    if (!res.ok) throw new Error(`Arbor 返回 HTTP ${res.status}`)
+    if (!res.ok) throw new Error(`Turnery 返回 HTTP ${res.status}`)
     return (await res.json()) as CommandResult
   }
   async close() {}
@@ -106,13 +106,13 @@ export async function connect(opts: ConnectOptions): Promise<Backend> {
   const running = await runningApp()
   if (running) return new AppBackend(running)
   if (opts.launch && launchApp(opts.hidden)) {
-    opts.log?.("正在启动 Arbor App…")
+    opts.log?.("正在启动 Turnery App…")
     const info = await waitForApp(30_000)
     if (info) return new AppBackend(info)
-    opts.log?.("Arbor App 没有在 30 秒内启动")
+    opts.log?.("Turnery App 没有在 30 秒内启动")
   }
   if (opts.fallback) return new LocalBackend(opts.distDir)
-  throw new Error("Arbor App 没在运行。先打开 Arbor（或运行 arbor open），再试一次。")
+  throw new Error("Turnery App 没在运行。先打开 Turnery（或运行 turnery open），再试一次。")
 }
 
 /**

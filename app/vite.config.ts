@@ -7,11 +7,11 @@ import { defineConfig, type Plugin } from 'vite'
 const api = `http://127.0.0.1:${process.env.STUDIO_API_PORT ?? 18914}`
 
 /**
- * The site's /desktop page shares its name with desktop.html (the Arbor window, a separate build):
+ * The site's /desktop page shares its name with desktop.html (the Turnery window, a separate build):
  * the dev server would serve that file for /desktop. Send the page to the site's index.html instead.
  */
 const desktopPage: Plugin = {
-  name: "arbor-desktop-page",
+  name: "turnery-desktop-page",
   configureServer(server) {
     server.middlewares.use((req, _res, next) => {
       if (req.url && /^\/desktop\/?(\?.*)?$/.test(req.url)) req.url = "/index.html"

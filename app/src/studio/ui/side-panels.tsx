@@ -37,7 +37,7 @@ export function ParamsPanel({ studio, onHover, annotations }: { studio: Studio; 
       {entries.length > 0 && (
         <div className="flex h-6 items-center gap-1 px-2 text-caption text-faint-foreground">
           {entries.length} 个参数
-          <Hint step={4} label="参数怎么用" tips={["改完按 Enter，整棵特征树按新参数重算。", "指向一个参数，模型上会标出它的尺寸。"]} />
+          <Hint label="参数怎么用" tips={["改完按 Enter，整棵特征树按新参数重算。", "指向一个参数，模型上会标出它的尺寸。"]} />
         </div>
       )}
       {studio.report?.paramError && <p className="px-2 text-small text-destructive">{studio.report.paramError}</p>}

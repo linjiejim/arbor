@@ -1,19 +1,19 @@
-// `window.arbor`, set up by the Electron preload script. Opened anywhere else
+// `window.turnery`, set up by the Electron preload script. Opened anywhere else
 // (a plain browser), every call fails and the page says where to open it.
-import type { ArborBridge } from "./core/protocol"
+import type { TurneryBridge } from "./core/protocol"
 
 declare global {
   interface Window {
-    arbor?: ArborBridge
+    turnery?: TurneryBridge
   }
 }
 
-export const inApp = typeof window !== "undefined" && Boolean(window.arbor)
+export const inApp = typeof window !== "undefined" && Boolean(window.turnery)
 
-const missing = () => Promise.reject(new Error("只能在 Arbor App 里使用"))
+const missing = () => Promise.reject(new Error("只能在 Turnery App 里使用"))
 
-export const arbor: ArborBridge =
-  window.arbor ??
+export const turnery: TurneryBridge =
+  window.turnery ??
   ({
     state: missing,
     subscribe: () => () => {},
@@ -27,6 +27,7 @@ export const arbor: ArborBridge =
     openProject: missing,
     openProjectAt: missing,
     recentProjects: () => Promise.resolve([]),
+    openExample: missing,
     pickFile: missing,
     reveal: missing,
     exportPart: missing,
@@ -38,4 +39,4 @@ export const arbor: ArborBridge =
     onNotice: () => () => {},
     restartToUpdate: missing,
     platform: "web",
-  } satisfies ArborBridge)
+  } satisfies TurneryBridge)

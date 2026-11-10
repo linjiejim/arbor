@@ -1,4 +1,4 @@
-// 练习（docs/specs/2026-11-08-arbor-rename-surfaces.md §5）：每道题的参考答案用真内核建出来，
+// 练习（docs/specs/2026-11-08-turnery-rename-surfaces.md §5）：每道题的参考答案用真内核建出来，
 // 要求全部通过；起始状态至少一项不通过；题目只用网页助教能写的特征和核对项。
 import { beforeAll, describe, expect, it } from "vitest"
 import type { z } from "zod"

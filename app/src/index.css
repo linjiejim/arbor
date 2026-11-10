@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "./styles/jim-theme.css";
-@import "./styles/arbor-theme.css";
+@import "./styles/turnery-theme.css";
 
 @layer base {
   html, body, #root { height: 100%; }

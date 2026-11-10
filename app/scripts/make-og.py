@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Put the brand on the link-preview image (public/og.png): the Arbor mark and
+"""Put the brand on the link-preview image (public/og.png): the Turnery mark and
 name at the top left, the site's address at the bottom left. The headline and
 the mug stay as they are. Idempotent: it paints over the same two places.
 
@@ -13,7 +13,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 APP = Path(__file__).resolve().parent.parent
 OG = APP / "public/og.png"
-MARK = APP.parent / "desktop/resources/logo/arbor-mark.svg"
+MARK = APP.parent / "desktop/resources/logo/turnery-mark.svg"
 HOST = "arbor.linjiejim.com"
 
 BG = (18, 18, 18)
@@ -56,7 +56,7 @@ def main():
         sans.set_variation_by_name("Semibold")
     except Exception:
         pass
-    d.text((132, 140), "Arbor", font=sans, fill=TEXT, anchor="lm")
+    d.text((132, 140), "Turnery", font=sans, fill=TEXT, anchor="lm")
 
     mono = ImageFont.truetype(MONO, 22)
     d.text((73, 507), HOST, font=mono, fill=ACCENT, anchor="ls")

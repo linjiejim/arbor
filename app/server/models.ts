@@ -44,7 +44,7 @@ export const OPENROUTER_ROUTING = { quantizations: ["fp8", "fp16", "bf16"], sort
 
 /** `routing` is OpenRouter's `provider` object; OPENROUTER_ROUTING (JSON) overrides it on the server. */
 export function openrouterRoute(apiKey: string, model: string, thinking: Thinking, routing: object = OPENROUTER_ROUTING): ModelRoute {
-  const openrouter = createOpenRouter({ apiKey, headers: { "HTTP-Referer": "https://arbor.linjiejim.com", "X-Title": "Arbor" } })
+  const openrouter = createOpenRouter({ apiKey, headers: { "HTTP-Referer": "https://arbor.linjiejim.com", "X-Title": "Turnery" } })
   return {
     model: openrouter.chat(model, {
       provider: routing as never,

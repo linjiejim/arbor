@@ -1,14 +1,15 @@
-// Development helper: look at and poke the Arbor window through the Chrome
+// Development helper: look at and poke the Turnery window through the Chrome
 // DevTools Protocol. Start the app with `npm start -- --remote-debugging-port=9223`.
 //
 //   node scripts/cdp.mjs shot out.png        screenshot of the window's page
 //   node scripts/cdp.mjs js "<expression>"   evaluate in the page, print the result
 //   node scripts/cdp.mjs click <x> <y>       click at CSS pixels
+//   node scripts/cdp.mjs hover <x> <y>       move the pointer there (CSS pixels)
 //   node scripts/cdp.mjs type "<text>"       type into the focused field
 //   node scripts/cdp.mjs logs                console messages from now for 3 seconds
 //   node scripts/cdp.mjs windows             list the windows (one per project)
-// With several windows, ARBOR_CDP_WINDOW=<n> (from `windows`) picks one; the first by default.
-const port = Number(process.env.ARBOR_CDP_PORT ?? 9223)
+// With several windows, TURNERY_CDP_WINDOW=<n> (from `windows`) picks one; the first by default.
+const port = Number(process.env.TURNERY_CDP_PORT ?? 9223)
 const [cmd, arg] = process.argv.slice(2)
 
 const pages = await (await fetch(`http://127.0.0.1:${port}/json`)).json()
@@ -17,8 +18,8 @@ if (cmd === "windows") {
   windows.forEach((p, i) => console.log(i, p.title))
   process.exit(0)
 }
-const page = windows[Number(process.env.ARBOR_CDP_WINDOW ?? 0)]
-if (!page) throw new Error(`no Arbor window on port ${port}: ${pages.map((p) => p.url).join(", ")}`)
+const page = windows[Number(process.env.TURNERY_CDP_WINDOW ?? 0)]
+if (!page) throw new Error(`no Turnery window on port ${port}: ${pages.map((p) => p.url).join(", ")}`)
 
 const ws = new WebSocket(page.webSocketDebuggerUrl)
 await new Promise((r, j) => {
@@ -45,8 +46,8 @@ const send = (method, params = {}) =>
 if (cmd === "shot") {
   const { data } = await send("Page.captureScreenshot", { format: "png" })
   const { writeFile } = await import("node:fs/promises")
-  await writeFile(arg ?? "arbor-window.png", Buffer.from(data, "base64"))
-  console.log(arg ?? "arbor-window.png")
+  await writeFile(arg ?? "turnery-window.png", Buffer.from(data, "base64"))
+  console.log(arg ?? "turnery-window.png")
 } else if (cmd === "js") {
   const res = await send("Runtime.evaluate", { expression: arg, awaitPromise: true, returnByValue: true })
   console.log(JSON.stringify(res.result?.value ?? res.exceptionDetails ?? res.result, null, 2))
@@ -55,6 +56,11 @@ if (cmd === "shot") {
   const [x, y] = [Number(arg), Number(process.argv[4])]
   for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1, buttons: type === "mousePressed" ? 1 : 0 })
   console.log(`clicked ${x},${y}`)
+} else if (cmd === "hover") {
+  // `hover <x> <y>`: move the pointer there without pressing (what opens an ⓘ).
+  const [x, y] = [Number(arg), Number(process.argv[4])]
+  await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y })
+  console.log(`hovering ${x},${y}`)
 } else if (cmd === "type") {
   await send("Input.insertText", { text: arg })
   console.log("typed")
@@ -63,6 +69,6 @@ if (cmd === "shot") {
   await new Promise((r) => setTimeout(r, 3000))
   for (const e of events.filter((e) => e.method === "Runtime.consoleAPICalled")) console.log(e.params.type, ...e.params.args.map((a) => a.value ?? a.description))
 } else {
-  console.log("usage: cdp.mjs shot <file> | js <expression> | click <x> <y> | type <text> | logs")
+  console.log("usage: cdp.mjs shot <file> | js <expression> | click <x> <y> | hover <x> <y> | type <text> | logs")
 }
 ws.close()

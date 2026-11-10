@@ -10,7 +10,7 @@ import { Check, DESKTOP_CHECKS, EdgeSelector, FaceSelector, Feature, Num, Sketch
 
 const OP_DOCS: Record<FeatureOp, string> = {
   component:
-    "装配里放一个零件：file 写零件文件（.arbor.json）、子装配（.arbor-asm.json）或外购件（.step），name 是它在装配里的名字，用 rotate、at 摆到位置（先旋转后平移）。只能用在装配文件（.arbor-asm.json）里；要改零件的形状，用 open_part 打开它的文件（加 context 写装配文件，就能看着其他零件改）。",
+    "装配里放一个零件：file 写零件文件（.turnery.json）、子装配（.turnery-asm.json）或外购件（.step），name 是它在装配里的名字，用 rotate、at 摆到位置（先旋转后平移）。只能用在装配文件（.turnery-asm.json）里；要改零件的形状，用 open_part 打开它的文件（加 context 写装配文件，就能看着其他零件改）。",
   sketch: "在基准面（或贴在某个平面上）画一个闭合草图，可以由多个图形组合，cut=true 的图形挖掉前面的图形；图形也可以是文字（刻字、凸字）。草图本身不改变实体。",
   extrude: "把草图沿法向拉伸成实体：mode=add 加料、mode=cut 切除；direction=both 两侧对称（distance 是两侧加起来的总长）；through=true 切除贯穿；until 成形到下一面或某个面（柱子要长到上面的板时用 until: \"next\"，不要自己算距离）；thin 薄壁（等厚的壁，开放的线 path 也能用）；draft 拔模角（锥形凸台、带斜度的槽）。",
   revolve: "把草图绕过原点的一根坐标轴旋转成回转体。轮廓只能在轴的一侧（可以贴着轴）。",
@@ -32,7 +32,7 @@ const OP_DOCS: Record<FeatureOp, string> = {
     "导入一个 STEP 文件（例如开发板、元件的官方模型）。缺省作参考体：半透明显示，用来对齐尺寸、核对间隙（check 的 clearance）和干涉（interference），不并入零件也不导出；mode=add 并入实体，mode=cut 从实体里减去（按元件挖让位槽）。用 rotate、at 摆到位置上。",
 }
 
-/** Ops only the desktop app (Arbor) runs: they read files next to the part. Not offered to the site's assistant. */
+/** Ops only the desktop app (Turnery) runs: they read files next to the part. Not offered to the site's assistant. */
 export const DESKTOP_OPS = new Set<FeatureOp>(["import", "component", "thread"])
 
 /** The site assistant's check items: without the desktop-only kinds. */

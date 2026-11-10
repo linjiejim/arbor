@@ -1,0 +1,405 @@
+{
+  "params": {
+    "L": 80,
+    "W": 50,
+    "H": 28,
+    "t": 2,
+    "r": 6,
+    "zs": 20,
+    "post_d": 7,
+    "inset": 5,
+    "usb_w": 9.5,
+    "usb_h": 3.6,
+    "usb_z": 8
+  },
+  "features": [
+    {
+      "id": "sk_body",
+      "name": "外形草图",
+      "intent": "外壳的俯视轮廓:长 L 宽 W 的圆角矩形,中心在原点",
+      "op": "sketch",
+      "on": {
+        "plane": "XY"
+      },
+      "shapes": [
+        {
+          "type": "rect",
+          "w": "L",
+          "h": "W",
+          "r": "r"
+        }
+      ]
+    },
+    {
+      "id": "body",
+      "name": "实心外形",
+      "intent": "先拉出整块实心外形,之后挖内腔、再一刀分成底壳和上盖,两件的外形天然对齐",
+      "op": "extrude",
+      "sketch": "sk_body",
+      "distance": "H"
+    },
+    {
+      "id": "top_round",
+      "name": "顶面圆角",
+      "intent": "上盖外缘倒圆,手感好,也便于顶面朝下打印时的首层",
+      "op": "fillet",
+      "edges": {
+        "faces": {
+          "normal": "+Z",
+          "extreme": "+Z"
+        },
+        "outer": true
+      },
+      "r": "1.5"
+    },
+    {
+      "id": "sk_cavity",
+      "name": "内腔草图",
+      "intent": "内腔轮廓比外形每边小一个壁厚,画在离底面 t 的平面上",
+      "op": "sketch",
+      "on": {
+        "plane": "XY",
+        "offset": "t"
+      },
+      "shapes": [
+        {
+          "type": "rect",
+          "w": "L-2*t",
+          "h": "W-2*t",
+          "r": "r-t"
+        }
+      ]
+    },
+    {
+      "id": "cavity",
+      "name": "挖内腔",
+      "intent": "上下各留一个壁厚,得到封闭的空腔",
+      "op": "extrude",
+      "sketch": "sk_cavity",
+      "distance": "H-2*t",
+      "mode": "cut"
+    },
+    {
+      "id": "sk_posts",
+      "name": "螺丝柱草图",
+      "intent": "四角各一根螺丝柱,中心离外壁 inset,和转角的壁连成一体",
+      "op": "sketch",
+      "on": {
+        "plane": "XY",
+        "offset": "t"
+      },
+      "shapes": [
+        {
+          "type": "circle",
+          "d": "post_d",
+          "center": [
+            "L/2-inset",
+            "W/2-inset"
+          ]
+        },
+        {
+          "type": "circle",
+          "d": "post_d",
+          "center": [
+            "-(L/2-inset)",
+            "W/2-inset"
+          ]
+        },
+        {
+          "type": "circle",
+          "d": "post_d",
+          "center": [
+            "L/2-inset",
+            "-(W/2-inset)"
+          ]
+        },
+        {
+          "type": "circle",
+          "d": "post_d",
+          "center": [
+            "-(L/2-inset)",
+            "-(W/2-inset)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "posts",
+      "name": "螺丝柱",
+      "intent": "柱子从内底一直长到内顶:分型后下半段装热熔螺母,上半段让螺钉穿过。改总高时柱子跟着变",
+      "op": "extrude",
+      "sketch": "sk_posts",
+      "until": "next"
+    },
+    {
+      "id": "parting",
+      "name": "分成底壳和上盖",
+      "intent": "在 zs 高度一刀切开:两件外形、螺丝柱天然对齐",
+      "op": "split",
+      "by": {
+        "plane": "XY",
+        "offset": "zs"
+      },
+      "parts": [
+        "底壳",
+        "上盖"
+      ]
+    },
+    {
+      "id": "insert_holes",
+      "name": "热熔螺母孔",
+      "intent": "底壳螺丝柱顶面压入 M3 热熔螺母,3D 打印件反复拆装不滑牙",
+      "part": "底壳",
+      "op": "hole",
+      "on": {
+        "plane": "XY",
+        "offset": "zs"
+      },
+      "at": [
+        [
+          "L/2-inset",
+          "W/2-inset"
+        ],
+        [
+          "-(L/2-inset)",
+          "W/2-inset"
+        ],
+        [
+          "L/2-inset",
+          "-(W/2-inset)"
+        ],
+        [
+          "-(L/2-inset)",
+          "-(W/2-inset)"
+        ]
+      ],
+      "standard": {
+        "size": "M3",
+        "fit": "insert"
+      }
+    },
+    {
+      "id": "screw_holes",
+      "name": "沉头螺钉孔",
+      "intent": "上盖从顶面打 M3 沉头过孔,螺钉头不凸出顶面",
+      "part": "上盖",
+      "op": "hole",
+      "on": {
+        "plane": "XY",
+        "face": {
+          "normal": "+Z",
+          "extreme": "+Z"
+        }
+      },
+      "at": [
+        [
+          "L/2-inset",
+          "W/2-inset"
+        ],
+        [
+          "-(L/2-inset)",
+          "W/2-inset"
+        ],
+        [
+          "L/2-inset",
+          "-(W/2-inset)"
+        ],
+        [
+          "-(L/2-inset)",
+          "-(W/2-inset)"
+        ]
+      ],
+      "standard": {
+        "size": "M3",
+        "head": "csink"
+      }
+    },
+    {
+      "id": "sk_usb",
+      "name": "USB-C 开口草图",
+      "intent": "前壁上的长圆孔,中心离底面 usb_z",
+      "op": "sketch",
+      "on": {
+        "plane": "XZ",
+        "face": {
+          "normal": "-Y",
+          "extreme": "-Y"
+        }
+      },
+      "shapes": [
+        {
+          "type": "slot",
+          "length": "usb_w",
+          "width": "usb_h",
+          "center": [
+            0,
+            "usb_z"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "usb",
+      "name": "USB-C 开口",
+      "intent": "切穿前壁,给 USB-C 插头让位",
+      "part": "底壳",
+      "op": "extrude",
+      "sketch": "sk_usb",
+      "distance": "t",
+      "mode": "cut",
+      "direction": "reverse"
+    },
+    {
+      "id": "sk_vent",
+      "name": "散热槽草图",
+      "intent": "顶面右半边第一条散热槽,之后阵列成一排",
+      "op": "sketch",
+      "on": {
+        "plane": "XY",
+        "face": {
+          "normal": "+Z",
+          "extreme": "+Z"
+        }
+      },
+      "shapes": [
+        {
+          "type": "slot",
+          "length": 22,
+          "width": 2,
+          "center": [
+            15,
+            -10
+          ]
+        }
+      ]
+    },
+    {
+      "id": "vent",
+      "name": "散热槽",
+      "intent": "切穿上盖顶板,让传感器接触外面的空气",
+      "part": "上盖",
+      "op": "extrude",
+      "sketch": "sk_vent",
+      "distance": "t",
+      "mode": "cut",
+      "direction": "reverse"
+    },
+    {
+      "id": "vents",
+      "name": "散热槽阵列",
+      "intent": "5 条等距的槽,个数和间距可以直接改",
+      "part": "上盖",
+      "op": "linear_pattern",
+      "features": [
+        "vent"
+      ],
+      "dir": "+Y",
+      "count": "5",
+      "spacing": "5"
+    },
+    {
+      "id": "sk_label",
+      "name": "刻字草图",
+      "intent": "顶面左半边刻型号",
+      "op": "sketch",
+      "on": {
+        "plane": "XY",
+        "face": {
+          "normal": "+Z",
+          "extreme": "+Z"
+        }
+      },
+      "shapes": [
+        {
+          "type": "text",
+          "text": "TURNERY",
+          "size": 6,
+          "center": [
+            -16,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "label",
+      "name": "刻字",
+      "intent": "浅刻 0.4,打印后清晰可读又不削弱顶板",
+      "part": "上盖",
+      "op": "extrude",
+      "sketch": "sk_label",
+      "distance": "0.4",
+      "mode": "cut",
+      "direction": "reverse"
+    }
+  ],
+  "paramNotes": {
+    "L": "总长,沿 X",
+    "W": "总宽,沿 Y",
+    "H": "总高,沿 Z(底壳 + 上盖)",
+    "t": "壁厚",
+    "r": "外形四角圆角半径",
+    "zs": "分型面高度:底壳和上盖在这里分开",
+    "post_d": "螺丝柱直径",
+    "inset": "螺丝柱中心到外壁的距离",
+    "usb_w": "USB-C 开口宽",
+    "usb_h": "USB-C 开口高",
+    "usb_z": "USB-C 开口中心离底面的高度"
+  },
+  "checks": [
+    {
+      "id": "size",
+      "said": "外形 80×50×28",
+      "kind": "size",
+      "expect": [
+        80,
+        50,
+        28
+      ]
+    },
+    {
+      "id": "wall",
+      "said": "壁厚 2",
+      "kind": "thickness",
+      "faces": {
+        "normal": "+X",
+        "extreme": "+X"
+      },
+      "expect": 2
+    },
+    {
+      "id": "inserts",
+      "said": "四角 M3 热熔螺母",
+      "kind": "holes",
+      "faces": {
+        "of": "insert_holes",
+        "kind": "cylinder"
+      },
+      "count": 4,
+      "d": 4
+    },
+    {
+      "id": "screws",
+      "said": "上盖 4 个 M3 沉头过孔",
+      "kind": "holes",
+      "faces": {
+        "of": "screw_holes",
+        "kind": "cylinder"
+      },
+      "count": 4,
+      "d": 3.4
+    },
+    {
+      "id": "seat",
+      "said": "上盖要落在底壳上,不能有缝",
+      "kind": "gap",
+      "a": {
+        "part": "底壳"
+      },
+      "b": {
+        "part": "上盖"
+      },
+      "max": 0
+    }
+  ]
+}

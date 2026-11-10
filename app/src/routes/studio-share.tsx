@@ -76,7 +76,7 @@ export function StudioSharePage() {
         title="这个链接里的模型打不开"
         description={`特征树格式不对：${value.message}。可能是更新版本的工作台做的，可以下载原始 JSON 留着。`}
         action={
-          <Button size="sm" variant="secondary" onClick={() => saveBlob(new Blob([JSON.stringify(value.raw, null, 2)], { type: "application/json" }), `arbor-share-${id}.json`)}>
+          <Button size="sm" variant="secondary" onClick={() => saveBlob(new Blob([JSON.stringify(value.raw, null, 2)], { type: "application/json" }), `turnery-share-${id}.json`)}>
             下载原始 JSON
           </Button>
         }
@@ -107,7 +107,7 @@ function SharedStudio({ snap, onDeleted }: { snap: SharedSnapshot; onDeleted: ()
   const download = async (format: "step" | "stl") => {
     const blob = await studio.exportBody(format)
     if (!blob) return notify("还没有实体可以导出")
-    saveBlob(blob, `arbor-${snap.id}.${format}`)
+    saveBlob(blob, `turnery-${snap.id}.${format}`)
   }
 
   return (

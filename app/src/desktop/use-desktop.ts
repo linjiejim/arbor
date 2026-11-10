@@ -15,7 +15,7 @@ import type { MeasureResult, MeasureTarget } from "@/studio/kernel/measure"
 import type { Pin } from "@/studio/look"
 import type { Annotations, Focus, Note } from "@/studio/use-annotations"
 import type { KernelState, Studio } from "@/studio/use-studio"
-import { arbor } from "./bridge"
+import { turnery } from "./bridge"
 import type { DocState, PartNote, PickRequest, ShowRequest, Snapshot } from "./core/protocol"
 
 /** Engine snapshot, the active part, and what the agent is asking of the window. */
@@ -28,7 +28,7 @@ export function useEngine() {
 
   React.useEffect(() => {
     const life = { alive: true }
-    const off = arbor.subscribe((e) => {
+    const off = turnery.subscribe((e) => {
       if (e.type === "snapshot") {
         active.current = e.snapshot.active
         setSnapshot(e.snapshot)
@@ -38,7 +38,7 @@ export function useEngine() {
       } else if (e.type === "pick") setPick(e.request)
       else if (e.type === "show") setShow(e.request.clear ? null : e.request)
     })
-    void arbor.state().then((s) => {
+    void turnery.state().then((s) => {
       if (!life.alive) return
       active.current = s.snapshot.active
       setSnapshot(s.snapshot)
@@ -93,7 +93,7 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
   React.useEffect(() => {
     if (!path || !ready) return
     const life = { alive: true }
-    arbor
+    turnery
       .kernel(path, { op: "display", index: atIndex >= 0 ? atIndex : undefined })
       .then((d) => life.alive && setDisplay(d as DisplayData))
       .catch(() => {})
@@ -107,7 +107,7 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
   React.useEffect(() => {
     if (!path || !ready) return
     const life = { alive: true }
-    arbor
+    turnery
       .kernel(path, { op: "dims" })
       .then((d) => life.alive && setDims(d as Dim[]))
       .catch(() => {})
@@ -126,8 +126,8 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
     if (doc?.changes.find((c) => !c.note)?.actor !== "user") setCheckBaseline(Object.fromEntries((report?.checks ?? []).map((c) => [c.id, c.pass])))
   }
 
-  const call = React.useCallback((name: string, input: Record<string, unknown>) => arbor.call(name, input, path ?? undefined), [path])
-  const kernel = React.useCallback(async <T,>(c: Parameters<typeof arbor.kernel>[1]) => (path ? ((await arbor.kernel(path, c)) as T) : null), [path])
+  const call = React.useCallback((name: string, input: Record<string, unknown>) => turnery.call(name, input, path ?? undefined), [path])
+  const kernel = React.useCallback(async <T,>(c: Parameters<typeof turnery.kernel>[1]) => (path ? ((await turnery.kernel(path, c)) as T) : null), [path])
   // A refused edit starts with ✗; an applied one may still leave a failing feature, shown in the tree as on the site.
   const errorOf = (r: { text: string }) => (r.text.startsWith("✗") ? r.text.replace(/^✗ /, "") : null)
 
@@ -179,14 +179,14 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
     exportBody: React.useCallback(
       async (format: "step" | "stl") => {
         if (!path) return null
-        const bytes = (await arbor.kernel(path, { op: "export", format })) as Uint8Array | null
+        const bytes = (await turnery.kernel(path, { op: "export", format })) as Uint8Array | null
         return bytes ? new Blob([bytes as BlobPart]) : null
       },
       [path],
     ),
     pick: React.useCallback(
       async (kind: "face" | "edge", hash: number, point: [number, number, number]) =>
-        path && !at ? ((await arbor.kernel(path, { op: "pick", kind, hash, point })) as PickInfo | null) : null,
+        path && !at ? ((await turnery.kernel(path, { op: "pick", kind, hash, point })) as PickInfo | null) : null,
       [path, at],
     ),
     locate: React.useCallback(async (kind: "face" | "edge", selector: unknown) => kernel<number[] | null>({ op: "locate", kind, selector }), [kernel]),
@@ -204,7 +204,7 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
     faceEdges: React.useCallback(async (hash: number, before: number) => (await kernel<number[]>({ op: "faceEdges", hash, before })) ?? [], [kernel]),
     drawing: React.useCallback(async (iso: boolean) => kernel<DrawingData | null>({ op: "drawing", iso }), [kernel]),
     measure: React.useCallback(
-      async (targets: MeasureTarget[]) => (path && !at ? ((await arbor.kernel(path, { op: "measure", targets })) as MeasureResult | null) : null),
+      async (targets: MeasureTarget[]) => (path && !at ? ((await turnery.kernel(path, { op: "measure", targets })) as MeasureResult | null) : null),
       [path, at],
     ),
     setPins: React.useCallback((pins: Pin[]) => {
@@ -289,11 +289,11 @@ export function useDesktopNotes(
       setDraft(null)
       setFocus(null)
       if (request) {
-        await arbor.answerPick(request.id, { info, text })
+        await turnery.answerPick(request.id, { info, text })
         notify.success("已告诉 agent 你点的位置")
         return
       }
-      const r = await arbor.call("add_note", { pick: info, text }, path)
+      const r = await turnery.call("add_note", { pick: info, text }, path)
       if (!r.ok) notify.error(r.text)
     },
     [draft, request, path],
@@ -302,7 +302,7 @@ export function useDesktopNotes(
   const remove = React.useCallback(
     (n: number) => {
       const note = notes?.find((x) => x.n === n)
-      if (note) void arbor.call("update_note", { id: note.id, remove: true }, path)
+      if (note) void turnery.call("update_note", { id: note.id, remove: true }, path)
     },
     [notes, path],
   )
@@ -324,7 +324,7 @@ export function useDesktopNotes(
   /** Save a note about the whole part; false (and the reason shown) when it wasn't saved, so the draft stays. */
   const addPartNote = React.useCallback(
     async (text: string) => {
-      const r = await arbor.call("add_note", { text }, path)
+      const r = await turnery.call("add_note", { text }, path)
       if (!r.ok) {
         notify.error(r.text.replace(/^✗ /, ""))
         return false
