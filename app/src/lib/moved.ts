@@ -1,6 +1,7 @@
 /**
- * The site moved from featuretree.linjiejim.com to arbor.linjiejim.com, and
- * localStorage belongs to the origin. The old host serves public/moved.html,
+ * The site moved twice: featuretree.linjiejim.com → arbor.linjiejim.com (2026-11-08) →
+ * turnery.linjiejim.com (2026-11-10). localStorage belongs to the origin, and the storage keys
+ * kept their names through both moves. Each old host serves public/moved.html,
  * which hands what this browser had there over in the address's fragment
  * (`#arbor-move=…`, never sent to a server); here it is merged in before
  * anything reads storage. The old host sends it on every visit, so taking it

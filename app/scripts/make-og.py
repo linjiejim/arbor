@@ -14,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 APP = Path(__file__).resolve().parent.parent
 OG = APP / "public/og.png"
 MARK = APP.parent / "desktop/resources/logo/turnery-mark.svg"
-HOST = "arbor.linjiejim.com"
+HOST = "turnery.linjiejim.com"
 
 BG = (18, 18, 18)
 TILE = (26, 26, 26)

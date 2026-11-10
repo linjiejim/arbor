@@ -4,7 +4,7 @@
 
 **让你的 coding agent 建参数化零件；建出来的东西你看得懂、核得准、改得动。**
 
-[English](README.md) · [下载 macOS 版](https://github.com/linjiejim/turnery/releases/latest) · [网站和课程](https://arbor.linjiejim.com) · [示例](examples/sensor-enclosure)
+[English](README.md) · [下载 macOS 版](https://github.com/linjiejim/turnery/releases/latest) · [网站和课程](https://turnery.linjiejim.com) · [示例](examples/sensor-enclosure)
 
 ![需求里的每个数字先落到零件上，再落进由内核量的核对表](docs/media/turnery-intro-zh.gif)
 
@@ -185,7 +185,7 @@ Turnery 目前是 0.5，更新很快。已经能用的：单个零件、共用�
 
 ## 这个仓库里还有：课程
 
-[arbor.linjiejim.com](https://arbor.linjiejim.com) 是一门中文、讲概念、不绑定软件的 3D 工业建模课，和桌面版用同一个内核、同一种特征树文件。桌面版适合做真东西，网站适合学为什么这样做。
+[turnery.linjiejim.com](https://turnery.linjiejim.com) 是一门中文、讲概念、不绑定软件的 3D 工业建模课，和桌面版用同一个内核、同一种特征树文件。桌面版适合做真东西，网站适合学为什么这样做。
 
 | 板块 | 内容 |
 | --- | --- |
