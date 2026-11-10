@@ -99,6 +99,8 @@ function useAssistantState(project: string | null, part: string | null) {
   // Only a turn ending counts: opening an old conversation doesn't move it to the top of the list.
   const { messages, status } = chat
   const wasBusy = React.useRef(false)
+  /** Messages in the saved copy this window started from (see chatSave). */
+  const savedCount = React.useRef(0)
   React.useEffect(() => {
     if (status === "submitted" || status === "streaming") {
       wasBusy.current = true
@@ -107,9 +109,15 @@ function useAssistantState(project: string | null, part: string | null) {
     if (!wasBusy.current || !messages.length) return
     wasBusy.current = false
     const m = metaRef.current
+    const base = savedCount.current
     void turnery
-      .chatSave({ id: m.id, title: m.title ?? chatTitle(messages), project: m.project, part: m.part, createdAt: m.createdAt, updatedAt: Date.now(), messages: forStorage(messages) })
-      .then(refresh)
+      .chatSave({ id: m.id, title: m.title ?? chatTitle(messages), project: m.project, part: m.part, createdAt: m.createdAt, updatedAt: Date.now(), messages: forStorage(messages) }, base)
+      .then((id) => {
+        savedCount.current = messages.length
+        // Another window had carried this conversation on: ours went into a copy, which is now the one open here.
+        if (id && id !== m.id) setMeta((cur) => (cur.id === m.id ? { ...cur, id, title: `${m.title ?? chatTitle(messages)}（副本）` } : cur))
+        refresh()
+      })
       .catch(() => undefined)
   }, [status, messages, refresh])
 
@@ -123,6 +131,7 @@ function useAssistantState(project: string | null, part: string | null) {
     if (busy) void chat.stop()
     chat.setMessages([])
     chat.clearError()
+    savedCount.current = 0
     setMeta(fresh())
   }
   const open = async (id: string) => {
@@ -131,6 +140,7 @@ function useAssistantState(project: string | null, part: string | null) {
     if (!record) return refresh()
     chat.setMessages(record.messages)
     chat.clearError()
+    savedCount.current = record.messages.length
     setMeta({ id: record.id, title: record.title, project: record.project, part: record.part, createdAt: record.createdAt })
   }
   const rename = async (title: string) => {

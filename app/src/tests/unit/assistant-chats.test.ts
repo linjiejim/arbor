@@ -4,7 +4,7 @@ import path from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import type { UIMessage } from "ai"
 import { activity } from "@/desktop/assistant-activity"
-import { clampLayout, defaultLayout } from "@/desktop/assistant-layout"
+import { clampLayout, defaultLayout, dockRoom } from "@/desktop/assistant-layout"
 import { chatTitle, forStorage, newChatId, type ChatRecord } from "@/desktop/core/chats"
 import { usageOf } from "@/desktop/core/assistant"
 
@@ -67,6 +67,18 @@ describe("the chat store (~/.turnery/chats)", () => {
     expect(store.listChats().map((c) => c.id)).not.toContain("c-bbbbbb")
   })
 
+  it("keeps turns another window saved meanwhile: the stale save becomes a copy", () => {
+    const two = { ...record("c-dddddd", "/p/one", 40), messages: [user("a", "1"), answer([], "2")] }
+    expect(store.saveChat(two, 0)).toBe("c-dddddd")
+    // Window B opened it with 2 messages; window A went on to 4; B now saves its 3.
+    expect(store.saveChat({ ...two, messages: [...two.messages, user("b", "3"), answer([], "4")] }, 2)).toBe("c-dddddd")
+    const copy = store.saveChat({ ...two, messages: [...two.messages, user("c", "5")] }, 2)
+    expect(copy).not.toBe("c-dddddd")
+    expect(store.readChat("c-dddddd")?.messages).toHaveLength(4)
+    expect(store.readChat(copy)).toMatchObject({ title: "c-dddddd（副本）" })
+    expect(store.readChat(copy)?.messages).toHaveLength(3)
+  })
+
   it("never reads or writes outside its folder", () => {
     expect(store.readChat("../providers")).toBeNull()
     expect(() => store.saveChat(record("../../evil", null, 1))).toThrow()
@@ -82,6 +94,15 @@ describe("the floating panel's place", () => {
     expect(l.x + l.w).toBeLessThanOrEqual(1440 - 8)
     expect(l.y).toBeGreaterThanOrEqual(48)
     expect(l.y + l.h).toBeLessThanOrEqual(900 - 8)
+  })
+})
+
+describe("the docked column", () => {
+  it("leaves the model at least 360 px, and goes back to floating when the window is too narrow", () => {
+    expect(dockRoom(1440)).toBe(1440 - 224 - 380 - 360)
+    const wide = clampLayout({ ...defaultLayout(1440, 900), mode: "dock", dockW: 900 }, 1440, 900)
+    expect(wide).toMatchObject({ mode: "dock", dockW: 476 })
+    expect(clampLayout({ ...defaultLayout(1100, 800), mode: "dock" }, 1100, 800).mode).toBe("float")
   })
 })
 

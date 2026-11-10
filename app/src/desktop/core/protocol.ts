@@ -181,7 +181,8 @@ export interface TurneryBridge {
   /** Saved conversations, newest first: `here` = held in this window's project (or among loose parts). */
   chats(scope: "here" | "all"): Promise<ChatSummary[]>
   chatRead(id: string): Promise<ChatRecord | null>
-  chatSave(record: ChatRecord): Promise<void>
+  /** `base`: messages the window started from; when the saved one has more (another window went on), it is kept and this becomes a copy. Resolves to the id saved under. */
+  chatSave(record: ChatRecord, base: number): Promise<string | null>
   chatRename(id: string, title: string): Promise<void>
   chatDelete(id: string): Promise<void>
   /** File dialog for something to put in an assembly: a part or assembly file, or a STEP. */

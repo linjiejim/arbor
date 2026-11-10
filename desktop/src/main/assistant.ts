@@ -68,9 +68,9 @@ export function wireAssistant(ipcMain: IpcMain, engineOf: (e: IpcMainInvokeEvent
   // Saved conversations. A window lists the ones held in its own project (or among loose parts).
   ipcMain.handle("turnery:chats", (e, scope: "here" | "all") => listChats(scope === "all" ? undefined : (engineOf(e).snapshot().project?.root ?? null)))
   ipcMain.handle("turnery:chat-read", (_e, id: string) => readChat(String(id)))
-  ipcMain.handle("turnery:chat-save", (_e, record: ChatRecord) => {
-    if (!record || typeof record !== "object" || !Array.isArray(record.messages)) return
-    saveChat({
+  ipcMain.handle("turnery:chat-save", (_e, record: ChatRecord, base: number) => {
+    if (!record || typeof record !== "object" || !Array.isArray(record.messages)) return null
+    return saveChat({
       id: String(record.id),
       title: String(record.title ?? "").slice(0, 80) || "新对话",
       project: typeof record.project === "string" ? record.project : null,
@@ -78,7 +78,7 @@ export function wireAssistant(ipcMain: IpcMain, engineOf: (e: IpcMainInvokeEvent
       createdAt: Number(record.createdAt) || Date.now(),
       updatedAt: Date.now(),
       messages: record.messages,
-    })
+    }, Number.isInteger(base) && base >= 0 ? base : 0)
   })
   ipcMain.handle("turnery:chat-rename", (_e, id: string, title: string) => renameChat(String(id), String(title)))
   ipcMain.handle("turnery:chat-delete", (_e, id: string) => deleteChat(String(id)))

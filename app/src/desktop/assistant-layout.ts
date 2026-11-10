@@ -28,13 +28,26 @@ export function defaultLayout(vw: number, vh: number): AssistantLayout {
   return { mode: "hidden", last: "float", x: vw - w - 24, y: TOP + 56, w, h, dockW: 380 }
 }
 
-/** Kept inside the window: at least the header stays reachable after the window shrinks. */
+/** The model needs at least this much width beside the docked column. */
+const VIEWPORT_MIN = 360
+
+/**
+ * How wide the docked column may get: what is left after the parts list (shown from 1024 px), the
+ * side panel (380, or 340 below 1280) and a usable model view. Below MIN_W there is no room to dock.
+ */
+export function dockRoom(vw: number) {
+  return vw - (vw >= 1024 ? 224 : 0) - (vw >= 1280 ? 380 : 340) - VIEWPORT_MIN
+}
+
+/** Kept inside the window: at least the header stays reachable after the window shrinks; no dock without room. */
 export function clampLayout(l: AssistantLayout, vw: number, vh: number): AssistantLayout {
   const w = Math.max(MIN_W, Math.min(l.w, vw - 2 * MARGIN))
   const h = Math.max(MIN_H, Math.min(l.h, vh - TOP - 2 * MARGIN))
   const x = Math.max(MARGIN, Math.min(l.x, vw - w - MARGIN))
   const y = Math.max(TOP + MARGIN, Math.min(l.y, vh - h - MARGIN))
-  const dockW = Math.max(MIN_W, Math.min(l.dockW, Math.round(vw * 0.5)))
+  const room = dockRoom(vw)
+  const dockW = Math.max(MIN_W, Math.min(l.dockW, room))
+  if (room < MIN_W && l.mode === "dock") return { ...l, mode: "float", x, y, w, h, dockW }
   return { ...l, x, y, w, h, dockW }
 }
 
@@ -61,7 +74,8 @@ export function useAssistantLayout() {
     window.addEventListener("resize", fit)
     return () => window.removeEventListener("resize", fit)
   }, [])
-  const show = (mode?: "float" | "dock") => setLayout((l) => ({ ...l, mode: mode ?? l.last, last: mode ?? l.last }))
+  const show = (mode?: "float" | "dock") =>
+    setLayout((l) => clampLayout({ ...l, mode: mode ?? l.last, last: mode ?? l.last }, window.innerWidth, window.innerHeight))
   const hide = () => setLayout((l) => ({ ...l, mode: "hidden" }))
   const toggle = () => (layout.mode === "hidden" ? show() : hide())
   return { layout, setLayout, show, hide, toggle }

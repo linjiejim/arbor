@@ -2,7 +2,7 @@ import * as React from "react"
 import { Minus, PanelRight, PictureInPicture2 } from "lucide-react"
 import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { clampLayout, MIN_H, MIN_W, type AssistantLayoutState } from "../assistant-layout"
+import { clampLayout, dockRoom, MIN_H, MIN_W, type AssistantLayoutState } from "../assistant-layout"
 import { AssistantPanel } from "./assistant-panel"
 
 type Edge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw"
@@ -104,7 +104,12 @@ function Actions({ state }: { state: AssistantLayoutState }) {
   const docked = state.layout.mode === "dock"
   return (
     <>
-      <IconButton label={docked ? "浮动显示" : "固定在右侧"} size="icon-sm" onClick={() => state.show(docked ? "float" : "dock")}>
+      <IconButton
+        label={docked ? "浮动显示" : dockRoom(window.innerWidth) < MIN_W ? "窗口太窄，放不下固定的对话栏" : "固定在右侧"}
+        size="icon-sm"
+        disabled={!docked && dockRoom(window.innerWidth) < MIN_W}
+        onClick={() => state.show(docked ? "float" : "dock")}
+      >
         {docked ? <PictureInPicture2 /> : <PanelRight />}
       </IconButton>
       <IconButton label="收起到右上角" size="icon-sm" onClick={state.hide}>

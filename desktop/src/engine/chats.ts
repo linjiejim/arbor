@@ -2,7 +2,7 @@
 // opens without reading every conversation. Never in a project folder (it would go into git).
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import { CHAT_ID, MAX_CHATS, summaryOf, type ChatRecord, type ChatSummary } from "../../../app/src/desktop/core/chats"
+import { CHAT_ID, MAX_CHATS, newChatId, summaryOf, type ChatRecord, type ChatSummary } from "../../../app/src/desktop/core/chats"
 import { HOME } from "./home"
 
 const DIR = () => path.join(HOME, "chats")
@@ -40,14 +40,23 @@ export function readChat(id: string): ChatRecord | null {
   }
 }
 
-/** Save (or replace) one conversation; past MAX_CHATS the oldest go. */
-export function saveChat(record: ChatRecord): ChatSummary[] {
+/**
+ * Save one conversation; past MAX_CHATS the oldest go. `base` is how many messages the saver started
+ * from (opened with, or last saved): when the file already holds more, another window carried the
+ * conversation on meanwhile, and this one is saved as a copy instead of replacing those turns.
+ * Returns the id it was saved under.
+ */
+export function saveChat(record: ChatRecord, base?: number): string {
   if (!CHAT_ID.test(record.id)) throw new Error("对话的编号不对")
+  const existing = base === undefined ? null : readChat(record.id)
+  if (existing && existing.messages.length > base!) {
+    record = { ...record, id: newChatId(), title: `${record.title}（副本）`, createdAt: Date.now() }
+  }
   writeAtomic(fileOf(record.id), JSON.stringify(record))
   const index = [summaryOf(record), ...readIndex().filter((c) => c.id !== record.id)].sort((a, b) => b.updatedAt - a.updatedAt)
   for (const old of index.splice(MAX_CHATS)) rmSync(fileOf(old.id), { force: true })
   writeAtomic(INDEX(), JSON.stringify(index))
-  return index
+  return record.id
 }
 
 export function renameChat(id: string, title: string) {
