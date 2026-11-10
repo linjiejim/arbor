@@ -2,6 +2,7 @@
 // kernel port (a Web Worker in the browser, the Kernel directly in Node), and
 // a short plain-text result the model can act on.
 import { Check, Feature, OP_NAMES, Tree, displayName, type FeatureOp } from "./dsl"
+import { changeText, isSet, lookText, ownLook, setPartLook, type Finish } from "./appearance"
 import { resolveParams } from "./expr"
 import type { BuildReport } from "./kernel/build"
 import { InputError } from "./kernel/errors"
@@ -196,6 +197,19 @@ export async function executeTool(port: KernelPort, tree: Tree, name: string, in
       const next: Tree = { ...tree, checks: checks.length ? checks : undefined }
       const report = await port.rebuild(next)
       return { tree: next, output: { ok: true, text: checkText(report) }, report }
+    }
+    if (name === "set_appearance") {
+      const parts = (input.parts as string[] | undefined)?.filter(Boolean)
+      const change = { color: input.color as string | null | undefined, finish: input.finish as Finish | null | undefined }
+      if (change.color === undefined && change.finish === undefined) return { tree, output: { ok: false, text: "✗ 写 color 或 finish（写 null 是清除）。" } }
+      const next = setPartLook(tree, parts?.length ? parts : undefined, change)
+      const report = await port.rebuild(next)
+      const names = report.parts?.map((p) => p.name) ?? []
+      const unknown = (parts ?? []).filter((p) => !names.includes(p))
+      if (unknown.length) return { tree, output: { ok: false, text: names.length ? `✗ 没有叫「${unknown.join("、")}」的零件：现在有 ${names.join("、")}` : "✗ 这个零件没有拆开：不写 parts，就是整个零件。" } }
+      const one = (name?: string) => lookText(ownLook(next.appearance, name), "未设置（白模）")
+      const now = names.length ? names.map((n) => `${n} ${one(n)}`).join("、") : one()
+      return { tree: next, output: { ok: true, text: `已设置${changeText(change) ? `（${changeText(change)}）` : ""}，不改几何。外观：${now}${isSet(next.appearance) && names.length ? "（整体的颜色用在没有自己颜色的零件上）" : ""}` }, report }
     }
     if (name === "look") {
       if (!look) return { tree, output: { ok: false, text: "这个环境不能渲染视图。" } }

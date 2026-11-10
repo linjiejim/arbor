@@ -4,7 +4,7 @@
 // ports, so the same engine runs in Electron's main process and in the CLI.
 import type { PickInfo } from "../../studio/annotations"
 import { executeTool, moveFeature, treeText, type KernelPort } from "../../studio/apply"
-import { applyLook, changeText, isSet, lookText, sameGeometry, setPartLook, SOURCE_DEFAULT, type Finish, type Look, type LookChange } from "../../studio/appearance"
+import { applyLook, changeText, colorName, colorWord, isSet, lookText, sameGeometry, setPartLook, SOURCE_DEFAULT, type Finish, type Look, type LookChange } from "../../studio/appearance"
 import { toBuild123d } from "../../studio/codegen"
 import { EMPTY_TREE, Feature, Tree, componentName, displayName } from "../../studio/dsl"
 import { designation } from "../../studio/fasteners"
@@ -171,7 +171,7 @@ type PickAnswer = { info: PickInfo; text?: string }
 const MAX_UNDO = 100
 const MAX_CHANGES = 200
 const FEATURE_TOOLS = new Set<string>(Feature.options.map((o) => o.shape.op.value))
-const STUDIO_TOOL_NAMES = new Set([...Object.keys(STUDIO_TOOLS), ...Object.keys(DESKTOP_TOOLS)].filter((n) => n !== "look"))
+const STUDIO_TOOL_NAMES = new Set([...Object.keys(STUDIO_TOOLS), ...Object.keys(DESKTOP_TOOLS)].filter((n) => n !== "look" && n !== "set_appearance"))
 /** Agent-side commands the window may run too. */
 const WINDOW_OK = new Set(["undo", "redo"])
 
@@ -320,6 +320,7 @@ export class Engine {
       openNotes: d.notes.notes.filter((n) => n.status === "open").length,
       error: d.error,
       kind: isAssembly(d.path) ? ("assembly" as const) : ("part" as const),
+      ...(d.tree.appearance ? { look: d.tree.appearance } : {}),
     }))
     return { parts, active: this.active, kernel: this.opts.kernel.phase, agent: { ...this.agent }, project: this.projectSummary(), loading: this.loading ? { ...this.loading, progress: this.opts.kernel.progress } : null }
   }
@@ -336,6 +337,7 @@ export class Engine {
         return {
           ...e,
           features: doc ? doc.tree.features.length : e.features,
+          ...(doc ? { look: doc.tree.appearance } : {}),
           open: Boolean(doc),
           openNotes: doc ? doc.notes.notes.filter((n) => n.status === "open").length : 0,
         }
@@ -451,6 +453,11 @@ export class Engine {
       if (name === "add_part") return await this.addPart(input as Parameters<Engine["addPart"]>[0], ctx)
       if (name === "close_part") return this.closePart(this.partKey(String(input.path)))
       if (name === "close_project") return this.closeProject()
+      // A part file nobody has open (its dot in the sidebar): written as it is, never built just for this.
+      if (name === "set_appearance" && ctx.part) {
+        const p = this.partKey(ctx.part, ctx.cwd)
+        if (!this.docs.has(p) && partExtOf(p)) return await this.lookInFile(p, input as Parameters<Engine["setAppearance"]>[1], ctx)
+      }
       const doc = await this.resolveDoc(ctx)
       if (!doc) return fail("还没有打开零件：先用 open_part（path 写零件文件，新零件加 create: true）。")
       // Catch up with the file first: an editor may have saved it a moment ago (the watcher is debounced).
@@ -1135,7 +1142,7 @@ export class Engine {
    * read it (assemblies) restyle; `origin` is left to the caller, who adopts it. Returns the edit, or
    * null when nothing was written.
    */
-  private async rewrite(path: string, change: (text: string) => string | null, ctx: CallContext, summary: string, origin: Doc): Promise<FileEdit | null> {
+  private async rewrite(path: string, change: (text: string) => string | null, ctx: CallContext, summary: string, origin?: Doc): Promise<FileEdit | null> {
     const open = this.docs.get(path)
     if (open) await this.fileChanged(open)
     const before = await this.opts.files.read(path)
@@ -1256,12 +1263,40 @@ export class Engine {
     return { ok: true, text: `已设置（不改几何，不重建）。\n${lines.join("\n")}\n${await this.looksText(doc)}` }
   }
 
+  /**
+   * set_appearance on a part file that isn't open: straight into the file. The open file that reads it (an
+   * assembly using the part) restyles, and takes the change on its undo list.
+   */
+  private async lookInFile(path: string, input: { parts?: string[]; color?: string | null; finish?: Finish | null }, ctx: CallContext): Promise<CommandResult> {
+    const change: LookChange = { color: input.color, finish: input.finish }
+    if (change.color === undefined && change.finish === undefined) return fail("写 color 或 finish（写 null 是清除）。")
+    const parts = input.parts?.length ? input.parts : undefined
+    const summary = `${partName(path)}${parts ? `「${parts.join("」「")}」` : ""}：${changeText(change)}`
+    const active = this.active ? this.docs.get(this.active) : undefined
+    const edit = await this.rewrite(
+      path,
+      (text) => {
+        const parsed = parseTree(text)
+        if (!parsed.ok) throw new InputError(`${partName(path)} 不是合法的特征树：${parsed.error}`)
+        const next = setPartLook(parsed.tree, parts, change)
+        return next === parsed.tree ? null : `${JSON.stringify(next, null, 2)}\n`
+      },
+      ctx,
+      summary,
+      active,
+    )
+    if (!edit) return { ok: true, text: "外观没变。" }
+    if (active?.assetWatch.has(path)) await this.adopt(active, active.tree, ctx.actor, { summary, files: [edit] })
+    await this.rescan()
+    return { ok: true, text: `已设置 ${summary}（写进文件，不改几何）。` }
+  }
+
   /** 「外观：上盖 橙、底壳 未设置（白模）」 for get_state and set_appearance. */
   private async looksText(doc: Doc) {
     await this.ensureKernel(doc)
     const list = (await this.opts.kernel.looks?.()) ?? []
     if (!list.length) return "外观：还没有实体。"
-    const one = (l: Look) => (isSet(l) ? lookText(l) : `未设置（${SOURCE_DEFAULT[l.source]}）`)
+    const one = (l: Look) => (isSet(l) ? lookText(l) : l.fileColor ? `未设置（按 STEP 自带的颜色，主要是${colorWord(l.fileColor)}）` : `未设置（${SOURCE_DEFAULT[l.source]}）`)
     if (list.length === 1 && !isAssembly(doc.path)) return `外观：${one(list[0].look)}`
     return `外观：${list.map((p) => `${p.name} ${one(p.look)}`).join("、")}`
   }
@@ -1806,7 +1841,7 @@ function bomText(doc: Doc, report: BuildReport, looks: Map<string, Look> = new M
   const parts = report.parts ?? (report.body ? [{ name: doc.name, volume: report.body.volume, size: report.body.size }] : [])
   // An unsplit body is listed under the file's name: its one look is the only entry.
   const lookOf = (name: string) => looks.get(name) ?? (looks.size === 1 ? [...looks.values()][0] : undefined)
-  const colour = (l: Look | undefined) => (l && isSet(l) ? lookText(l) : "—")
+  const colour = (l: Look | undefined) => (l && isSet(l) ? lookText(l) : l?.fileColor ? `${colorName(l.fileColor)}（STEP 自带）` : "—")
   const rows = new Map<string, { name: string; file: string; count: number; volume: number; size: number[]; look: string }>()
   for (const p of parts) {
     // 「螺钉#3/垫圈」: component 螺钉, its third copy, the part 垫圈 of it.
@@ -1840,10 +1875,19 @@ function bomText(doc: Doc, report: BuildReport, looks: Map<string, Look> = new M
 /** 「橙：上盖；黑 · 金属：螺钉#1、螺钉#2」: which colour is which part in the pictures (empty: all plain). */
 function lookLegend(d: DisplayData, hide: string[]) {
   const entries = d.parts ? d.parts.filter((p) => !p.hidden && !hide.includes(p.name)).map((p) => ({ name: p.name, look: p.look })) : [{ name: "", look: d.look }]
-  if (entries.every((e) => !e.look || (!isSet(e.look) && e.look.source === "part"))) return ""
+  if (entries.every((e) => !e.look || (!isSet(e.look) && e.look.source === "part" && !e.look.fileColor))) return ""
   const groups = new Map<string, string[]>()
   for (const e of entries) {
-    const key = e.look && isSet(e.look) ? lookText(e.look) : e.look?.source === "standard" ? "金属灰（标准件，没设颜色）" : e.look?.source === "step" ? "深灰（外购件，没设颜色）" : "白模（没设颜色）"
+    const key =
+      e.look && isSet(e.look)
+        ? lookText(e.look)
+        : e.look?.fileColor
+          ? `STEP 文件自带的颜色（主要是${colorWord(e.look.fileColor)}）`
+          : e.look?.source === "standard"
+            ? "金属灰（标准件，没设颜色）"
+            : e.look?.source === "step"
+              ? "深灰（外购件，没设颜色）"
+              : "白模（没设颜色）"
     groups.set(key, [...(groups.get(key) ?? []), e.name])
   }
   const names = (list: string[]) => (list.length > 4 ? `${list.slice(0, 4).join("、")} 等 ${list.length} 个` : list.join("、"))

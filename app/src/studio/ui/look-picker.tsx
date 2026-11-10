@@ -16,16 +16,16 @@ const defaultFinish = (look: Look | undefined): Finish => (look?.source === "sta
  * nothing is set. The colour comes from the part, not the theme.
  */
 export function LookDot({ look, className }: { look: Look | Appearance | undefined; className?: string }) {
-  const hex = hexOf(look?.color)
+  const hex = hexOf(look?.color ?? (look && "fileColor" in look ? look.fileColor : undefined))
   const finish = look?.finish
-  if (!hex) return <span aria-hidden className={cn("inline-block size-2.5 shrink-0 rounded-full border border-faint-foreground", finish === "clear" && "border-dashed", className)} />
-  // Clear: the colour half see-through inside a full ring, so a clear white part still shows a dot.
+  // Nothing set: a dashed ring, so it never reads as a white part.
+  if (!hex) return <span aria-hidden className={cn("inline-block size-2.5 shrink-0 rounded-full border border-dashed border-muted-foreground", className)} />
+  // Clear: half filled, the other half see-through. The ring follows the theme, so black and white dots both show.
   return (
     <span
       aria-hidden
-      // The ring follows the theme: a black part's dot still shows on a dark sidebar, a white one on a light one.
-      className={cn("relative inline-block size-2.5 shrink-0 overflow-hidden rounded-full ring-1", finish === "clear" ? "ring-faint-foreground" : "ring-foreground/25", className)}
-      style={{ backgroundColor: finish === "clear" ? `${hex}80` : hex }}
+      className={cn("relative inline-block size-2.5 shrink-0 overflow-hidden rounded-full ring-1 ring-foreground/30", className)}
+      style={{ background: finish === "clear" ? `linear-gradient(135deg, ${hex} 50%, ${hex}33 50%)` : hex }}
     >
       {finish === "metal" && <span className="absolute top-px left-0.5 size-1 rounded-full bg-background/70" />}
     </span>
@@ -43,8 +43,11 @@ export function LookPicker({
   extra,
   disabled,
   className,
+  dot,
 }: {
   look: Look | undefined
+  /** What the dot shows, when not `look` itself (a file whose split parts have colours of their own). */
+  dot?: Look
   /** 「上盖」的颜色 */
   label: string
   onChange: (change: LookChange) => unknown
@@ -75,7 +78,7 @@ export function LookPicker({
             className={cn("grid size-5 shrink-0 place-items-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none", className)}
             onClick={(e) => e.stopPropagation()}
           >
-            <LookDot look={look} />
+            <LookDot look={dot ?? look} />
           </button>
         </PopoverTrigger>
       </Tooltip>

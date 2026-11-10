@@ -57,6 +57,12 @@ export function colorName(color: string | undefined | null) {
   return paletteOf(color)?.name ?? hexOf(color) ?? "未设置"
 }
 
+/** A colour inside a Chinese sentence: 「主要是绿」, 「主要是 #1f6e3a」 (a value gets a space before it). */
+export function colorWord(color: string | undefined | null) {
+  const p = paletteOf(color)
+  return p ? p.name : ` ${hexOf(color) ?? "未设置"}`
+}
+
 /** The form saved in files: the palette id when it is one, else lowercase #rrggbb. */
 export function normalColor(color: string): string {
   return paletteOf(color)?.id ?? hexOf(color) ?? color
@@ -81,8 +87,11 @@ export type PartAppearance = z.infer<typeof PartAppearance>
 /** Where a part comes from: how it looks when nothing is set (white, metal grey, a darker grey). */
 export type LookSource = "part" | "standard" | "step"
 
-/** A part as drawn: its colour and finish where set, and where it comes from. */
-export type Look = Appearance & { source: LookSource }
+/**
+ * A part as drawn: its colour and finish where set, and where it comes from. `fileColor`: a STEP file's
+ * own colours (by face; this is the one most faces have), shown when no colour is set.
+ */
+export type Look = Appearance & { source: LookSource; fileColor?: string }
 
 /** Field by field: `a` wins. */
 export function mergeLook(a: Appearance | undefined, b: Appearance | undefined): Appearance {
@@ -122,6 +131,7 @@ export const SOURCE_DEFAULT: Record<LookSource, string> = { part: "白模", stan
 /** What a colour dot says when pointed at: 「橙 · 金属」, or that nothing is set and how it shows then. */
 export function lookTip(look: Look | Appearance | undefined) {
   if (look && isSet(look)) return lookText(look)
+  if (look && "fileColor" in look && look.fileColor) return `未设置颜色（按 STEP 文件自带的颜色，主要是${colorWord(look.fileColor)}）`
   const source = look && "source" in look ? look.source : "part"
   return `未设置颜色（${SOURCE_DEFAULT[source]}）`
 }

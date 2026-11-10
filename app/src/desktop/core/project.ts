@@ -3,6 +3,7 @@
 // window's sidebar and `list_parts`, and decides which folder that is from
 // what was opened last.
 import type { Files } from "./engine"
+import { PartAppearance } from "../../studio/appearance"
 import { PART_EXT, partExtOf } from "./protocol"
 import { ASM_EXT, asmExtOf, PARAMS_EXT } from "./sources"
 
@@ -23,12 +24,14 @@ export type ProjectEntry = {
   kind: "part" | "assembly"
   /** Features (parts) or components (assemblies); null when the file can't be read as a tree. */
   features: number | null
+  /** A part file's colour and finish, for its dot in the sidebar. */
+  look?: PartAppearance
 }
 
 export type Scan = { root: string; entries: ProjectEntry[]; truncated: boolean }
 
 /** What a scan remembers per file, so unchanged files aren't read again. */
-export type ScanCache = Map<string, { mtime: number; features: number | null }>
+export type ScanCache = Map<string, { mtime: number; features: number | null; look?: PartAppearance }>
 
 export const isPartFile = (name: string) => partExtOf(name) !== null
 export const isAssemblyFile = (name: string) => asmExtOf(name) !== null
@@ -119,7 +122,8 @@ export async function scanProject(files: Files, root: string, cache: ScanCache):
           continue
         }
         const path = files.canonical?.(p) ?? p
-        entries.push({ path, name: stripEnding(e.name), folder: relativePath(root, dir) === "." ? "" : relativePath(root, dir), kind, features: await countFeatures(files, path, cache) })
+        const read = await readEntry(files, path, cache)
+        entries.push({ path, name: stripEnding(e.name), folder: relativePath(root, dir) === "." ? "" : relativePath(root, dir), kind, features: read.features, ...(read.look ? { look: read.look } : {}) })
       }
     }
     level = next
@@ -127,20 +131,25 @@ export async function scanProject(files: Files, root: string, cache: ScanCache):
   return { root, entries, truncated }
 }
 
-async function countFeatures(files: Files, path: string, cache: ScanCache): Promise<number | null> {
+/** How many features a file has and the look it saves (read again only when the file changed). */
+async function readEntry(files: Files, path: string, cache: ScanCache): Promise<{ features: number | null; look?: PartAppearance }> {
   const st = await files.stat?.(path)
   const hit = cache.get(path)
-  if (st && hit && hit.mtime === st.mtimeMs) return hit.features
+  if (st && hit && hit.mtime === st.mtimeMs) return hit
   let features: number | null = null
+  let look: PartAppearance | undefined
   try {
     const text = await files.read(path)
-    const tree = text === null ? null : (JSON.parse(text) as { features?: unknown })
+    const tree = text === null ? null : (JSON.parse(text) as { features?: unknown; appearance?: unknown })
     features = Array.isArray(tree?.features) ? tree.features.length : null
+    const parsed = PartAppearance.safeParse(tree?.appearance)
+    if (tree?.appearance !== undefined && parsed.success) look = parsed.data
   } catch {
     features = null
   }
-  if (st) cache.set(path, { mtime: st.mtimeMs, features })
-  return features
+  const out = { features, ...(look ? { look } : {}) }
+  if (st) cache.set(path, { mtime: st.mtimeMs, ...out })
+  return out
 }
 
 /** The skeleton of a new project: an empty assembly that uses an empty parameter file. */

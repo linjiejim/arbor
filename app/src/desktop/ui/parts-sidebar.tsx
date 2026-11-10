@@ -3,10 +3,11 @@ import { Boxes, CircleAlert, FolderOpen, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Hint } from "@/components/hint"
 import { IconButton } from "@/components/ui/button"
+import { notify } from "@/components/ui/toast"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { matchesPart } from "@/studio/part-selection"
-import type { Look, LookChange } from "@/studio/appearance"
+import { isSet, lookText, type Look, type LookChange, type PartAppearance } from "@/studio/appearance"
 import { LookPicker } from "@/studio/ui/look-picker"
 import { turnery } from "../bridge"
 import type { PartSummary, ProjectFile, Snapshot } from "../core/protocol"
@@ -159,12 +160,35 @@ function Group({ title, children }: { title?: string; children: ReactNode }) {
 const rowClass = (active: boolean) => cn("group relative flex items-center rounded-md", active ? "bg-selected" : "hover:bg-accent")
 const buttonClass = "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
 
+/**
+ * A part file's colour dot: the whole part's look, changed right in the file (open or not). Split parts
+ * with looks of their own keep them; the dot then shows the first of those when the whole has none.
+ */
+function FileLook({ path, name, look }: { path: string; name: string; look?: PartAppearance }) {
+  const whole: Look = { ...(look?.color ? { color: look.color } : {}), ...(look?.finish ? { finish: look.finish } : {}), source: "part" }
+  const own = Object.entries(look?.parts ?? {}).filter(([, l]) => isSet(l))
+  const label = own.length ? `「${name}」整体的颜色（${own.map(([n, l]) => `${n} ${lookText(l)}`).join("、")} 另有自己的）` : `「${name}」的颜色`
+  return (
+    <LookPicker
+      look={whole}
+      dot={isSet(whole) || !own.length ? whole : { ...own[0][1], source: "part" }}
+      label={label}
+      className="ml-1.5"
+      onChange={async (change) => {
+        const r = await turnery.call("set_appearance", change, path)
+        if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
+      }}
+    />
+  )
+}
+
 /** A file of the project: open or not. */
 function FileRow({ file: f, active }: { file: ProjectFile; active: boolean }) {
   const unit = f.kind === "assembly" ? "个零件" : "个特征"
   return (
     <div className={rowClass(active)}>
-      <button type="button" className={buttonClass} title={f.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: f.path })}>
+      {f.kind === "part" && f.features !== null && <FileLook path={f.path} name={f.name} look={f.look} />}
+      <button type="button" className={cn(buttonClass, f.kind === "part" && f.features !== null && "pl-1")} title={f.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: f.path })}>
         <span className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate text-body", active && "font-medium", !f.open && !active && "text-muted-foreground")}>
           {f.kind === "assembly" && <Boxes className="size-3.5 shrink-0 text-faint-foreground" />}
           <span className="truncate">{f.name}</span>
@@ -181,9 +205,11 @@ function FileRow({ file: f, active }: { file: ProjectFile; active: boolean }) {
 
 /** An open part outside the project (or any open part, without a project). */
 function OpenRow({ part: p, active }: { part: PartSummary; active: boolean }) {
+  const colourable = p.kind !== "assembly" && !p.error
   return (
     <div className={rowClass(active)}>
-      <button type="button" className={buttonClass} title={p.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: p.path })}>
+      {colourable && <FileLook path={p.path} name={p.name} look={p.look} />}
+      <button type="button" className={cn(buttonClass, colourable && "pl-1")} title={p.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: p.path })}>
         <span className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate text-body", active && "font-medium")}>
           {p.error && <CircleAlert className="size-3.5 shrink-0 text-destructive" aria-label="文件有错" />}
           {p.kind === "assembly" && <Boxes className="size-3.5 shrink-0 text-faint-foreground" />}

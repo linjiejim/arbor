@@ -30,6 +30,7 @@ import {
 } from "replicad"
 import type { PickInfo } from "../annotations"
 import { ownLook, mergeLook, withoutLooks, hexOf, colorName, type Appearance, type Look } from "../appearance"
+import { mainColor, stepFaceColors } from "./step-colors"
 import { componentName, displayName, EMPTY_TREE, OP_NAMES, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type Point, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
 import { MAX_COUNT } from "../limits"
@@ -170,8 +171,8 @@ export type DisplayData = {
   provisional?: boolean
   index: number
   mesh: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array } | null
-  /** One per B-rep face, in mesh order. `hash` identifies the face for picking; `part` indexes `parts`. */
-  groups: { start: number; count: number; status: FaceStatus; origin: string; hash: number; part?: number }[]
+  /** One per B-rep face, in mesh order. `hash` identifies the face for picking; `part` indexes `parts`; `color`: its STEP file's. */
+  groups: { start: number; count: number; status: FaceStatus; origin: string; hash: number; part?: number; color?: string }[]
   edges: Float32Array | null
   /** One per edge: a run of points in `edges` (segment pairs). */
   edgeGroups: { start: number; count: number; hash: number; part?: number }[]
@@ -238,7 +239,10 @@ export type ComponentSource = {
   compiled?: CompiledComponent
 }
 
-export type CompiledComponent = { parts: { name: string | null; brep: string; display?: ComponentDisplay; bounds?: [V3, V3]; volume?: number; trail?: Trail }[]; failed: number }
+export type CompiledComponent = { parts: { name: string | null; brep: string; display?: ComponentDisplay; bounds?: [V3, V3]; volume?: number; trail?: Trail; faceColors?: FaceColors }[]; failed: number }
+
+/** A STEP file's colours, one per face in facesOf order (null: none set there). */
+export type FaceColors = (string | null)[]
 
 /**
  * Where a part of an assembly comes from, outermost first: the component feature that placed it and the
@@ -248,7 +252,7 @@ export type CompiledComponent = { parts: { name: string | null; brep: string; di
 export type Trail = { component: string; sub: string | null }[]
 
 /** A built component: its parts' final shapes (unnamed: a single-body part), and how many features failed. */
-type Built = { parts: { name: string | null; shape: Shape3D; trail?: Trail }[]; failed: number }
+type Built = { parts: { name: string | null; shape: Shape3D; trail?: Trail; faceColors?: FaceColors }[]; failed: number }
 
 /** Built components by content, shared by every kernel in the thread (switching parts doesn't rebuild them). */
 const BUILT = new Map<string, Built>()
@@ -289,6 +293,8 @@ type Part = {
   placement?: Placement
   /** In an assembly: where it comes from, for its colour (see Trail). */
   trail?: Trail
+  /** A STEP file's own colours, per face (placing a shape keeps its faces' order). */
+  faceColors?: FaceColors
 }
 
 /** New faces smaller than this (mm²) are reported as slivers. */
@@ -537,9 +543,11 @@ export class Kernel {
    * look in this assembly over the look its file gives it (a sub-assembly: followed down its trail),
    * standard parts and STEP files by what they are.
    */
-  private lookOf(p: Pick<Part, "name" | "trail">): Look {
+  private lookOf(p: Pick<Part, "name" | "trail" | "faceColors">): Look {
     if (!p.trail?.length) return { ...ownLook(this.tree.appearance, p.name), source: "part" }
-    return trailLook(this.tree, this.components, p.trail, 0)
+    const look = trailLook(this.tree, this.components, p.trail, 0)
+    const file = p.faceColors ? mainColor(p.faceColors) : undefined
+    return file ? { ...look, fileColor: file } : look
   }
 
   /** Each part of the last body that built and how it looks (one entry for an unsplit body). */
@@ -600,12 +608,16 @@ export class Kernel {
       if (body.parts && (body.parts.length > 1 || body.parts.some((p) => p.hidden))) {
         // Which part each face and edge belongs to, for colouring, hiding and exploding parts.
         const faceToPart = new Map<number, number>()
+        const faceColor = new Map<number, string>()
         const edgeToPart = new Map<number, number>()
         const auto = autoExplode(body.parts)
         out.parts = body.parts.map((p, k) => {
           const fs = facesOf(p.body)
           const es = edgesOf(p.body)
-          fs.forEach((f) => faceToPart.set(f.hashCode, k))
+          fs.forEach((f, i) => {
+            faceToPart.set(f.hashCode, k)
+            if (p.faceColors?.[i]) faceColor.set(f.hashCode, p.faceColors[i]!)
+          })
           es.forEach((e) => edgeToPart.set(e.hashCode, k))
           fs.forEach((f) => f.delete())
           es.forEach((e) => e.delete())
@@ -620,11 +632,21 @@ export class Kernel {
             ...(where ? { component: where.component, ...(where.sub ? { sub: where.sub } : {}) } : {}),
           }
         })
-        out.groups = out.groups.map((g) => ({ ...g, part: faceToPart.get(g.hash) }))
+        out.groups = out.groups.map((g) => ({ ...g, part: faceToPart.get(g.hash), ...(faceColor.has(g.hash) ? { color: faceColor.get(g.hash) } : {}) }))
         out.edgeGroups = out.edgeGroups.map((g) => ({ ...g, part: edgeToPart.get(g.hash) }))
       }
     }
-    if (body?.body && !out.parts) out.look = body.parts?.length === 1 ? this.lookOf(body.parts[0]) : { ...ownLook(this.tree.appearance, body.mainName), source: "part" }
+    if (body?.body && !out.parts) {
+      const only = body.parts?.length === 1 ? body.parts[0] : null
+      out.look = only ? this.lookOf(only) : { ...ownLook(this.tree.appearance, body.mainName), source: "part" }
+      // A single STEP component: its own colours on its faces.
+      if (only?.faceColors) {
+        const fs = facesOf(only.body)
+        const colors = new Map(fs.flatMap((f, i) => (only.faceColors![i] ? [[f.hashCode, only.faceColors![i]!] as const] : [])))
+        fs.forEach((f) => f.delete())
+        out.groups = out.groups.map((g) => (colors.has(g.hash) ? { ...g, color: colors.get(g.hash) } : g))
+      }
+    }
     // The assembly around a part being edited in context draws like reference bodies.
     const refs = [...((body ?? step)?.refs ?? []), ...this.context]
     if (refs.length) {
@@ -1055,7 +1077,8 @@ export class Kernel {
     const step = this.lastBuilt(index === undefined ? this.steps.length : index + 1)
     if (!step?.body) return null
     const split = !!step.parts && step.parts.length > 1
-    const looks = this.looksOf(step)
+    // A STEP part with nothing set is exported in its file's main colour.
+    const looks = this.looksOf(step).map((l) => (l.look.color || !l.look.fileColor ? l : { ...l, look: { ...l.look, color: l.look.fileColor } }))
     if (format === "3mf") return threeMF(looks)
     if (!split && format === "step" && !hexOf(looks[0].look.color)) return step.body.blobSTEP()
     if (!split && format === "stl") return stlOf(step.body, step.mainName ?? "零件")
@@ -1900,6 +1923,7 @@ export class Kernel {
         component: f.id,
         placement: pl,
         trail: [{ component: f.id, sub: p.name }, ...(p.trail ?? [])],
+        faceColors: p.faceColors,
       })),
     )
     // A screw or an insert bites into the material it goes in: overlap is the point, not news.
@@ -2232,7 +2256,7 @@ function buildComponent(src: ComponentSource): Built {
     try {
       for (const p of src.compiled.parts) {
         const shape = deserializeShape(p.brep) as Shape3D
-        parts.push({ name: p.name, shape, trail: p.trail })
+        parts.push({ name: p.name, shape, trail: p.trail, faceColors: p.faceColors })
         if (p.display) restoreDisplay(shape, p.display)
         if (p.bounds) BOUNDS.set(shape, p.bounds)
         if (p.volume !== undefined) VOLUMES.set(shape, p.volume)
@@ -2245,7 +2269,14 @@ function buildComponent(src: ComponentSource): Built {
   } else if (src.bytes !== undefined) {
     if (!src.bytes) throw new InputError(`读不到「${src.file}」`)
     const shape = readStep(src.bytes) as Shape3D
-    built = { parts: [{ name: null, shape }], failed: 0 }
+    // Its own colours, when it has any (a vendor's board model): shown until a colour is set on it.
+    let faceColors: FaceColors | undefined
+    try {
+      faceColors = stepFaceColors(src.bytes, shape) ?? undefined
+    } catch {
+      faceColors = undefined
+    }
+    built = { parts: [{ name: null, shape, faceColors }], failed: 0 }
   } else {
     const sub = new Kernel(true)
     try {
@@ -2260,7 +2291,7 @@ function buildComponent(src: ComponentSource): Built {
         throw new InputError(`「${src.file}」一步都没有建成${err ? `：${err}` : ""}`)
       }
       const failed = rep.features.filter((x) => x.state === "error").length
-      const parts = last.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, shape: p.body.clone(), trail: p.trail })) : [{ name: null, shape: last.body.clone(), trail: last.parts?.[0]?.trail }]
+      const parts = last.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, shape: p.body.clone(), trail: p.trail, faceColors: p.faceColors })) : [{ name: null, shape: last.body.clone(), trail: last.parts?.[0]?.trail, faceColors: last.parts?.[0]?.faceColors }]
       built = { parts, failed }
     } finally {
       sub.dispose()
@@ -2278,7 +2309,7 @@ function buildComponent(src: ComponentSource): Built {
 /** Portable OCCT geometry for a component worker/cache; no session-specific face hashes. */
 export function compileComponent(source: ComponentSource): CompiledComponent {
   const built = buildComponent(source)
-  return { parts: built.parts.map((p) => ({ name: p.name, brep: p.shape.serialize(), display: packDisplay(p.shape), bounds: boundsOf(p.shape), volume: volumeOf(p.shape), trail: p.trail })), failed: built.failed }
+  return { parts: built.parts.map((p) => ({ name: p.name, brep: p.shape.serialize(), display: packDisplay(p.shape), bounds: boundsOf(p.shape), volume: volumeOf(p.shape), trail: p.trail, faceColors: p.faceColors })), failed: built.failed }
 }
 
 /** Rotate (in order, about the origin) then move: a component's place in its assembly. */

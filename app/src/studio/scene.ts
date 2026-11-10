@@ -34,7 +34,7 @@ const lookAt = (d: DisplayData, k: number | undefined) => (k !== undefined && d.
 export function hasLooks(d: DisplayData | null | undefined) {
   if (!d) return false
   const list = d.parts ? d.parts.map((p) => p.look) : [d.look]
-  return list.some((l) => !!l && (isSet(l) || l.source !== "part"))
+  return list.some((l) => !!l && (isSet(l) || l.source !== "part" || !!l.fileColor))
 }
 
 /**
@@ -47,17 +47,19 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
   const root = new THREE.Group()
   root.name = "studio-model"
   const materials: THREE.Material[] = [kit.model, kit.highlight, kit.modified, kit.ghost, kit.modelDark, kit.hovered, kit.added]
-  // Each part's resting material: an index into `materials` (0, the white model, when looks are off).
-  const restOf = (k: number | undefined) => {
+  // Each face's resting material: an index into `materials` (0, the white model, when looks are off).
+  // A colour set on the part wins; else a STEP file's own colour for that face; else by where it comes from.
+  const restOf = (k: number | undefined, fileColor?: string) => {
     const look = lookAt(d, k)
     if (!looks || !look) return 0
-    const m = kit.forLook(look).surface
+    const m = kit.forLook(!look.color && fileColor ? { ...look, color: fileColor } : look).surface
     const i = materials.indexOf(m)
     return i >= 0 ? i : materials.push(m) - 1
   }
   const edgeOf = (k: number | undefined) => {
     const look = lookAt(d, k)
-    return looks && look ? kit.forLook(look).edge : kit.edge
+    if (!looks || !look) return kit.edge
+    return kit.forLook(!look.color && look.fileColor ? { ...look, color: look.fileColor } : look).edge
   }
   // Parts pulled apart or hidden: one mesh (and edge set) per part, moved along its explode vector.
   if (d.parts && (view.explode > 0 || view.hidden.size || view.focus || d.parts.some((p) => p.hidden))) {
@@ -75,12 +77,12 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
       geo.setAttribute("position", new THREE.BufferAttribute(d.mesh.vertices, 3))
       geo.setAttribute("normal", new THREE.BufferAttribute(d.mesh.normals, 3))
       geo.setIndex(index)
-      const rest = restOf(k)
-      for (const g of own) geo.addGroup(g.start, g.count, materialIndex(g, paint, rest))
+      const rests = own.map((g) => restOf(k, g.color))
+      own.forEach((g, i) => geo.addGroup(g.start, g.count, materialIndex(g, paint, rests[i])))
       const mesh = new THREE.Mesh(geo, ghost ? kit.ghost : materials)
       mesh.userData.contextGhost = ghost
       mesh.userData.groups = own
-      mesh.userData.rests = own.map(() => rest)
+      mesh.userData.rests = rests
       mesh.userData.part = k
       const at = new THREE.Vector3(...part.explode).multiplyScalar(view.explode)
       mesh.position.copy(at)
@@ -104,7 +106,7 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
     geo.setAttribute("position", new THREE.BufferAttribute(d.mesh.vertices, 3))
     geo.setAttribute("normal", new THREE.BufferAttribute(d.mesh.normals, 3))
     geo.setIndex(new THREE.BufferAttribute(d.mesh.triangles, 1))
-    const rests = d.groups.map((g) => restOf(g.part))
+    const rests = d.groups.map((g) => restOf(g.part, g.color))
     d.groups.forEach((g, i) => geo.addGroup(g.start, g.count, materialIndex(g, paint, rests[i])))
     const mesh = new THREE.Mesh(geo, materials)
     mesh.userData.groups = d.groups

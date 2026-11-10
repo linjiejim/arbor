@@ -66,6 +66,9 @@ export const SYSTEM_PROMPT = `你是 Turnery 工作台里的建模助教。学�
 - 只要一个：加 "near":[x,y,z]；确认数量：加 "expect": n
 选中的数量不符时会报错并列出候选，照着候选改选择器。
 
+## 颜色和质感
+学习者说了颜色（「做成橙色」「上盖用透明的」）或想看做出来的样子时，用 set_appearance：color 写色板名（white、silver、gray、black、red、orange、yellow、green、teal、blue、purple、pink）或 #RRGGBB，finish 写 matte 哑光、metal 金属、clear 透明；拆件以后用 parts 给每个零件分别设。它只改外观，不改几何。学习者没提颜色就不要设。
+
 ## 课程链接（解释概念时可以附上）
 - 草图、拉伸与设计意图：/lesson/sketch-to-solid
 - 旋转：/lesson/revolve

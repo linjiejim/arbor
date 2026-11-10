@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Check, ChevronRight, CircleHelp, Eye, ImagePlus, ListChecks, Pencil, Search, SlidersHorizontal, Square, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react"
+import { Check, ChevronRight, CircleHelp, Eye, ImagePlus, ListChecks, Palette, Pencil, Search, SlidersHorizontal, Square, Trash2, TriangleAlert, X, type LucideIcon } from "lucide-react"
 import type { FileUIPart, UIMessage } from "ai"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
@@ -47,6 +47,7 @@ const TOOL_LABEL: Record<string, { label: string; op?: OpId; icon?: LucideIcon }
   inspect: { label: "查看模型", icon: Search },
   look: { label: "看一眼", icon: Eye },
   check: { label: "核对要求", icon: ListChecks },
+  set_appearance: { label: "颜色", icon: Palette },
 }
 
 /** Tools that only look at the model. */

@@ -9,6 +9,7 @@ import { toBuild123d } from "@/studio/codegen"
 import { Tree } from "@/studio/dsl"
 import { Kernel, type ComponentSource } from "@/studio/kernel/build"
 import { initNodeKernel } from "@/studio/kernel/node"
+import { getOC, makeBox, makeCylinder } from "replicad"
 import { memFiles } from "./mem-files"
 
 const AGENT: CallContext = { actor: "agent", session: "s1", cwd: "/work" }
@@ -270,6 +271,119 @@ describe("appearance: exports", () => {
     const coloured = new TextDecoder().decode(new Uint8Array(await (await k.exportBody("step"))!.arrayBuffer()))
     const [r, g, b] = coloured.match(/COLOUR_RGB\('',([\d.]+),([\d.]+),([\d.]+)\)/)!.slice(1).map(Number)
     expect([r, g, b].map((x) => Math.round(x * 255))).toEqual([0x33, 0x66, 0x99])
+    k.dispose()
+  })
+})
+
+/** A STEP file the way a vendor ships a board: one solid coloured whole, one with a face of its own colour. */
+function colouredStep(): Uint8Array {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const oc = getOC() as any
+  const board = makeBox([-20, -15, 0], [20, 15, 1.6])
+  const chip = makeBox([-5, -5, 1.6], [5, 5, 4])
+  const text = (s: string) => new oc.TCollection_ExtendedString(s, true)
+  const doc = new oc.TDocStd_Document(text("XmlOcaf"))
+  const main = doc.Main()
+  const shapes = oc.XCAFDoc_DocumentTool.ShapeTool(main)
+  const colors = oc.XCAFDoc_DocumentTool.ColorTool(main)
+  const rgba = (r: number, g: number, b: number) => new oc.Quantity_ColorRGBA(r, g, b, 1)
+  const a = shapes.NewShape()
+  shapes.SetShape(a, board.wrapped)
+  colors.SetColor(a, rgba(0, 0.5, 0), oc.XCAFDoc_ColorType.XCAFDoc_ColorSurf)
+  const b = shapes.NewShape()
+  shapes.SetShape(b, chip.wrapped)
+  colors.SetColor(b, rgba(0.02, 0.02, 0.02), oc.XCAFDoc_ColorType.XCAFDoc_ColorSurf)
+  // The chip's top face (the last of a box's faces here) gets a colour of its own.
+  const top = chip.faces.find((f) => f.normalAt().z > 0.9)!
+  const sub = shapes.AddSubShape(b, top.wrapped)
+  colors.SetColor(sub, rgba(1, 1, 1), oc.XCAFDoc_ColorType.XCAFDoc_ColorSurf)
+  shapes.UpdateAssemblies()
+  const writer = new oc.STEPCAFControl_Writer(new oc.XSControl_WorkSession(), false)
+  writer.SetColorMode(true)
+  writer.Perform(doc, "/coloured-board.step", new oc.Message_ProgressRange())
+  const bytes = oc.FS.readFile("/coloured-board.step") as Uint8Array
+  oc.FS.unlink("/coloured-board.step")
+  return bytes
+}
+
+describe("appearance: a STEP file's own colours", () => {
+  it("reads them per face, shows them until a colour is set, and exports the main one", async () => {
+    const bytes = colouredStep()
+    const text = new TextDecoder().decode(bytes)
+    expect(text).toMatch(/STYLED_ITEM/)
+    const k = new Kernel()
+    k.setComponents([{ file: "board.step", bytes }, { file: "a.turnery.json", tree: { params: {}, features: box(5, 5, 5) } }])
+    const tree: Tree = { params: {}, features: [{ id: "b", op: "component", name: "板", file: "board.step" }, { id: "a", op: "component", name: "块", file: "a.turnery.json", at: [40, 0, 0] }] }
+    expect(k.rebuild(tree).features.every((f) => f.state === "ok")).toBe(true)
+    let d = k.display()
+    const board = d.parts!.findIndex((p) => p.name === "板")
+    const colours = d.groups.filter((g) => g.part === board).map((g) => g.color)
+    // 6 board faces green (#00bc00 is linear 0.5 written back as sRGB), 6 chip faces: 5 near black, the top white.
+    expect(colours.filter((c) => c === "#00bc00")).toHaveLength(6)
+    expect(colours.filter((c) => c === "#ffffff")).toHaveLength(1)
+    expect(colours.filter((c) => c === "#272727")).toHaveLength(5)
+    expect(d.parts![board].look).toEqual({ source: "step", fileColor: "#00bc00" })
+    expect(d.groups.filter((g) => g.part !== board).every((g) => !g.color)).toBe(true)
+    // A colour set on the component wins over the file's (in the view: the face colours are only a fallback).
+    k.restyle({ ...tree, features: [{ ...tree.features[0], appearance: { color: "orange" } } as Tree["features"][number], tree.features[1]] })
+    d = k.display()
+    expect(d.parts![board].look).toEqual({ color: "orange", source: "step", fileColor: "#00bc00" })
+    k.restyle(tree)
+    const zip = new TextDecoder().decode(new Uint8Array(await (await k.exportBody("3mf"))!.arrayBuffer()))
+    expect(zip).toMatch(/<base name="#00bc00" displaycolor="#00BC00FF"\/>/)
+    k.dispose()
+  })
+
+  it("leaves the colours out when the file's solids don't match what was read", async () => {
+    const { stepFaceColors } = await import("@/studio/kernel/step-colors")
+    const bytes = colouredStep()
+    // A cylinder: none of the file's solids has its faces (two flat, one round).
+    expect(stepFaceColors(bytes, makeCylinder(2, 5))).toBeNull()
+    expect(stepFaceColors(new TextEncoder().encode("ISO-10303-21;\nDATA;\nENDSEC;\n"), makeBox([0, 0, 0], [1, 1, 1]))).toBeNull()
+  })
+})
+
+describe("appearance: the project list and the site's assistant", () => {
+  it("lists part files with their colours, and colours a part file nobody has open (undoable from its assembly)", async () => {
+    const { run, rebuild, disk, files, engine } = setup()
+    await files.write("/work/proj/parts/block.turnery.json", JSON.stringify({ params: {}, features: box(10, 10, 10), appearance: { color: "red" } }))
+    await files.write("/work/proj/parts/plain.turnery.json", JSON.stringify({ params: {}, features: box(5, 5, 5) }))
+    await run("open_part", { path: "proj/asm.turnery-asm.json", create: true })
+    await run("component", { id: "a", name: "块", file: "parts/block.turnery.json" })
+    await run("component", { id: "b", name: "块2", file: "parts/block.turnery.json", at: [20, 0, 0] })
+    await engine.run("scan_project", {}, USER)
+    const listed = (p: string) => engine.snapshot().project?.files.find((f) => f.path.endsWith(p))
+    expect(listed("block.turnery.json")?.look).toEqual({ color: "red" })
+    expect(listed("plain.turnery.json")?.look).toBeUndefined()
+    const builds = rebuild.mock.calls.length
+
+    // From the sidebar: the file isn't open, so it is written as it is and not built.
+    const r = await engine.run("set_appearance", { color: "green" }, { ...USER, part: "/work/proj/parts/block.turnery.json" })
+    expect(r.ok, r.text).toBe(true)
+    expect(engine.snapshot().parts.some((p) => p.path.endsWith("block.turnery.json"))).toBe(false)
+    expect(JSON.parse(disk.get("/work/proj/parts/block.turnery.json") as string).appearance).toEqual({ color: "green" })
+    expect(listed("block.turnery.json")?.look).toEqual({ color: "green" })
+    expect((await run("get_state", {})).text).toMatch(/块 绿、块2 绿/)
+    expect(rebuild.mock.calls.length).toBe(builds)
+    // The assembly on screen reads that file: its undo puts the file back.
+    expect((await run("undo", {}, USER)).ok).toBe(true)
+    expect(JSON.parse(disk.get("/work/proj/parts/block.turnery.json") as string).appearance).toEqual({ color: "red" })
+    expect(rebuild.mock.calls.length).toBe(builds)
+  })
+
+  it("gives the site's assistant its own set_appearance, and the desktop one command of that name", async () => {
+    const { executeTool } = await import("@/studio/apply")
+    const { COMMANDS } = await import("@/desktop/core/catalog")
+    expect(COMMANDS.filter((c) => c.name === "set_appearance")).toHaveLength(1)
+    expect(COMMANDS.find((c) => c.name === "set_appearance")?.input.shape).toHaveProperty("where")
+    const k = new Kernel()
+    const port = { rebuild: async (t: Tree) => k.rebuild(t), inspect: async () => "" }
+    let run = await executeTool(port, shell, "set_appearance", { parts: ["上盖"], color: "orange", finish: "clear" })
+    expect(run.output.ok, run.output.text).toBe(true)
+    expect(run.output.text).toMatch(/外观：底壳 未设置（白模）、上盖 橙 · 透明/)
+    expect(run.tree.appearance).toEqual({ parts: { 上盖: { color: "orange", finish: "clear" } } })
+    run = await executeTool(port, run.tree, "set_appearance", { parts: ["顶盖"], color: "red" })
+    expect(run.output.text).toMatch(/没有叫「顶盖」的零件：现在有 底壳、上盖/)
     k.dispose()
   })
 })

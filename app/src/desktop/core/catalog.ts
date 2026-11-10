@@ -25,7 +25,8 @@ const VIEWS = ["iso", "front", "top", "right", "back", "bottom", "left"] as cons
 
 /** Modelling tools of the web studio, as they are (look is replaced below: here it renders in the window). */
 const studioTools: CommandSpec[] = Object.entries({ ...STUDIO_TOOLS, ...DESKTOP_TOOLS })
-  .filter(([name]) => name !== "look")
+  // look renders in the window here; set_appearance also writes an assembly's part files (both below).
+  .filter(([name]) => name !== "look" && name !== "set_appearance")
   .map(([name, t]) => ({ name, description: typeof t.description === "string" ? t.description : "", input: t.inputSchema as z.ZodObject, audience: "both" as const }))
 
 const own: CommandSpec[] = [
