@@ -201,7 +201,6 @@ export function TreeOverlay({
           <div className="flex items-center gap-1 whitespace-nowrap">
             <span>{tree.features.length} 个特征</span>
             <Hint
-              step={2}
               label="特征树怎么用"
               side="top"
               tips={[

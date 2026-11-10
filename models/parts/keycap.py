@@ -23,7 +23,7 @@ from build123d import (
     offset,
 )
 
-from arborbake import Dim, Feature, Param, PartModel
+from turnerybake import Dim, Feature, Param, PartModel
 
 DISH = 11.0  # 碟面在顶面上的直径，固定不变
 STEM_Z0 = 1.0  # 轴座底面离裙边底面的高度

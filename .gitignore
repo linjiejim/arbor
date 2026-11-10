@@ -9,3 +9,6 @@ __pycache__/
 
 /projects/
 .codex/
+
+# 宣发计划和各渠道文案：只给维护者自己看，不进仓库
+/docs/launch/

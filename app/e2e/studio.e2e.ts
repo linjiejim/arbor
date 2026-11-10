@@ -317,31 +317,28 @@ test.describe("工作台", () => {
     await expect(page.getByLabel("失败")).toHaveCount(0)
   })
 
-  test("/studio 第一次进来：ⓘ 按顺序导览，跳过后不再弹出", async ({ page }) => {
-    // First load only: init scripts run again on reload, and the reload must see what the tour wrote.
-    await page.addInitScript(() => {
-      if (sessionStorage.getItem("tour-reset")) return
-      sessionStorage.setItem("tour-reset", "1")
-      localStorage.removeItem("arbor:tour:studio")
-    })
+  test("/studio 的说明：指向 ⓘ 就全部显示，不用点", async ({ page }) => {
     await page.goto("/studio?start=flange")
     await expect(page.getByRole("navigation", { name: "特征树" }).getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
-    const pop = page.getByRole("dialog").filter({ hasText: "导览" })
-    await expect(pop.getByText("导览 1/3")).toBeVisible()
-    await expect(pop).toContainText("说出零件的形状和尺寸")
-    // Through the first hint's tips, then on to the feature tree's.
-    for (let i = 0; i < 6 && (await pop.getByText("导览 1/3").isVisible()); i++) await pop.getByRole("button", { name: "下一条" }).click()
-    await expect(pop.getByText("导览 2/3")).toBeVisible()
-    await expect(pop).toContainText("点一步：模型回到这一步")
-    await pop.getByRole("button", { name: "跳过导览" }).click()
-    await expect(pop).toHaveCount(0)
-    await page.reload()
-    await expect(page.getByRole("navigation", { name: "特征树" }).getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
+    // Nothing opens on its own.
     await page.waitForTimeout(1200)
-    await expect(page.getByText(/^导览 \d\/\d$/), "seen: it doesn't start again").toHaveCount(0)
-    // Any ⓘ still opens on its own.
-    await page.getByRole("button", { name: "特征树怎么用" }).click()
-    await expect(page.getByRole("dialog")).toContainText("点一步：模型回到这一步")
+    await expect(page.getByRole("dialog")).toHaveCount(0)
+    const info = page.getByRole("button", { name: "特征树怎么用" })
+    await info.hover()
+    const card = page.getByRole("dialog")
+    await expect(card).toContainText("点一步：模型回到这一步")
+    await expect(card.getByRole("listitem").nth(1), "every tip at once").toBeVisible()
+    await expect(card.getByRole("button")).toHaveCount(0)
+    // Moving away closes it; a click keeps it open until a click elsewhere.
+    await page.mouse.move(5, 5)
+    await expect(card).toHaveCount(0)
+    await info.click()
+    await expect(card).toContainText("点一步：模型回到这一步")
+    await page.mouse.move(5, 5)
+    await page.waitForTimeout(400)
+    await expect(card).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(card).toHaveCount(0)
   })
 
   test("/studio?practice= 练习：要求实时打勾，做到了就完成", async ({ page }) => {

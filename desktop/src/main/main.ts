@@ -1,34 +1,34 @@
-// Arbor's main process: one workspace per window (an engine with its own kernel
+// Turnery's main process: one workspace per window (an engine with its own kernel
 // thread, so projects in different windows never wait on each other), the local
 // endpoint the MCP server and CLI talk to, and the windows that show it all.
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, net, protocol, shell, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type OpenDialogOptions, type SaveDialogOptions } from "electron"
-import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, realpathSync, statSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 import { normalizePartPath, type Screen } from "../../../app/src/desktop/core/engine"
 import { inside } from "../../../app/src/desktop/core/project"
 import { PART_EXT, PRODUCT, type CallContext, type ExportFormat, type KernelCall, type LookRequest, type MenuAction, type PickInfo, type RecentProject, type Snapshot } from "../../../app/src/desktop/core/protocol"
-import { addRecentProject, clearEngineInfo, HOME, PROJECTS_DIR, projectStamp, readRecent, readRecentProjects, readSettings, writeAppInfo, writeEngineInfo, writeSettings } from "../engine/home"
+import { addRecentProject, adoptLegacyHome, clearEngineInfo, HOME, PROJECTS_DIR, projectStamp, readRecent, readRecentProjects, readSettings, writeAppInfo, writeEngineInfo, writeSettings } from "../engine/home"
 import { startEngine } from "../engine/host"
 import { serveEngine } from "../engine/rpc"
 import { agentSetup } from "./setup"
 import { createUpdater } from "./updater"
 
-declare const __ARBOR_VERSION__: string
+declare const __TURNERY_VERSION__: string
 
 const distDir = new URL("./", import.meta.url)
 const DIST = fileURLToPath(distDir)
 const RENDERER_DIR = path.join(DIST, "renderer")
 /** Dev: the Vite server for the window (`npm run dev`). */
-const RENDERER_URL = process.env.ARBOR_RENDERER_URL
+const RENDERER_URL = process.env.TURNERY_RENDERER_URL
 const CSP =
   "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'"
 
 app.setName(PRODUCT)
-// A separate ARBOR_HOME (tests, a second copy from source) is a separate app: its own single-instance lock and window state.
-if (process.env.ARBOR_HOME) app.setPath("userData", path.join(HOME, "electron"))
-protocol.registerSchemesAsPrivileged([{ scheme: "arbor", privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } }])
+// A separate TURNERY_HOME (tests, a second copy from source) is a separate app: its own single-instance lock and window state.
+if (process.env.TURNERY_HOME) app.setPath("userData", path.join(HOME, "electron"))
+protocol.registerSchemesAsPrivileged([{ scheme: "turnery", privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } }])
 
 /** Files passed as `--open <path>` (the CLI, a second launch). */
 function filesIn(argv: string[]) {
@@ -41,7 +41,7 @@ function filesIn(argv: string[]) {
 
 /**
  * `--headless`: no window shows and there is no Dock icon; agents' `look` still renders in a hidden
- * window. The person running Arbor (or `arbor open`), or an agent's request_pick, brings the windows up.
+ * window. The person running Turnery (or `turnery open`), or an agent's request_pick, brings the windows up.
  */
 let headless = process.argv.includes("--headless")
 if (headless) app.dock?.hide()
@@ -53,7 +53,7 @@ const MIN_ZOOM = -3
 const MAX_ZOOM = 4
 
 const pendingOpen: string[] = [...filesIn(process.argv)]
-// Finder: double-clicking an .arbor.json, or dropping it on the dock icon. Can come before `ready`.
+// Finder: double-clicking an .turnery.json, or dropping it on the dock icon. Can come before `ready`.
 app.on("open-file", (e, file) => {
   e.preventDefault()
   if (engineReady) void openForUser(focused(), file)
@@ -96,7 +96,7 @@ function newWorkspace(): Workspace {
   ws.kernel = kernel
   let lastRoot: string | null = null
   const off = engine.on((e) => {
-    ws.win?.webContents.send("arbor:event", e)
+    ws.win?.webContents.send("turnery:event", e)
     // The agent waits for a click: bring the window up and ask for attention.
     if (e.type === "pick" && e.request) {
       leaveHeadless()
@@ -194,7 +194,7 @@ async function lookIn(ws: Workspace, req: LookRequest) {
   const id = ++lookSeq
   return new Promise<string[]>((resolve, reject) => {
     ws.looks.set(id, { resolve, reject })
-    w.webContents.send("arbor:look", id, req)
+    w.webContents.send("turnery:look", id, req)
     setTimeout(() => {
       if (ws.looks.delete(id)) reject(new Error("窗口没有在 30 秒内画出视图"))
     }, 30_000)
@@ -227,7 +227,7 @@ function createWindow(ws: Workspace, mode: "focus" | "inactive") {
     if (mode === "inactive") w.showInactive()
     else w.show()
   })
-  // The title says which project this window is (the page's own <title> would make every window 「Arbor」).
+  // The title says which project this window is (the page's own <title> would make every window 「Turnery」).
   w.on("page-title-updated", (e) => e.preventDefault())
   w.webContents.on("did-finish-load", () => {
     const zoom = readSettings().zoom
@@ -248,12 +248,12 @@ function createWindow(ws: Workspace, mode: "focus" | "inactive") {
     return { action: "deny" }
   })
   w.webContents.on("will-navigate", (e, url) => {
-    const own = RENDERER_URL ? url.startsWith(new URL(RENDERER_URL).origin) : url.startsWith("arbor://app/")
+    const own = RENDERER_URL ? url.startsWith(new URL(RENDERER_URL).origin) : url.startsWith("turnery://app/")
     if (own) return
     e.preventDefault()
     if (/^https?:\/\//.test(url)) void shell.openExternal(url)
   })
-  void w.loadURL(RENDERER_URL ?? "arbor://app/desktop.html")
+  void w.loadURL(RENDERER_URL ?? "turnery://app/desktop.html")
   titleWindow(ws, ws.engine.snapshot())
   return w
 }
@@ -263,14 +263,14 @@ async function ensureWindow(ws: Workspace) {
   if (!ws.win) createWindow(ws, "inactive")
   let timer: NodeJS.Timeout | undefined
   const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error("Arbor 窗口没有在 20 秒内准备好")), 20_000)
+    timer = setTimeout(() => reject(new Error("Turnery 窗口没有在 20 秒内准备好")), 20_000)
   })
   try {
     await Promise.race([ws.ready, late])
   } finally {
     clearTimeout(timer)
   }
-  if (!ws.win) throw new Error("Arbor 窗口刚被关掉了")
+  if (!ws.win) throw new Error("Turnery 窗口刚被关掉了")
   return ws.win
 }
 
@@ -375,6 +375,26 @@ async function openForUser(from: Workspace | null, file: string, create = false)
   return res.ok
 }
 
+/**
+ * The example that ships with the app (dist/examples): copied into ~/.turnery/projects the first time,
+ * so what the person changes in it is theirs and the app bundle stays as it was signed.
+ */
+const EXAMPLE = { dir: "sensor-enclosure", part: "enclosure.turnery.json" }
+async function openExample(from: Workspace | null) {
+  const dest = path.join(PROJECTS_DIR, EXAMPLE.dir)
+  const file = path.join(dest, EXAMPLE.part)
+  try {
+    if (!existsSync(file)) {
+      mkdirSync(dest, { recursive: true })
+      copyFileSync(path.join(DIST, "examples", EXAMPLE.dir, EXAMPLE.part), file)
+    }
+  } catch (err) {
+    void dialog.showMessageBox({ type: "warning", message: "没能打开示例", detail: err instanceof Error ? err.message : String(err) })
+    return false
+  }
+  return (await openProjectAt(from, dest)) && (await openForUser(workspaces.find((w) => w.engine.projectRoot === canonical(dest)) ?? from, file))
+}
+
 // -------------------------------------------------------------------- dialogs
 
 const saveDialog = (ws: Workspace | null, o: SaveDialogOptions) => (ws?.win ? dialog.showSaveDialog(ws.win, o) : dialog.showSaveDialog(o))
@@ -387,7 +407,7 @@ async function newPartDialog(ws: Workspace | null) {
   const res = await saveDialog(ws, {
     title: "新建零件",
     defaultPath: path.join(dir, `零件${PART_EXT}`),
-    filters: [{ name: "Arbor 零件", extensions: ["json"] }],
+    filters: [{ name: "Turnery 零件", extensions: ["json"] }],
     properties: ["createDirectory", "showOverwriteConfirmation"],
   })
   if (res.canceled || !res.filePath) return null
@@ -395,7 +415,7 @@ async function newPartDialog(ws: Workspace | null) {
   return (await openForUser(ws, file, true)) ? file : null
 }
 
-/** A new project folder: in ~/.arbor/projects, named by the time unless the person types a name. */
+/** A new project folder: in ~/.turnery/projects, named by the time unless the person types a name. */
 async function newProjectDialog(ws: Workspace | null) {
   mkdirSync(PROJECTS_DIR, { recursive: true })
   const res = await saveDialog(ws, {
@@ -421,7 +441,7 @@ async function pickFileDialog(ws: Workspace, kind: "part" | "step") {
   const res = await openDialog(ws, {
     title: kind === "step" ? "选一个 STEP 文件" : "选一个零件或装配",
     defaultPath: doc ? path.dirname(doc.path) : undefined,
-    filters: kind === "step" ? [{ name: "STEP", extensions: ["step", "stp"] }] : [{ name: "Arbor 零件和装配", extensions: ["json"] }],
+    filters: kind === "step" ? [{ name: "STEP", extensions: ["step", "stp"] }] : [{ name: "Turnery 零件和装配", extensions: ["json"] }],
     properties: ["openFile"],
   })
   return res.canceled ? null : (res.filePaths[0] ?? null)
@@ -431,7 +451,7 @@ async function pickFileDialog(ws: Workspace, kind: "part" | "step") {
 async function openPartDialog(ws: Workspace | null) {
   const res = await openDialog(ws, {
     title: "打开零件、装配或项目文件夹",
-    filters: [{ name: "Arbor 零件和装配", extensions: ["json"] }],
+    filters: [{ name: "Turnery 零件和装配", extensions: ["json"] }],
     properties: ["openFile", "openDirectory"],
   })
   const picked = res.canceled ? null : res.filePaths[0]
@@ -474,18 +494,18 @@ async function goHome(ws: Workspace | null) {
 
 const updater = createUpdater({
   status: (s) => {
-    for (const ws of workspaces) ws.win?.webContents.send("arbor:update", s)
+    for (const ws of workspaces) ws.win?.webContents.send("turnery:update", s)
   },
   // The answer to 检查更新…: in the window in front when there is one, otherwise a dialog.
   notice: (n) => {
     const ws = focused()
-    if (ws?.win) ws.win.webContents.send("arbor:notice", n)
+    if (ws?.win) ws.win.webContents.send("turnery:notice", n)
     else void dialog.showMessageBox({ type: n.tone === "error" ? "warning" : "info", message: n.text })
   },
 })
 
 function send(action: MenuAction) {
-  focused()?.win?.webContents.send("arbor:menu", action)
+  focused()?.win?.webContents.send("turnery:menu", action)
 }
 
 /** ⌘= / ⌘- / ⌘0: the whole window, every window (they share one origin), kept for the next launch. */
@@ -496,9 +516,9 @@ function zoom(step: -1 | 0 | 1) {
   writeSettings({ ...readSettings(), zoom: level })
 }
 
-/** The `arbor` executable: inside the app bundle when packaged, the repo's bin/ in development. */
-function arborBin() {
-  return app.isPackaged ? path.join(process.resourcesPath, "bin", "arbor") : path.join(app.getAppPath(), "bin", "arbor")
+/** The `turnery` executable: inside the app bundle when packaged, the repo's bin/ in development. */
+function turneryBin() {
+  return app.isPackaged ? path.join(process.resourcesPath, "bin", "turnery") : path.join(app.getAppPath(), "bin", "turnery")
 }
 
 let menuKey: string | null = null
@@ -604,28 +624,29 @@ function refreshMenu() {
 // ------------------------------------------------------------------------ IPC
 
 function wireIpc() {
-  ipcMain.handle("arbor:state", (e) => {
+  ipcMain.handle("turnery:state", (e) => {
     const { engine } = wsOf(e)
     return { snapshot: engine.snapshot(), doc: engine.docState(), pick: engine.pickRequest() }
   })
-  ipcMain.handle("arbor:call", (e, command: string, input: Record<string, unknown>, part?: string) => wsOf(e).engine.run(command, input, userCtx(part)))
-  ipcMain.handle("arbor:kernel", (e, p: string, call: KernelCall) => wsOf(e).engine.kernelCall(p, call))
-  ipcMain.handle("arbor:answer-pick", (e, id: string, answer: { info: PickInfo; text?: string } | null) => wsOf(e).engine.answerPick(id, answer))
-  ipcMain.handle("arbor:open-part", (e) => openPartDialog(wsOf(e)))
-  ipcMain.handle("arbor:new-part", (e) => newPartDialog(wsOf(e)))
-  ipcMain.handle("arbor:new-project", (e) => newProjectDialog(wsOf(e)))
-  ipcMain.handle("arbor:open-project", (e) => openProjectDialog(wsOf(e)))
-  ipcMain.handle("arbor:open-project-at", (e, root: string) => openProjectAt(wsOf(e), String(root)))
-  ipcMain.handle("arbor:recent-projects", () => recentProjects())
-  ipcMain.handle("arbor:pick-file", (e, kind: "part" | "step") => pickFileDialog(wsOf(e), kind === "step" ? "step" : "part"))
-  ipcMain.handle("arbor:reveal", (_e, p: string) => shell.showItemInFolder(p))
-  ipcMain.handle("arbor:export", (e, format: ExportFormat) => exportDialog(wsOf(e), format))
-  ipcMain.handle("arbor:agent-setup", () => agentSetup(arborBin()))
-  ipcMain.handle("arbor:copy", (_e, text: string) => clipboard.writeText(String(text)))
-  ipcMain.handle("arbor:update", () => updater.status())
-  ipcMain.handle("arbor:restart-to-update", () => updater.restart())
-  ipcMain.on("arbor:renderer-ready", (e) => workspaces.find((w) => w.win?.webContents === e.sender)?.markReady())
-  ipcMain.on("arbor:look-done", (e, id: number, res: { images?: string[]; error?: string }) => {
+  ipcMain.handle("turnery:call", (e, command: string, input: Record<string, unknown>, part?: string) => wsOf(e).engine.run(command, input, userCtx(part)))
+  ipcMain.handle("turnery:kernel", (e, p: string, call: KernelCall) => wsOf(e).engine.kernelCall(p, call))
+  ipcMain.handle("turnery:answer-pick", (e, id: string, answer: { info: PickInfo; text?: string } | null) => wsOf(e).engine.answerPick(id, answer))
+  ipcMain.handle("turnery:open-part", (e) => openPartDialog(wsOf(e)))
+  ipcMain.handle("turnery:new-part", (e) => newPartDialog(wsOf(e)))
+  ipcMain.handle("turnery:new-project", (e) => newProjectDialog(wsOf(e)))
+  ipcMain.handle("turnery:open-project", (e) => openProjectDialog(wsOf(e)))
+  ipcMain.handle("turnery:open-project-at", (e, root: string) => openProjectAt(wsOf(e), String(root)))
+  ipcMain.handle("turnery:recent-projects", () => recentProjects())
+  ipcMain.handle("turnery:open-example", (e) => openExample(wsOf(e)))
+  ipcMain.handle("turnery:pick-file", (e, kind: "part" | "step") => pickFileDialog(wsOf(e), kind === "step" ? "step" : "part"))
+  ipcMain.handle("turnery:reveal", (_e, p: string) => shell.showItemInFolder(p))
+  ipcMain.handle("turnery:export", (e, format: ExportFormat) => exportDialog(wsOf(e), format))
+  ipcMain.handle("turnery:agent-setup", () => agentSetup(turneryBin()))
+  ipcMain.handle("turnery:copy", (_e, text: string) => clipboard.writeText(String(text)))
+  ipcMain.handle("turnery:update", () => updater.status())
+  ipcMain.handle("turnery:restart-to-update", () => updater.restart())
+  ipcMain.on("turnery:renderer-ready", (e) => workspaces.find((w) => w.win?.webContents === e.sender)?.markReady())
+  ipcMain.on("turnery:look-done", (e, id: number, res: { images?: string[]; error?: string }) => {
     const ws = workspaces.find((w) => w.win?.webContents === e.sender)
     const l = ws?.looks.get(id)
     if (!ws || !l) return
@@ -640,6 +661,7 @@ function wireIpc() {
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
+  adoptLegacyHome()
   app.on("second-instance", (_e, argv) => {
     // Another agent starting the app: it's already here, nothing to show.
     if (argv.includes("--from-agent")) return
@@ -650,7 +672,7 @@ if (!app.requestSingleInstanceLock()) {
   })
 
   void app.whenReady().then(async () => {
-    protocol.handle("arbor", async (req) => {
+    protocol.handle("turnery", async (req) => {
       const url = new URL(req.url)
       const file = path.normalize(path.join(RENDERER_DIR, decodeURIComponent(url.pathname)))
       if (!file.startsWith(RENDERER_DIR + path.sep)) return new Response("not found", { status: 404 })
@@ -663,18 +685,23 @@ if (!app.requestSingleInstanceLock()) {
     const fromAgent = process.argv.includes("--from-agent") || headless
     const first = newWorkspace()
     refreshMenu()
-    const rpc = await serveEngine(agentRun, __ARBOR_VERSION__)
-    writeEngineInfo({ port: rpc.port, token: rpc.token, pid: process.pid, version: __ARBOR_VERSION__, startedAt: Date.now() })
+    const rpc = await serveEngine(agentRun, __TURNERY_VERSION__)
+    writeEngineInfo({ port: rpc.port, token: rpc.token, pid: process.pid, version: __TURNERY_VERSION__, startedAt: Date.now() })
     writeAppInfo({ exec: process.execPath, args: app.isPackaged ? [] : [app.getAppPath()] })
     engineReady = true
     createWindow(first, fromAgent ? "inactive" : "focus")
     for (const f of pendingOpen.splice(0)) await openForUser(first, f)
-    // The person starts Arbor: back where they were. An agent's start leaves the window empty for the agent.
+    // The person starts Turnery: back where they were. An agent's start leaves the window empty for the agent.
     if (!fromAgent && first.engine.empty) {
       const last = recentProjects()[0]?.root
       const part = readRecent().find((p) => existsSync(p))
       if (last) await first.engine.run("open_project", { path: last }, userCtx())
       else if (part) await first.engine.openForUser(part)
+      // The very first start: something to look at and change, once. After that the welcome page offers it.
+      else if (!readSettings().exampleShown) {
+        writeSettings({ ...readSettings(), exampleShown: true })
+        await openExample(first)
+      }
     }
 
     app.on("activate", () => {

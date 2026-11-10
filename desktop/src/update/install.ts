@@ -1,6 +1,6 @@
-// Getting a new Arbor.app onto the disk, macOS only: download the signed archive next to the
+// Getting a new Turnery.app onto the disk, macOS only: download the signed archive next to the
 // installed app (same volume, so the final swap is two renames), check it, unpack it there, and
-// swap the bundles when Arbor quits. The running app is never touched while it runs: its
+// swap the bundles when Turnery quits. The running app is never touched while it runs: its
 // helpers, kernel thread and wasm keep loading from the old bundle until the very end.
 import { execFile } from "node:child_process"
 import { createHash } from "node:crypto"
@@ -14,9 +14,9 @@ import type { UpdateAsset } from "./manifest"
 
 const run = promisify(execFile)
 
-export const BUNDLE_ID = "com.linjiejim.arbor"
+export const BUNDLE_ID = "com.linjiejim.turnery"
 
-/** The .app around an executable at `Arbor.app/Contents/MacOS/Arbor`, or null. */
+/** The .app around an executable at `Turnery.app/Contents/MacOS/Turnery`, or null. */
 export function bundleOf(exe: string) {
   const app = path.resolve(exe, "../../..")
   return app.endsWith(".app") && path.basename(path.dirname(exe)) === "MacOS" ? app : null
@@ -24,9 +24,9 @@ export function bundleOf(exe: string) {
 
 /** Why this copy can't update itself, or null when it can. */
 export function cannotReplace(bundle: string | null) {
-  if (!bundle) return "只有打包好的 Arbor.app 能自动更新"
+  if (!bundle) return "只有打包好的 Turnery.app 能自动更新"
   if (bundle.includes("/AppTranslocation/") || bundle.startsWith("/Volumes/"))
-    return "Arbor 正从下载的磁盘映像或隔离位置运行：先把它拖进「应用程序」文件夹再打开，才能自动更新"
+    return "Turnery 正从下载的磁盘映像或隔离位置运行：先把它拖进「应用程序」文件夹再打开，才能自动更新"
   try {
     // Moving a folder to another parent needs write access to it as well as to both parents.
     accessSync(path.dirname(bundle), constants.W_OK)
@@ -38,7 +38,7 @@ export function cannotReplace(bundle: string | null) {
 }
 
 /** Where updates are prepared: a hidden folder next to the app, removed at the next launch. */
-export const stagingDir = (bundle: string) => path.join(path.dirname(bundle), ".arbor-update")
+export const stagingDir = (bundle: string) => path.join(path.dirname(bundle), ".turnery-update")
 
 /** What's left from an earlier update (the old bundle, a half-done download). */
 export const clearStaging = (bundle: string) => rm(stagingDir(bundle), { recursive: true, force: true })
@@ -83,24 +83,24 @@ export async function download(fetchFn: Fetch, asset: UpdateAsset, file: string,
   }
 }
 
-/** Unpack the archive into `dir` and check it holds an Arbor.app of `version`. Returns that .app. */
+/** Unpack the archive into `dir` and check it holds an Turnery.app of `version`. Returns that .app. */
 export async function unpack(zip: string, dir: string, version: string) {
   await rm(dir, { recursive: true, force: true })
   await mkdir(dir, { recursive: true })
   // ditto keeps the bundle's symlinks and permissions (the frameworks rely on both).
   await run("/usr/bin/ditto", ["-x", "-k", zip, dir])
-  const app = path.join(dir, "Arbor.app")
+  const app = path.join(dir, "Turnery.app")
   const plist = path.join(app, "Contents/Info.plist")
-  if (!existsSync(plist)) throw new Error("更新包里没有 Arbor.app")
+  if (!existsSync(plist)) throw new Error("更新包里没有 Turnery.app")
   const read = async (key: string) => (await run("/usr/bin/plutil", ["-extract", key, "raw", "-o", "-", plist])).stdout.trim()
   const [id, v] = await Promise.all([read("CFBundleIdentifier"), read("CFBundleShortVersionString")])
-  if (id !== BUNDLE_ID) throw new Error(`更新包里的 App 不是 Arbor（${id}）`)
-  if (v !== version) throw new Error(`更新包里的 Arbor 是 ${v}，不是 ${version}`)
+  if (id !== BUNDLE_ID) throw new Error(`更新包里的 App 不是 Turnery（${id}）`)
+  if (v !== version) throw new Error(`更新包里的 Turnery 是 ${v}，不是 ${version}`)
   return app
 }
 
 /**
- * Put `fresh` where `bundle` is. Synchronous: it runs while Arbor quits. The old bundle moves into
+ * Put `fresh` where `bundle` is. Synchronous: it runs while Turnery quits. The old bundle moves into
  * the staging folder (cleared at the next launch); if the second rename fails it is put back.
  */
 export function swapBundles(bundle: string, fresh: string) {

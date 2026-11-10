@@ -1,6 +1,6 @@
 # 参与贡献
 
-> Arbor is a Chinese-language, concept-first course on parametric CAD. Contributions are welcome in Chinese or English; this guide covers running the site, checks, lessons, models, design rules, commit style and how to cite sources for content fixes.
+> Turnery is a desktop app that lets coding agents build parametric CAD over MCP, plus a Chinese-language, concept-first course on the same kernel. Contributions are welcome in Chinese or English; this guide covers running the site, checks, lessons, models, design rules, commit style and how to cite sources for content fixes.
 > Code is MIT and lesson text is CC BY 4.0; by contributing you agree to license your contribution the same way.
 
 欢迎改错字、纠正说法、报 bug、提新课，也欢迎直接写一节课或一个拆解模型。这份说明讲怎么跑起来、提交前查什么，以及内容纠错为什么一定要给出处。
@@ -13,8 +13,8 @@
 - 改 `models/` 时还要 Python 3.11 以上。
 
 ```bash
-git clone https://github.com/linjiejim/arbor.git
-cd arbor/app
+git clone https://github.com/linjiejim/turnery.git
+cd turnery/app
 npm ci              # 国内网络慢时加 --registry=https://registry.npmmirror.com
 npm run dev         # http://localhost:5287
 ```
@@ -56,12 +56,12 @@ npm run build       # 生产构建，并为每个页面生成带标题和描述�
 
 完整说明见 [`docs/dev/models.md`](docs/dev/models.md)。
 
-模型用 [build123d](https://github.com/gumyr/build123d) 写在 `models/parts/<id>.py` 或 `models/assemblies/<id>.py`，由烘焙器 `arborbake` 离线算成 GLB。
+模型用 [build123d](https://github.com/gumyr/build123d) 写在 `models/parts/<id>.py` 或 `models/assemblies/<id>.py`，由烘焙器 `turnerybake` 离线算成 GLB。
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r models/requirements.txt
-cd models && ../.venv/bin/python -m arborbake <id>    # 只烘焙一个模型
+cd models && ../.venv/bin/python -m turnerybake <id>    # 只烘焙一个模型
 ```
 
 规则：

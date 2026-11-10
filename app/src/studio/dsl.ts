@@ -287,7 +287,7 @@ export const Feature = z.discriminatedUnion("op", [
   z.object({
     ...Base,
     op: z.literal("import"),
-    file: z.string().min(1).max(200).describe("STEP 文件，相对零件文件所在的文件夹，例如 \"board.step\"。只在桌面版 Arbor 里能读文件"),
+    file: z.string().min(1).max(200).describe("STEP 文件，相对零件文件所在的文件夹，例如 \"board.step\"。只在桌面版 Turnery 里能读文件"),
     mode: z
       .enum(["reference", "add", "cut"])
       .optional()
@@ -299,7 +299,7 @@ export const Feature = z.discriminatedUnion("op", [
       .describe("依次绕过原点的坐标轴旋转，角度用度；先旋转、后平移"),
     at: Vec3.optional().describe("平移 [x, y, z]"),
   }),
-  // Desktop (Arbor) only: an assembly (*.arbor-asm.json) is a tree of these, each a part file placed in it.
+  // Desktop (Turnery) only: an assembly (*.turnery-asm.json) is a tree of these, each a part file placed in it.
   z.object({
     ...Base,
     op: z.literal("component"),
@@ -308,7 +308,7 @@ export const Feature = z.discriminatedUnion("op", [
       .min(1)
       .max(200)
       .optional()
-      .describe("零件文件（.arbor.json）、子装配（.arbor-asm.json）或外购件（.step），相对装配文件所在的文件夹；放标准件时不写，写 standard"),
+      .describe("零件文件（.turnery.json）、子装配（.turnery-asm.json）或外购件（.step），相对装配文件所在的文件夹；放标准件时不写，写 standard"),
     standard: z
       .object({
         type: z.enum(FASTENER_TYPES).describe("screw 螺钉、nut 六角螺母（ISO 4032）、washer 平垫圈（ISO 7089）、insert 热熔螺母（3D 打印件用）"),
@@ -405,7 +405,7 @@ export const Check = z.discriminatedUnion("kind", [
   // Against a reference body brought in with `import` (desktop app): fit around a board, a part to mate with.
   z.object({ ...CheckBase, kind: z.literal("clearance"), ref: z.string().describe("参考体的特征 id（import），或一个零件的名字"), min: z.number().describe("和它之间最小的间隙，mm") }),
   z.object({ ...CheckBase, kind: z.literal("interference"), ref: z.string().describe("参考体的特征 id（import），或一个零件的名字：其余部分不能和它相交") }),
-  // Desktop (Arbor) only for now: left out of the site assistant's `check` (tools.ts).
+  // Desktop (Turnery) only for now: left out of the site assistant's `check` (tools.ts).
   z.object({
     ...CheckBase,
     kind: z.literal("position"),
@@ -428,7 +428,7 @@ export const DESKTOP_CHECKS = new Set(["position", "gap"])
 export type Check = z.infer<typeof Check>
 
 export const Tree = z.object({
-  /** Desktop (Arbor): a shared parameter file (*.params.json) next to the part; its parameters win over the part's own. */
+  /** Desktop (Turnery): a shared parameter file (*.params.json) next to the part; its parameters win over the part's own. */
   uses: z.string().min(1).max(200).optional(),
   params: z.record(z.string(), Num),
   /** One line per parameter for people (「总长，沿 X」); never used in calculations. */
@@ -477,5 +477,5 @@ export const TOOL_OPS: FeatureOp[] = ["extrude", "revolve", "hole", "sweep", "lo
 export function componentName(f: { name?: string; file?: string; standard?: { type: string; size: string } }) {
   if (f.name) return f.name
   if (!f.file) return f.standard ? `${f.standard.size} ${{ screw: "螺钉", nut: "螺母", washer: "垫圈", insert: "热熔螺母" }[f.standard.type] ?? ""}`.trim() : "零件"
-  return (f.file.split(/[\\/]/).pop() ?? f.file).replace(/\.(arbor-asm\.json|arbor\.json|json|step|stp)$/i, "")
+  return (f.file.split(/[\\/]/).pop() ?? f.file).replace(/\.((turnery|arbor)-asm\.json|(turnery|arbor)\.json|json|step|stp)$/i, "")
 }

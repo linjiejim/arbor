@@ -3,8 +3,8 @@
 // window's sidebar and `list_parts`, and decides which folder that is from
 // what was opened last.
 import type { Files } from "./engine"
-import { PART_EXT } from "./protocol"
-import { ASM_EXT, PARAMS_EXT } from "./sources"
+import { PART_EXT, partExtOf } from "./protocol"
+import { ASM_EXT, asmExtOf, PARAMS_EXT } from "./sources"
 
 /** How deep, and how much, a scan looks: a project folder opened on a huge tree stays quick. */
 export const SCAN_DEPTH = 3
@@ -30,11 +30,11 @@ export type Scan = { root: string; entries: ProjectEntry[]; truncated: boolean }
 /** What a scan remembers per file, so unchanged files aren't read again. */
 export type ScanCache = Map<string, { mtime: number; features: number | null }>
 
-export const isPartFile = (name: string) => name.endsWith(PART_EXT)
-export const isAssemblyFile = (name: string) => name.endsWith(ASM_EXT)
+export const isPartFile = (name: string) => partExtOf(name) !== null
+export const isAssemblyFile = (name: string) => asmExtOf(name) !== null
 export const baseName = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? p
 export const dirName = (p: string) => p.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "") || "/"
-export const stripEnding = (name: string) => name.replace(/\.arbor-asm\.json$|\.arbor\.json$|\.params\.json$/, "")
+export const stripEnding = (name: string) => name.replace(/\.(turnery|arbor)-asm\.json$|\.(turnery|arbor)\.json$|\.params\.json$/, "")
 const join = (dir: string, name: string) => `${dir.replace(/[\\/]+$/, "")}/${name}`
 const skip = (name: string) => name.startsWith(".") || name === "node_modules"
 
@@ -44,7 +44,7 @@ export function inside(root: string, path: string) {
   return path === r || path.startsWith(`${r}/`)
 }
 
-/** `to` written relative to the folder `from` ("parts/a.arbor.json", "../pen.params.json"). */
+/** `to` written relative to the folder `from` ("parts/a.turnery.json", "../pen.params.json"). */
 export function relativePath(from: string, to: string) {
   const a = from.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean)
   const b = to.split(/[\\/]/).filter(Boolean)
@@ -159,7 +159,7 @@ export function projectSkeleton(root: string) {
 export function partFileName(name: string) {
   const n = name
     .trim()
-    .replace(/\.arbor\.json$/, "")
+    .replace(/\.turnery\.json$/, "")
     .replace(/[\\/:*?"<>|]+/g, "-")
     .replace(/^\.+/, "")
   return n ? `${n}${PART_EXT}` : null

@@ -63,7 +63,7 @@ export class ThreadKernel implements KernelHost {
   }
 
   private spawn(): Promise<void> {
-    // OpenCascade prints (STEP statistics, warnings) to stdout. Under `arbor mcp` stdout is the
+    // OpenCascade prints (STEP statistics, warnings) to stdout. Under `turnery mcp` stdout is the
     // protocol channel, so the thread gets its own streams and its chatter goes to stderr.
     const worker = new Worker(this.file, { stdout: true, stderr: true })
     worker.stdout.on("data", (b: Buffer) => process.stderr.write(b))

@@ -125,11 +125,11 @@ export const EVALS: EvalCase[] = [
   },
   {
     id: "nameplate",
-    prompt: "做一块 70×30×4 的铭牌，四个竖角 R3 圆角，顶面居中刻上「Arbor」，字号 7，深 0.5。",
+    prompt: "做一块 70×30×4 的铭牌，四个竖角 R3 圆角，顶面居中刻上「Turnery」，字号 7，深 0.5。",
     size: [70, 30, 4],
     upright: true,
     maxVolume: 70 * 30 * 4 - 10,
-    text: "Arbor",
+    text: "Turnery",
     extra: (q) => {
       const floor = centres(q.inspect("faces", { normal: "+Z" })).filter((c) => Math.abs(c[2] - 3.5) < 0.05)
       return [{ name: "刻在顶面下 0.5", pass: floor.length > 0, detail: `${floor.length} 个字底面在 z=3.5` }]

@@ -27,7 +27,7 @@ export function SiteHeader() {
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur-sm">
       <div className="mx-auto flex h-12 max-w-[1200px] items-center gap-2 px-6 max-sm:px-4">
-        <Link to="/" className="mr-4 rounded-sm" aria-label="Arbor 首页">
+        <Link to="/" className="mr-4 rounded-sm" aria-label="Turnery 首页">
           <Brand />
         </Link>
         <nav className="flex items-center gap-0.5 max-md:hidden">

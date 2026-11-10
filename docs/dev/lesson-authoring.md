@@ -1,6 +1,6 @@
 # 写一节互动课
 
-Arbor 的每节互动课由两个文件组成，放在 `app/src/content/lessons/`：
+Turnery 的每节互动课由两个文件组成，放在 `app/src/content/lessons/`：
 
 | 文件 | 内容 |
 | --- | --- |
@@ -83,7 +83,7 @@ npx playwright test -g <id>       # 这节课的冒烟测试
 - 视口每一步都要画出东西（不能整块空白），整个过程不能有未捕获的异常或 `console.error`。
 - 小测用标准的 `quiz` 字段，不要另做答题控件。
 
-怎么跑见根目录 `README.md` 的「开发」一节。
+怎么跑见根目录 `README.zh-CN.md` 的「开发」一节。
 
 # 写一张图文卡
 

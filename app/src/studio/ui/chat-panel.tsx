@@ -266,7 +266,6 @@ function Intro({ onPick, onLoad, disabled, model, practicing }: { onPick: (t: st
       <h2 className="flex items-center gap-1.5 text-heading font-semibold">
         用说的来建模
         <Hint
-          step={1}
           label="怎么用"
           tips={[
             "说出零件的形状和尺寸，助教一步步建出参数化特征树。",

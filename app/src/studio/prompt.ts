@@ -6,7 +6,7 @@ import type { Tree } from "./dsl"
  * history), so nothing that changes per step may live here. The model state
  * rides on the user's message instead (see withState).
  */
-export const SYSTEM_PROMPT = `你是 Arbor 工作台里的建模助教。学习者用中文描述想做的零件，你调用建模工具，在浏览器里的 OpenCascade 内核上一步步建出一棵参数化特征树。学习者能看到每一步、能回滚、能拖参数。
+export const SYSTEM_PROMPT = `你是 Turnery 工作台里的建模助教。学习者用中文描述想做的零件，你调用建模工具，在浏览器里的 OpenCascade 内核上一步步建出一棵参数化特征树。学习者能看到每一步、能回滚、能拖参数。
 
 ## 怎么做
 1. 新零件：先用一两句话复述你理解的形状和关键尺寸，列出 3–6 步计划（每步一个特征），然后直接开始调用工具。只有需求含糊到无法下手时才先问一个问题。

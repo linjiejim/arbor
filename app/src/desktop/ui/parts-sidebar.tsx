@@ -5,7 +5,7 @@ import { Hint } from "@/components/hint"
 import { IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { matchesPart } from "@/studio/part-selection"
-import { arbor } from "../bridge"
+import { turnery } from "../bridge"
 import type { PartSummary, ProjectFile, Snapshot } from "../core/protocol"
 
 /**
@@ -36,7 +36,6 @@ export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect
           {project ? project.name : "零件"}
         </span>
         <Hint
-          step={1}
           label="项目怎么用"
           tips={[
             "项目就是一个文件夹：里面的装配和零件都列在这里。",
@@ -45,10 +44,10 @@ export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect
           ]}
         />
         <div className="ml-auto flex">
-          <IconButton label="新建零件（⌘N）" size="icon-sm" onClick={() => void arbor.newPart()}>
+          <IconButton label="新建零件（⌘N）" size="icon-sm" onClick={() => void turnery.newPart()}>
             <Plus />
           </IconButton>
-          <IconButton label="打开（⌘O）" size="icon-sm" onClick={() => void arbor.openPart()}>
+          <IconButton label="打开（⌘O）" size="icon-sm" onClick={() => void turnery.openPart()}>
             <FolderOpen />
           </IconButton>
         </div>
@@ -127,7 +126,7 @@ function FileRow({ file: f, active }: { file: ProjectFile; active: boolean }) {
   const unit = f.kind === "assembly" ? "个零件" : "个特征"
   return (
     <div className={rowClass(active)}>
-      <button type="button" className={buttonClass} title={f.path} aria-current={active ? "page" : undefined} onClick={() => void arbor.call("open_part", { path: f.path })}>
+      <button type="button" className={buttonClass} title={f.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: f.path })}>
         <span className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate text-body", active && "font-medium", !f.open && !active && "text-muted-foreground")}>
           {f.kind === "assembly" && <Boxes className="size-3.5 shrink-0 text-faint-foreground" />}
           <span className="truncate">{f.name}</span>
@@ -146,7 +145,7 @@ function FileRow({ file: f, active }: { file: ProjectFile; active: boolean }) {
 function OpenRow({ part: p, active }: { part: PartSummary; active: boolean }) {
   return (
     <div className={rowClass(active)}>
-      <button type="button" className={buttonClass} title={p.path} aria-current={active ? "page" : undefined} onClick={() => void arbor.call("open_part", { path: p.path })}>
+      <button type="button" className={buttonClass} title={p.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: p.path })}>
         <span className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate text-body", active && "font-medium")}>
           {p.error && <CircleAlert className="size-3.5 shrink-0 text-destructive" aria-label="文件有错" />}
           {p.kind === "assembly" && <Boxes className="size-3.5 shrink-0 text-faint-foreground" />}
@@ -168,7 +167,7 @@ function CloseButton({ path }: { path: string }) {
       label="关闭（文件不动）"
       size="icon-sm"
       className="absolute right-1 bg-sunken opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-      onClick={() => void arbor.call("close_part", { path })}
+      onClick={() => void turnery.call("close_part", { path })}
     >
       <X />
     </IconButton>

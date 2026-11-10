@@ -103,7 +103,7 @@ export function ViewTools({
           <Expand />
         </IconButton>
         <div className="my-0.5 h-px w-5 bg-border" />
-        <Hint step={3} label="视图怎么用" side="right" align="start" className="mb-1" tips={tips} />
+        <Hint label="视图怎么用" side="right" align="start" className="mb-1" tips={tips} />
       </div>
       {section && bbox && <SectionPanel section={section} onChange={onSection} bbox={bbox} />}
       {exploding && explode !== null && (

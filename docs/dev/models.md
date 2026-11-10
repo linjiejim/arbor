@@ -1,6 +1,6 @@
 # 写一个拆解模型
 
-案例拆解页上的几何不是手画的，而是 `models/` 里的 build123d 代码在 OpenCascade 内核里算出来的。烘焙器（`models/arborbake`）把每个特征之后的零件状态导出成 GLB，并标出每个面是这一步**新生成**、**修改**还是**没变**。
+案例拆解页上的几何不是手画的，而是 `models/` 里的 build123d 代码在 OpenCascade 内核里算出来的。烘焙器（`models/turnerybake`）把每个特征之后的零件状态导出成 GLB，并标出每个面是这一步**新生成**、**修改**还是**没变**。
 
 ## 环境
 
@@ -8,7 +8,7 @@
 python3 -m venv .venv
 .venv/bin/pip install -r models/requirements.txt    # build123d 0.13（含 OCP）
 cd app && npm run bake                              # 全部模型
-cd models && ../.venv/bin/python -m arborbake mug      # 只烘焙一个
+cd models && ../.venv/bin/python -m turnerybake mug      # 只烘焙一个
 ```
 
 输出在 `app/public/models/<id>/`：`manifest.json`、每组参数一个 `<variant>.glb`，以及总表 `app/public/models/index.json`。
@@ -63,7 +63,7 @@ def build(p, r):
 
 ## 面状态怎么判定
 
-`arborbake/classify.py` 用几何方法判定：把这一步每个面上的采样点投影到上一步各个面的底层曲面上。
+`turnerybake/classify.py` 用几何方法判定：把这一步每个面上的采样点投影到上一步各个面的底层曲面上。
 
 - 落在同一张曲面上、面积和中心也不变：没变。
 - 落在同一张曲面上，但被裁剪或延伸了：修改。

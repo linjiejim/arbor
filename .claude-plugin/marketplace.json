@@ -1,0 +1,14 @@
+{
+  "name": "turnery",
+  "description": "Turnery: parametric CAD that coding agents build over MCP",
+  "owner": {
+    "name": "Jim Lin"
+  },
+  "plugins": [
+    {
+      "name": "turnery",
+      "source": "./plugin",
+      "description": "Build parametric CAD parts with the Turnery desktop app: feature tree, kernel-checked requirements, STEP/STL export"
+    }
+  ]
+}

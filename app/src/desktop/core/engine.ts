@@ -1,4 +1,4 @@
-// The Arbor engine: open parts (feature-tree files), one OpenCascade kernel,
+// The Turnery engine: open parts (feature-tree files), one OpenCascade kernel,
 // undo, the person's notes, and every command the agent or the window runs.
 // Platform-neutral: the kernel, the file system and the window come in as
 // ports, so the same engine runs in Electron's main process and in the CLI.
@@ -33,7 +33,7 @@ import { InputError } from "../../studio/kernel/errors"
 import type { MeasureResult, MeasureSpec } from "../../studio/kernel/measure"
 import { STARTERS } from "../../studio/starters"
 import { resolveParams } from "../../studio/expr"
-import { ASM_EXT, besides, effectiveTree, gather, isAssembly, loadShared, shadowed, sharedText, type Shared } from "./sources"
+import { ASM_EXT, asmExtOf, besides, effectiveTree, gather, isAssembly, loadShared, shadowed, sharedText, type Shared } from "./sources"
 import { baseName, canBeRoot, dirName, inside, isAssemblyFile, partFileName, projectSkeleton, relativePath, rootFor, scanProject, stripEnding, type Scan, type ScanCache } from "./project"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
 import { AGENT_GUIDE, COMMAND } from "./catalog"
@@ -41,6 +41,8 @@ import { newNote, notesText, parseNotes, pickLines, type NotesFile } from "./not
 import {
   NOTES_EXT,
   PART_EXT,
+  partExtOf,
+  type Actor,
   type AgentActivity,
   type CallContext,
   type Change,
@@ -153,8 +155,8 @@ type Doc = {
   /** Changes so far (the activity list is capped; this keeps counting). */
   seq: number
   /** What the agent has been told about: changes up to this one, notes up to this number. */
-  agentSeq: number
-  agentNoteN: number
+  /** How far each of the two kinds of agent has seen this part: its last change and its newest note. */
+  seen: Record<Reader, { seq: number; note: number }>
 }
 
 type PickAnswer = { info: PickInfo; text?: string }
@@ -171,19 +173,21 @@ const clip = (s: string, n = 30) => (s.length > n ? `${s.slice(0, n)}…` : s)
 
 export function partName(path: string) {
   const base = path.split(/[\\/]/).pop() ?? path
-  if (base.endsWith(ASM_EXT)) return base.slice(0, -ASM_EXT.length)
-  return base.endsWith(PART_EXT) ? base.slice(0, -PART_EXT.length) : base.replace(/\.json$/i, "")
+  const ext = asmExtOf(base) ?? partExtOf(base)
+  return ext ? base.slice(0, -ext.length) : base.replace(/\.json$/i, "")
 }
 
 export function notesPath(path: string) {
   // An assembly's notes don't share a name with a part of the same name next to it.
-  if (path.endsWith(ASM_EXT)) return path.slice(0, -ASM_EXT.length) + ".asm" + NOTES_EXT
-  return path.endsWith(PART_EXT) ? path.slice(0, -PART_EXT.length) + NOTES_EXT : path.replace(/\.json$/i, "") + NOTES_EXT
+  const asm = asmExtOf(path)
+  if (asm) return path.slice(0, -asm.length) + ".asm" + NOTES_EXT
+  const part = partExtOf(path)
+  return part ? path.slice(0, -part.length) + NOTES_EXT : path.replace(/\.json$/i, "") + NOTES_EXT
 }
 
 /**
  * A part path as given by a caller: made absolute against its directory, `.` and repeated
- * separators dropped, `.arbor.json` added when there's no `.json`. `..` stays: after a symlinked
+ * separators dropped, `.turnery.json` added when there's no `.json`. `..` stays: after a symlinked
  * folder it means the link target's parent, so only the file system (`Files.canonical`) resolves it.
  */
 export function normalizePartPath(path: string, cwd?: string) {
@@ -210,6 +214,13 @@ export function parseTree(text: string): { ok: true; tree: Tree } | { ok: false;
   if (!parsed.success) return { ok: false, error: parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".") || "（根）"} ${i.message}`).join("；") }
   return { ok: true, tree: parsed.data }
 }
+
+/** The two kinds of agent that are told what changed since their last call; each keeps its own place. */
+type Reader = "agent" | "assistant"
+const readerOf = (actor: Actor): Reader | null => (actor === "agent" || actor === "assistant" ? actor : null)
+/** How a change by someone else is introduced to an agent. */
+const BY: Record<Actor, string> = { user: "用户在窗口里", file: "文件被直接修改", agent: "另一个 agent（通过 MCP）", assistant: "窗口里的内置助手" }
+const WHO: Record<Actor, string> = { user: "用户", file: "文件", agent: "另一个 agent ", assistant: "内置助手" }
 
 export class Engine {
   private loading: LoadState | null = null
@@ -396,13 +407,14 @@ export class Engine {
   }
 
   private async track(ctx: CallContext, name: string, fn: () => Promise<CommandResult>) {
-    if (ctx.actor !== "agent") return fn()
-    this.agent = { busy: true, tool: name, at: Date.now() }
+    const who = readerOf(ctx.actor)
+    if (!who) return fn()
+    this.agent = { busy: true, tool: name, at: Date.now(), who }
     this.emitSnapshot()
     try {
       return await fn()
     } finally {
-      this.agent = { busy: false, tool: name, at: Date.now() }
+      this.agent = { busy: false, tool: name, at: Date.now(), who }
       this.emitSnapshot()
     }
   }
@@ -437,13 +449,14 @@ export class Engine {
       // Catch up with the file first: an editor may have saved it a moment ago (the watcher is debounced).
       await this.fileChanged(doc)
       // get_notes lists the new notes itself.
-      const notice = ctx.actor === "agent" ? this.noticeFor(doc, name === "get_notes") : ""
+      const reader = readerOf(ctx.actor)
+      const notice = reader ? this.noticeFor(doc, reader, name === "get_notes") : ""
       let res = await this.onDoc(doc, name, input, ctx)
       if (doc.conflict) {
         doc.conflict = false
         res = { ok: false, text: `${res.text}\n\n⚠ 这次修改期间，文件被别人保存过：已经以文件里的版本为准，刚才的改动没有写进文件（undo 可以找回）。` }
       }
-      if (ctx.actor === "agent") this.markSeen(doc)
+      if (reader) this.markSeen(doc, reader)
       return notice ? { ...res, text: `${notice}\n\n${res.text}` } : res
     } catch (e) {
       if (e instanceof InputError) return fail(e.message)
@@ -470,7 +483,7 @@ export class Engine {
     }
     switch (name) {
       case "get_state":
-        return { ok: true, text: await this.stateText(doc) }
+        return { ok: true, text: await this.stateText(doc, readerOf(ctx.actor)) }
       case "set_tree": {
         const base = input.base_rev as number | undefined
         if (base !== undefined && base !== doc.rev) return fail(`模型已经是第 ${doc.rev} 版了（你基于第 ${base} 版）：先用 get_state 看最新的，再改。`)
@@ -501,7 +514,8 @@ export class Engine {
       case "export":
         return this.exportPart(doc, input as { path: string; format?: "step" | "stl" | "py" | "json" }, ctx)
       case "get_notes": {
-        doc.agentNoteN = Math.max(doc.agentNoteN, ...doc.notes.notes.map((n) => n.n))
+        const who = readerOf(ctx.actor)
+        if (who) doc.seen[who].note = Math.max(doc.seen[who].note, ...doc.notes.notes.map((n) => n.n))
         return { ok: true, text: notesText(doc.notes.notes, input.status === "all") }
       }
       case "resolve_note": {
@@ -761,7 +775,8 @@ export class Engine {
     if (ctx.session) this.sessions.set(ctx.session, path)
     await this.joinProject(path)
     // What was there before the agent arrived isn't news to it.
-    if (ctx.actor === "agent") this.markSeen(doc)
+    const opener = readerOf(ctx.actor)
+    if (opener) this.markSeen(doc, opener)
     this.emitDoc(doc)
     const what = isAssembly(path) ? "装配" : "零件"
     const head = existed ? `已打开${what} ${path}（第 ${doc.rev} 版）` : `已新建${what} ${path}${input.template && !isAssembly(path) ? `（从「${STARTERS.find((s) => s.id === input.template)?.title}」开始）` : ""}`
@@ -770,7 +785,7 @@ export class Engine {
     const warn = existed && input.template ? "\n文件已经存在，没有用 template。" : ""
     const inCtx = doc.context ? `\n在装配「${partName(doc.context)}」里编辑：装配里的其他零件（${(doc.report?.refs ?? []).map((r) => r.name).join("、") || "无"}）半透明地显示在旁边，可以 look、measure、check（gap / clearance / interference 写它们的名字）。${contextNote}` : ""
     const asmHint = isAssembly(path) && !doc.tree.features.length ? "\n这是空装配：用 component 放零件（file 写零件文件，rotate、at 摆位置）。" : ""
-    return { ok: true, text: `${head}。Arbor 窗口已切到这个${what}。${warn}${notes}${inCtx}${asmHint}\n${treeText(doc.tree, doc.report!)}` }
+    return { ok: true, text: `${head}。Turnery 窗口已切到这个${what}。${warn}${notes}${inCtx}${asmHint}\n${treeText(doc.tree, doc.report!)}` }
   }
 
   private async listParts(): Promise<CommandResult> {
@@ -857,12 +872,12 @@ export class Engine {
     } else this.emitSnapshot()
     return {
       ok: true,
-      text: `${created ? created : ""}${this.projectText()}\n多个零件的东西：零件放在 parts/ 下（open_part path=parts/<名字>.arbor.json create=true），用装配里的 component 放进来；共用的尺寸写进项目的参数文件（share_params）。`,
+      text: `${created ? created : ""}${this.projectText()}\n多个零件的东西：零件放在 parts/ 下（open_part path=parts/<名字>.turnery.json create=true），用装配里的 component 放进来；共用的尺寸写进项目的参数文件（share_params）。`,
     }
   }
 
   /**
-   * The window's 「+ 零件」 on an assembly: `name` makes parts/<name>.arbor.json (using the assembly's
+   * The window's 「+ 零件」 on an assembly: `name` makes parts/<name>.turnery.json (using the assembly's
    * parameter file) and opens it inside the assembly; `file` puts an existing part, assembly or STEP in.
    */
   private async addPart(input: { name?: string; file?: string }, ctx: CallContext): Promise<CommandResult> {
@@ -979,8 +994,7 @@ export class Engine {
       shared: null,
       context: null,
       seq: 0,
-      agentNoteN: 0,
-      agentSeq: 0,
+      seen: { agent: { seq: 0, note: 0 }, assistant: { seq: 0, note: 0 } },
     }
     this.docs.set(path, doc)
     await this.refreshShared(doc)
@@ -1315,7 +1329,7 @@ export class Engine {
 
   // ----------------------------------------------------------- observation
 
-  private async stateText(doc: Doc) {
+  private async stateText(doc: Doc, reader: Reader | null = null) {
     const report = await this.ensureKernel(doc)
     const open = doc.notes.notes.filter((n) => n.status === "open")
     const lines = [`${isAssembly(doc.path) ? "装配" : "零件"}：${doc.path}（第 ${doc.rev} 版）`]
@@ -1328,15 +1342,15 @@ export class Engine {
     lines.push(treeText(this.effective(doc, doc.tree), report))
     lines.push(open.length ? `未处理的备注 ${open.length} 条：${open.map((n) => `${n.id}「${clip(n.text)}」`).join("、")}（get_notes 看详情）` : "没有未处理的备注。")
     if (doc.changes.length) {
-      const who = { agent: "你", user: "用户", file: "文件" } as const
-      lines.push(`最近的改动：\n${doc.changes.slice(0, 6).map((c) => `- 第 ${c.rev} 版 · ${who[c.actor]}：${c.summary}`).join("\n")}`)
+      const who = (a: Actor) => (a === reader ? "你" : WHO[a].trim())
+      lines.push(`最近的改动：\n${doc.changes.slice(0, 6).map((c) => `- 第 ${c.rev} 版 · ${who(c.actor)}：${c.summary}`).join("\n")}`)
     }
     return lines.join("\n")
   }
 
   private async look(doc: Doc, input: Record<string, unknown>): Promise<CommandResult> {
     const screen = this.opts.screen?.()
-    if (!screen) return fail("看图要在 Arbor 窗口里渲染：先打开 Arbor App（命令行 arbor open <零件>），再调用 look。其余命令不需要窗口。")
+    if (!screen) return fail("看图要在 Turnery 窗口里渲染：先打开 Turnery App（命令行 turnery open <零件>），再调用 look。其余命令不需要窗口。")
     const report = await this.ensureKernel(doc)
     const at = input.at as string | undefined
     const index = at ? doc.tree.features.findIndex((f) => f.id === at) : -1
@@ -1499,7 +1513,7 @@ export class Engine {
   // ------------------------------------------------------------------ picks
 
   private async requestPick(input: Record<string, unknown>, ctx: CallContext): Promise<CommandResult> {
-    if (!this.opts.screen?.()) return fail("要请用户在 Arbor 窗口里点选：先打开 Arbor App。")
+    if (!this.opts.screen?.()) return fail("要请用户在 Turnery 窗口里点选：先打开 Turnery App。")
     const doc = await this.exclusive(() => this.resolveDoc(ctx))
     if (!doc) return fail("还没有打开零件：先用 open_part。")
     const prompt = String(input.prompt)
@@ -1554,27 +1568,27 @@ export class Engine {
   // ----------------------------------------------------------------- agent
 
   /** What changed under the agent since its last call: told first, so it doesn't undo the person's edits. */
-  private noticeFor(doc: Doc, skipNewNotes = false) {
-    const theirs = doc.changes.filter((c) => c.actor !== "agent" && (c.seq ?? 0) > doc.agentSeq).reverse()
+  private noticeFor(doc: Doc, reader: Reader, skipNewNotes = false) {
+    const seen = doc.seen[reader]
+    const theirs = doc.changes.filter((c) => c.actor !== reader && (c.seq ?? 0) > seen.seq).reverse()
     const tree = theirs.filter((c) => !c.note)
     // New notes get their own line below; what happened to existing ones (handled, removed) goes here.
     const notes = theirs.filter((c) => c.note === "changed")
-    const fresh = skipNewNotes ? [] : doc.notes.notes.filter((n) => n.status === "open" && n.n > doc.agentNoteN)
+    const fresh = skipNewNotes ? [] : doc.notes.notes.filter((n) => n.status === "open" && n.n > seen.note)
     const lines: string[] = []
     if (tree.length) {
       lines.push(`⚠ 自你上次调用以来，模型被改过（以现在的状态为准，不要改回去）：`)
-      for (const c of tree.slice(-8)) lines.push(`- ${c.actor === "user" ? "用户在窗口里" : "文件被直接修改"}：${c.summary}`)
+      for (const c of tree.slice(-8)) lines.push(`- ${BY[c.actor]}：${c.summary}`)
       lines.push(`现在是第 ${doc.rev} 版。`)
     }
-    if (notes.length) lines.push(`备注有变化：${notes.slice(-6).map((c) => `用户${c.summary}`).join("；")}。`)
+    if (notes.length) lines.push(`备注有变化：${notes.slice(-6).map((c) => `${c.actor === "user" ? "用户" : WHO[c.actor]}${c.summary}`).join("；")}。`)
     if (fresh.length) lines.push(`◆ 用户在窗口里留了 ${fresh.length} 条新备注：${fresh.map((n) => `${n.id}「${clip(n.text)}」`).join("、")}。用 get_notes 读详情。`)
     return lines.join("\n")
   }
 
   /** The agent has seen the part as it is now. */
-  private markSeen(doc: Doc) {
-    doc.agentSeq = doc.seq
-    doc.agentNoteN = Math.max(doc.agentNoteN, ...doc.notes.notes.map((n) => n.n))
+  private markSeen(doc: Doc, reader: Reader) {
+    doc.seen[reader] = { seq: doc.seq, note: Math.max(doc.seen[reader].note, ...doc.notes.notes.map((n) => n.n)) }
   }
 
   dispose() {

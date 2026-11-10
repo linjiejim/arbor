@@ -1,6 +1,5 @@
 import * as React from "react"
 import { Boxes, CircleAlert, MousePointerClick, Sparkles, X } from "lucide-react"
-import { Tour } from "@/components/hint"
 import { Button, IconButton } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { notify } from "@/components/ui/toast"
@@ -13,7 +12,7 @@ import { DESKTOP_WORDS, WordsContext } from "@/studio/ui/host-words"
 import { StudioViewport } from "@/studio/ui/studio-viewport"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
 import { useReselect } from "@/studio/use-reselect"
-import { arbor } from "./bridge"
+import { turnery } from "./bridge"
 import type { DocState, PartNote, PickRequest, ShowRequest } from "./core/protocol"
 import { asNote, useDesktopNotes, useDesktopStudio, useEngine } from "./use-desktop"
 import { AgentSetupDialog } from "./ui/agent-setup"
@@ -51,22 +50,22 @@ export function DesktopApp() {
   // The agent's `look`: render the views it asked for, from the mesh the engine sent.
   React.useEffect(
     () =>
-      arbor.onLook(async (req) =>
+      turnery.onLook(async (req) =>
         req.shots ? renderShots(req.display, req.shots, { highlight: req.highlight, pins: req.pins, section: req.section, hide: req.hide, size: req.size }) : renderViews(req.display, req.views, req.highlight, { pins: req.pins }),
       ),
     [],
   )
   // What 检查更新… found.
-  React.useEffect(() => arbor.onNotice((n) => void (n.tone === "error" ? notify.error(n.text) : notify[n.tone](n.text))), [])
+  React.useEffect(() => turnery.onNotice((n) => void (n.tone === "error" ? notify.error(n.text) : notify[n.tone](n.text))), [])
 
   // Menu items and shortcuts: ⌘Z undoes typing in a field, otherwise the last change to the part.
   const path = doc?.path
   React.useEffect(
     () =>
-      arbor.onMenu((action) => {
+      turnery.onMenu((action) => {
         if (action === "agent-setup") return setSetupOpen(true)
         if (editing()) return void document.execCommand(action)
-        if (path) void arbor.call(action, {}, path).then((r) => !r.ok && notify(r.text.replace(/^✗ /, "")))
+        if (path) void turnery.call(action, {}, path).then((r) => !r.ok && notify(r.text.replace(/^✗ /, "")))
       }),
     [path],
   )
@@ -128,7 +127,7 @@ export function DesktopApp() {
   const loading = snapshot?.loading ?? (doc && !doc.error && snapshot?.kernel.phase !== "error" && (!studio.display || studio.display.provisional || presented !== studio.display) ? { path: doc.path, name: doc.name, startedAt: 0, progress: { stage: "mesh" as const, completed: 0, total: 1 } } : null)
   return (
     <WordsContext.Provider value={DESKTOP_WORDS}>
-    <Tour page="desktop" ready={Boolean(doc)}>
+    <>
     <div className="flex h-dvh flex-col bg-background">
       <TitleBar snapshot={snapshot} doc={doc} pick={pick} onSetup={() => setSetupOpen(true)} sheet={sheet && Boolean(doc)} onSheet={setSheet} />
       <div className="flex min-h-0 flex-1">
@@ -240,7 +239,7 @@ export function DesktopApp() {
         }}
       />
     </div>
-    </Tour>
+    </>
     </WordsContext.Provider>
   )
 }
@@ -267,7 +266,7 @@ function ContextBanner({ doc }: { doc: DocState }) {
       icon={<Boxes />}
       keep
       action={
-        <Button size="sm" variant="secondary" onClick={() => void arbor.call("open_part", { path: doc.context!.assembly })}>
+        <Button size="sm" variant="secondary" onClick={() => void turnery.call("open_part", { path: doc.context!.assembly })}>
           回到装配
         </Button>
       }
@@ -288,11 +287,11 @@ function PickBanner({ request, elsewhere }: { request: PickRequest; elsewhere: b
       action={
         <>
           {elsewhere && (
-            <Button size="sm" variant="secondary" onClick={() => void arbor.call("open_part", { path: request.path })}>
+            <Button size="sm" variant="secondary" onClick={() => void turnery.call("open_part", { path: request.path })}>
               切到 {part}
             </Button>
           )}
-          <Button size="sm" variant="ghost" onClick={() => void arbor.answerPick(request.id, null)}>
+          <Button size="sm" variant="ghost" onClick={() => void turnery.answerPick(request.id, null)}>
             不点了
           </Button>
         </>

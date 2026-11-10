@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import { componentName, type Feature } from "@/studio/dsl"
 import type { PartsView } from "@/studio/scene"
 import type { Studio } from "@/studio/use-studio"
-import { arbor } from "../bridge"
+import { turnery } from "../bridge"
 import type { DocState } from "../core/protocol"
 import { besides } from "../core/sources"
 
@@ -58,8 +58,8 @@ export function ComponentActions({ f, doc, studio, view, onView }: { f: Feature;
             onClick={async () => {
               // A sub-assembly opens as itself; a part opens inside this assembly.
               const file = f.file!
-              const nested = /\.arbor-asm\.json$/i.test(file)
-              const r = await arbor.call("open_part", nested ? { path: besides(doc.path, file) } : { path: besides(doc.path, file), context: doc.path })
+              const nested = /\.(turnery|arbor)-asm\.json$/i.test(file)
+              const r = await turnery.call("open_part", nested ? { path: besides(doc.path, file) } : { path: besides(doc.path, file), context: doc.path })
               if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
             }}
           >
@@ -75,12 +75,12 @@ export function ComponentActions({ f, doc, studio, view, onView }: { f: Feature;
 export function AddPartMenu({ doc }: { doc: DocState }) {
   const [naming, setNaming] = React.useState(false)
   const add = async (input: { name?: string; file?: string }) => {
-    const r = await arbor.call("add_part", input, doc.path)
+    const r = await turnery.call("add_part", input, doc.path)
     if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
     return r.ok
   }
   const pick = async (kind: "part" | "step") => {
-    const file = await arbor.pickFile(kind)
+    const file = await turnery.pickFile(kind)
     if (file) await add({ file })
   }
   return (

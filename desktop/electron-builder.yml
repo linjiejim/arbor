@@ -1,7 +1,7 @@
-# Arbor.app only; scripts/release.mjs signs it ad hoc and makes the dmg, the update zip and
-# arbor-update.json. No Apple certificate: macOS asks once on first open (see desktop/README.md).
-appId: com.linjiejim.arbor
-productName: Arbor
+# Turnery.app only; scripts/release.mjs signs it ad hoc and makes the dmg, the update zip and
+# turnery-update.json. No Apple certificate: macOS asks once on first open (see desktop/README.md).
+appId: com.linjiejim.turnery
+productName: Turnery
 copyright: Copyright © 2026 Jim Lin
 directories:
   output: release
@@ -14,8 +14,8 @@ files:
 asar: false
 electronLanguages: [zh_CN, zh_TW, en]
 extraResources:
-  - from: resources/arbor-cli.sh
-    to: bin/arbor
+  - from: resources/turnery-cli.sh
+    to: bin/turnery
 mac:
   icon: resources/icon.icns
   category: public.app-category.developer-tools

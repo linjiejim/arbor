@@ -3,21 +3,21 @@ import { Copy } from "lucide-react"
 import { IconButton } from "@/components/ui/button"
 import { Dialog, DialogBody, DialogContent, DialogHeader } from "@/components/ui/dialog"
 import { notify } from "@/components/ui/toast"
-import { arbor } from "../bridge"
+import { turnery } from "../bridge"
 import type { AgentSetup } from "../core/protocol"
 
-export const EXAMPLE_ASK = "用 arbor 建一个 80×50×30 的盒子，壁厚 2，外圆角 R4，四角 M3 螺纹孔，建完核对尺寸再看一眼。"
+export const EXAMPLE_ASK = "用 turnery 建一个 80×50×30 的盒子，壁厚 2，外圆角 R4，四角 M3 螺纹孔，建完核对尺寸再看一眼。"
 
-/** How to plug a local coding agent into Arbor: one command per agent. */
+/** How to plug a local coding agent into Turnery: one command per agent. */
 export function AgentSetupDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const [setup, setSetup] = React.useState<AgentSetup | null>(null)
   React.useEffect(() => {
-    if (open && !setup) void arbor.agentSetup().then(setSetup)
+    if (open && !setup) void turnery.agentSetup().then(setSetup)
   }, [open, setup])
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="lg">
-        <DialogHeader title="接入 coding agent" description="Arbor 通过 MCP 把建模和查看的工具交给本机的 agent；agent 每改一步，这个窗口都实时显示。" />
+        <DialogHeader title="接入 coding agent" description="Turnery 通过 MCP 把建模和查看的工具交给本机的 agent；agent 每改一步，这个窗口都实时显示。" />
         <DialogBody className="space-y-5 pb-5">
           {setup ? (
             <>
@@ -34,7 +34,7 @@ export function AgentSetupDialog({ open, onOpenChange }: { open: boolean; onOpen
                 <Command text={EXAMPLE_ASK} />
               </Section>
               <p className="text-small text-muted-foreground">
-                同一个程序也是命令行工具：<code className="font-mono text-small">{setup.bin} help</code>。窗口没开时 agent 也能建模、核对、导出，用到看图或点选时会自动打开 Arbor。
+                同一个程序也是命令行工具：<code className="font-mono text-small">{setup.bin} help</code>。窗口没开时 agent 也能建模、核对、导出，用到看图或点选时会自动打开 Turnery。
               </p>
             </>
           ) : (
@@ -64,7 +64,7 @@ export function Command({ text }: { text: string }) {
         label="复制"
         size="icon-sm"
         className="absolute top-1 right-1"
-        onClick={() => void arbor.copy(text).then(() => notify.success("已复制"))}
+        onClick={() => void turnery.copy(text).then(() => notify.success("已复制"))}
       >
         <Copy />
       </IconButton>

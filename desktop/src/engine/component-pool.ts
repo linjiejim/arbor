@@ -136,7 +136,7 @@ export class ComponentPool {
         try {
           const started = performance.now()
           const compiled = await this.runner(runnerIndex).call(sources[i])
-          if (process.env.ARBOR_PROFILE) process.stderr.write(`COMPONENT ${sources[i].file} ${Math.round(performance.now() - started)} ms\n`)
+          if (process.env.TURNERY_PROFILE) process.stderr.write(`COMPONENT ${sources[i].file} ${Math.round(performance.now() - started)} ms\n`)
           output[i] = { ...sources[i], compiled }
           this.memory.set(key, compiled)
           if (!compiled.failed) await cache?.put(key, compiled)

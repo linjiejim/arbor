@@ -1,6 +1,6 @@
 # 第三方组件与许可
 
-Arbor 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和文档用 CC BY 4.0（[`LICENSE-content`](LICENSE-content)）。下面是用到的第三方组件。许可证一栏取自 `app/node_modules` 里各包的 `package.json` 和 LICENSE 文件，以及 Python 环境里各包的 PyPI 元数据；版本是 `app/package-lock.json` 和 `models/requirements.txt` 锁定的版本。
+Turnery 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和文档用 CC BY 4.0（[`LICENSE-content`](LICENSE-content)）。下面是用到的第三方组件。许可证一栏取自 `app/node_modules` 里各包的 `package.json` 和 LICENSE 文件，以及 Python 环境里各包的 PyPI 元数据；版本是 `app/package-lock.json` 和 `models/requirements.txt` 锁定的版本。
 
 按是否随网站发布分成三类：
 
@@ -77,17 +77,17 @@ Arbor 自己的代码用 MIT（[`LICENSE`](LICENSE)），课程文字和文档�
 | `@openrouter/ai-sdk-provider` | 3.1.0 | Apache-2.0 | <https://github.com/OpenRouterTeam/ai-sdk-provider> |
 | AI SDK（`ai`）、Zod | 同上 | Apache-2.0 / MIT | 同上 |
 
-### 桌面版 Arbor（`desktop/`，随安装包分发）
+### 桌面版 Turnery（`desktop/`，随安装包分发）
 
-Arbor 的窗口和网站共用上面「随网站发布」的前端组件（React、three.js、Radix、Lucide、字体……），另外带上：
+Turnery 的窗口和网站共用上面「随网站发布」的前端组件（React、three.js、Radix、Lucide、字体……），另外带上：
 
 | 组件 | 版本 | 许可证 | 用途 | 链接 |
 | --- | --- | --- | --- | --- |
 | Electron（含 Chromium、Node.js） | 45.2.3 | MIT；Chromium 各组件的许可见安装包里的 `LICENSES.chromium.html` | 桌面应用外壳 | <https://github.com/electron/electron> |
-| `@modelcontextprotocol/sdk` | 1.32.2 | MIT | `arbor mcp` 的 MCP 服务 | <https://github.com/modelcontextprotocol/typescript-sdk> |
+| `@modelcontextprotocol/sdk` | 1.32.2 | MIT | `turnery mcp` 的 MCP 服务 | <https://github.com/modelcontextprotocol/typescript-sdk> |
 | replicad-opencascadejs | 1.1.0 | LGPL-2.1-only | 几何内核，见上一节 | 同上 |
 
-- **OpenCascade 的 wasm 怎么分发**：和网站一样是单独的文件，在 `Arbor.app/Contents/Resources/app/dist/vendor/opencascade/`（`replicad_single.js` + `replicad_single.wasm`，旁边附 `LICENSE`）。安装包不打 asar，替换这两个文件就能换成自己编译的版本。
+- **OpenCascade 的 wasm 怎么分发**：和网站一样是单独的文件，在 `Turnery.app/Contents/Resources/app/dist/vendor/opencascade/`（`replicad_single.js` + `replicad_single.wasm`，旁边附 `LICENSE`）。安装包不打 asar，替换这两个文件就能换成自己编译的版本。
 - 只在构建时用、不进安装包：electron-builder（MIT）、esbuild（MIT）。
 
 ### jim-uiux 组件

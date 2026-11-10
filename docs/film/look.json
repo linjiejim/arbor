@@ -1,0 +1,11 @@
+{
+  "name": "turnery",
+  "from": "Turnery's own theme (app/src/styles/turnery-theme.css)",
+  "mood": "the product's light theme: off-white ground, near-black type, one engineering blue, red only for a failed check",
+  "color": { "ground": "#f6f6f4", "deep": "#e9e9e6", "card": "#ffffff", "line": "#e1e1dd", "mute": "#84847e", "ink": "#1a1a1a", "accent": "#2759e0", "accent2": "#cc4136" },
+  "type": {
+    "display": { "face": "Inter", "weight": 600, "tracking": -0.03 },
+    "text": { "face": "Inter", "weight": 500, "tracking": -0.015 },
+    "mono": { "face": "Geist Mono", "weight": 400, "tracking": 0 }
+  }
+}

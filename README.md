@@ -1,123 +1,187 @@
-<p><img src="desktop/resources/icon-64.png" width="64" alt="Arbor"></p>
+<p><img src="desktop/resources/icon-64.png" width="64" alt="Turnery"></p>
 
-# Arbor · 工业建模互动课
+# Turnery
 
-看懂每一个特征是怎么长出来的。
+**Parametric CAD that your coding agent builds and you can read, check and change.**
 
-线上：<https://arbor.linjiejim.com>（部署见 `docs/deploy.md`）
+[简体中文](README.zh-CN.md) · [Download for macOS](https://github.com/linjiejim/turnery/releases/latest) · [Website and course](https://arbor.linjiejim.com) · [Example](examples/sensor-enclosure)
 
-Arbor 有两部分，用的是同一个建模内核、同一种特征树文件：
+![Every number in the request lands on the part, then in a check the kernel measures](docs/media/turnery-intro-en.gif)
 
-- **网站**：中文、讲概念、不绑定软件的 3D 工业建模课。每个建模概念配一个能亲手操作的 3D 场景；真实零件按特征树一步步重建，每个面都标明是哪一步生成或修改的；工作台里有 AI 助教带着做练习。适合学。
-- **桌面版**（macOS）：让你电脑上的 coding agent（Claude Code、Codex……）通过 MCP 建参数化零件，以项目为单位做多零件装配。适合做真东西。
+<sub>A 27-second animation of the idea, not a screen recording. With sound: [`turnery-intro-en.mp4`](docs/media/turnery-intro-en.mp4).</sub>
 
-名字：arbor 既是「树」（特征树），也是机加工里夹着刀具转的「心轴」。标志是一个拉出厚度的小写 a：草图拉伸成实体，参数化建模的第一步。
+Turnery is a desktop app with an MCP server. Claude Code, Codex or any other MCP agent on your machine calls 40 modeling tools; an OpenCascade kernel computes the geometry; you watch every step in a 3D window, drag parameters, and leave notes on faces for the agent to act on.
 
-## 有什么
+What the agent hands you is a **feature tree**: named parameters, ordered features that each say why they exist, and a list of your requirements that the kernel re-measures on every rebuild. It is one JSON file. It diffs, it goes in git, and you can open it a month later and change the wall thickness.
 
-| 板块 | 内容 |
+## Why a feature tree
+
+Ask a model for a 3D part today and you usually get one of two things.
+
+| You get | What happens when you say "make the walls 3 mm" |
 | --- | --- |
-| 互动课 `/lesson/:id` | 21 节，覆盖坐标与视图、基准面、三视图、剖视、尺寸标注、公差与配合、GD&T、草图约束、旋转、阵列、圆角、扫掠放样、特征树、装配自由度、3D 打印、钣金、注塑拔模、曲率连续和斑马纹。一步一个概念：视角自动转到该看的地方，任务在 3D 里完成（点平面、拖角点、拉箭头、拖剖切面），关键处先猜再看，最后是带解释的小测。 |
-| 图文卡 `/card/:code` | 17 张，覆盖 T0–T2 里不需要 3D 的课：文件格式、单位与材料、孔与螺纹、重建报错、配置、外部参考等。几段短文、一张示意图或对照表、2–3 道小测，每张卡列出参考来源。 |
-| 案例拆解 `/teardown/:id` | 7 个零件（马克杯、积木砖、两种做法的小盒子、键帽、直齿轮、温湿度计底壳）和 2 个装配（桌面温湿度计、带铰链盒子）。零件按特征树回滚、播放；新生成的面蓝色、被修改的面橙色；每一步的 build123d 代码；参数沙盒里每组参数都在内核里算过，失败的组合不隐藏，并解释为什么失败。装配可以爆炸、按装配顺序播放、剖切，保留自由度的零件可以拖动。 |
-| 学习路径 `/learn` | 6 条轨、96 节课的大纲，按人群给入口，已有互动课、拆解或图文卡的课可以直接进入；到期复习（1 天 / 1 周 / 3 周）。 |
-| 工具图鉴 `/atlas` | 18 个建模命令：悬停回放生成过程，抽屉里调参数，8 个软件的官方中文叫法。 |
-| 术语表 `/glossary` | 命令对照表和 28 张概念卡。 |
-| 工作台 `/studio` | 用中文描述零件，AI 助教（默认 DeepSeek `deepseek-flash`）调用 13 种建模特征和查询工具，一步步建出参数化特征树，并讲清每一步的设计意图。几何在浏览器里由 OpenCascade（replicad）算出：每一步可以回滚，面按「新生成 / 被修改」着色并能看出来自哪个特征，参数直接改，导出 STEP、STL 和等价的 build123d 代码。可以附参考图，也有「边做边学」模式（关键步骤先让你预测）。不用 AI 也能从现成的特征树开始。默认「边做边学」，回复里的术语可以点开看解释。界面上的说明收在灰色 ⓘ 里，第一次进来按顺序走一遍导览。 |
-| 练习 `/studio?practice=<id>` | 8 道，挂在对应课程的最后一步：课程讲完一个概念，到工作台上自己做一个零件。要求就是需求核对表，随着模型变化实时打勾，全部做到记进学习进度。 |
-| 桌面版（`desktop/`，介绍页 `/desktop`） | 让本机的 coding agent（Claude Code、Codex……）通过 MCP 或命令行建模：40 个建模、观测、核对和协作工具，同一套特征树和内核；一个文件夹就是一个项目，几个零件文件可以共用参数、组成装配一起看和核对，用贴合摆放零件、放标准件（螺钉、螺母、垫圈、热熔螺母）、做真实螺纹，窗口里能新建项目、往装配里加零件、出工程图；能导入开发板、元件的 STEP 模型，围着它建外壳并核对间隙和干涉。你在窗口里实时看每一步、拖参数、改特征，在面或边上留备注给 agent；agent 也能请你在模型上点一下。零件是可以进 git 的 `.arbor.json` 文件。macOS 版从 [Releases](https://github.com/linjiejim/arbor/releases/latest) 下载，装好后会自动更新。见 [`desktop/README.md`](desktop/README.md)。 |
+| A mesh (text-to-3D) | Nothing to edit. Generate again and hope the rest stays the same. |
+| A script (OpenSCAD, CadQuery, KCL…) | Editable, if you read the code and it still runs. Nothing tells you the holes are still where you asked. |
+| **An Turnery feature tree** | Change `t` from 2 to 3. Everything that referenced it follows, and the check "wall 2 mm" turns red because that is not what you asked for. |
 
-当前进度、验证结果、已知局限和开源前清单见 [`docs/report.md`](docs/report.md)。
+The design choices behind that:
 
-## 目录
+- **Tools with schemas, not generated code.** The agent can only change the tree through validated tool calls. A failed feature comes back with the reason and a suggested fix, so the agent repairs that step and does not stack a workaround on top.
+- **Selectors by meaning.** Faces and edges are picked by description (`{ normal: "+Z", extreme: "+Z" }`, "the edges of the top face, outer loop only") and resolved again on every rebuild. There are no face IDs to go stale when an earlier feature changes.
+- **The agent can look and measure.** `look` renders views, sections and close-ups for it. `measure` returns distances from the kernel. It does not have to trust its own arithmetic, and neither do you.
+- **Requirements are stored and re-checked.** `check` turns "80×50×28, 2 mm walls, four M3 holes" into items the kernel measures after every change: size, wall thickness, hole count and diameter, clearances to an imported board, gaps between parts.
+- **Two-way with you.** Click a face, write "USB-C opening here, 6 mm above the floor", and the agent's next call sees the note with the face and coordinates. The agent can also ask you to click the face it is unsure about.
+- **Your agent, your subscription.** Turnery calls no model and needs no API key.
+
+## What a session looks like
+
+The request, in one message:
+
+> Build a sensor enclosure with turnery: 80×50×28, 2 mm walls, R6 corners. Split it into a base and a lid, held by four M3 countersunk screws into heat-set inserts. USB-C opening in the front wall, five vent slots and "TURNERY" engraved on the lid. Check the dimensions and take a look when you are done.
+
+Fifteen tool calls later:
+
+![The enclosure, one feature at a time](docs/media/feature-tree-steps.png)
+
+<p>
+<img src="docs/media/enclosure.png" width="46%" alt="The finished enclosure">
+<img src="docs/media/enclosure-section.png" width="46%" alt="Section through the screw posts">
+</p>
 
 ```
-app/                 网站：React 19 + Vite 8 + TypeScript + Tailwind v4 + three.js r187
-  src/three/         轻量 CAD 视口引擎：按需渲染、主题配色、视图方块、剖切、烘焙模型加载
-  src/content/       课程（lessons/）、命令与术语、课程大纲
-  src/studio/        AI 建模工作台：特征树格式、浏览器内核（Worker）、工具、提示词
-  src/desktop/       桌面版 Arbor 的引擎核心（core/）和窗口
-  server/            工作台的对话 API（Hono + AI SDK，只转发对话）
-  e2e/               Playwright 冒烟测试
-  public/models/     烘焙好的模型（manifest.json + 每组参数一个 GLB）
-desktop/             桌面版 Arbor：Electron 主进程、MCP 服务和 arbor 命令行、打包
-models/              build123d 模型源码和烘焙器 arborbake
-docs/
-  report.md          完成报告：做了什么、怎么验证、局限、下一步
-  research/          调研报告和 6 份原始笔记
-  proposal.md        原型方案
-  DESIGN.md          设计规范（基于 jim-uiux）
-  dev/               写课程、写模型的说明
-  deploy.md          部署
-spikes/              浏览器内 OCCT 内核（replicad）实测
+✓ size     80 × 50 × 28                  measured 80 × 50 × 28
+✓ wall     2 mm                          measured 2 mm
+✓ inserts  4 × M3 heat-set insert        measured 4 × ⌀4
+✓ screws   4 × M3 countersunk clearance  measured 4 × ⌀3.4
+✓ seat     lid sits on the base, no gap  measured contact (0 mm)
 ```
 
-## 开发
+What you see in the window when the wall is changed to 3 mm: the part follows, and the request "wall 2" is flagged (the interface is in Chinese for now).
+
+![The Turnery window: the check list flags the wall that no longer matches the request](docs/media/window-check.png)
+
+When words are not enough, click the face and write the note there. The agent receives the face, where it came from and your text.
+
+![Leaving a note on a face for the agent](docs/media/window-note.png)
+
+The whole result is [`examples/sensor-enclosure/enclosure.turnery.json`](examples/sensor-enclosure/enclosure.turnery.json): 11 parameters, 17 features, 5 checks. One feature from it:
+
+```json
+{
+  "id": "posts",
+  "name": "螺丝柱",
+  "intent": "柱子从内底一直长到内顶:分型后下半段装热熔螺母,上半段让螺钉穿过。改总高时柱子跟着变",
+  "op": "extrude",
+  "sketch": "sk_posts",
+  "until": "next"
+}
+```
+
+The `intent` reads: "the posts run from the floor to the ceiling; after the split the lower half takes the insert and the screw passes through the upper half. They follow the total height." Open that file, set `H` to 40, and the posts grow to 36 mm on their own, because the feature says "until the next face" and not "24 mm".
+
+## Install
+
+1. Download `Turnery-<version>-arm64.dmg` (Apple silicon) or `-x64.dmg` (Intel) from [Releases](https://github.com/linjiejim/turnery/releases/latest) and drag Turnery to Applications.
+2. Turnery is not signed with an Apple certificate yet. On first launch macOS blocks it: open System Settings → Privacy & Security and choose "Open Anyway", or run
+
+   ```bash
+   xattr -dr com.apple.quarantine /Applications/Turnery.app
+   ```
+
+3. Connect your agent. In Claude Code, install the plugin (the MCP server plus a skill that tells Claude when and how to use it):
+
+   ```
+   /plugin marketplace add linjiejim/turnery
+   /plugin install turnery@turnery
+   ```
+
+   Or add the server by hand; the "接入 Agent" button in the window shows the exact command for your machine:
+
+   ```bash
+   claude mcp add --scope user turnery -- /Applications/Turnery.app/Contents/Resources/bin/turnery mcp
+   ```
+
+   ```bash
+   codex mcp add turnery -- /Applications/Turnery.app/Contents/Resources/bin/turnery mcp
+   ```
+
+   Any other MCP client: `command` is that `turnery` path, `args` is `["mcp"]`.
+
+4. Tell the agent what to build. Start with "use turnery to…".
+
+No agent yet? The first time Turnery starts it opens the example above. Change `t` in the parameter panel and watch the check list.
+
+The app updates itself from GitHub Releases; update packages are verified against a key built into the app.
+
+## How it fits together
+
+```
+Claude Code / Codex ──MCP (stdio)──► turnery mcp ──HTTP 127.0.0.1──► Turnery app: engine ◄──IPC──► window
+                     turnery CLI ───────────────────┘                  │ OpenCascade (WASM) in a worker thread
+                                                                      ▼
+                                              your project folder: part.turnery.json, part.notes.json
+```
+
+- A folder is a project. Parts are `*.turnery.json`, assemblies are `*.turnery-asm.json`, shared parameters are `*.params.json`.
+- Edits can come from the agent, from you in the window, or from a text editor or git. All of them land in one history with undo. When you change something, the agent's next result starts with what you changed, so it does not put your edit back.
+- The same engine runs without a window: `turnery check part.turnery.json --no-app` works in CI.
+
+## The tools
+
+| Group | Tools |
+| --- | --- |
+| Parts and assemblies | `open_project` `open_part` `list_parts` `get_state` `share_params` `guide` |
+| Modeling | `set_params` `sketch` `extrude` `revolve` `sweep` `loft` `fillet` `chamfer` `shell` `draft` `hole` `thread` `rib` `split` `mirror` `linear_pattern` `circular_pattern` |
+| Bought-in and standard parts | `import` (STEP files as reference bodies) · `component` (parts, sub-assemblies, STEP files, ISO screws, nuts, washers and heat-set inserts, placed with mates) |
+| Editing the tree | `edit_feature` `delete_feature` `move_feature` `set_tree` `undo` `redo` |
+| Seeing | `look` (views, sections, close-ups, with a scale) · `inspect` · `measure` |
+| Checking and delivering | `check` · `export` (STEP, STL, build123d Python, JSON, bill of materials) |
+| Working with you | `get_notes` `resolve_note` `request_pick` `show` |
+
+Full reference, the CLI and the internals: [`desktop/README.md`](desktop/README.md) (Chinese).
+
+## Where it stands
+
+Turnery is at 0.5 and moving fast. What works today: single parts and multi-part assemblies with shared parameters, standard fasteners, real thread geometry, STEP import for building around a board, engineering drawings, and the check list described above.
+
+What does not, yet:
+
+- **macOS only**, and unsigned. Windows and Linux builds are planned.
+- **The interface is in Chinese**: window, tool descriptions, kernel messages and the agent guide. Tool names and JSON schemas are English. An English interface is the first thing on the roadmap.
+- **No sketch constraint solver in the modeling tools.** Sketches are written with parameters and expressions.
+- **No free-form "code feature"** for shapes the tree cannot express.
+- **Mates place parts once, in order.** They are not a constraint system and there is no motion.
+- **An imported STEP file is one body.** Clearance and interference are checked against the whole of it.
+
+## Turnery and its neighbours
+
+Giving a coding agent CAD skills is a busy field, and several projects do parts of it well. Where Turnery sits, as of November 2026:
+
+| If you want | Look at | How Turnery differs |
+| --- | --- | --- |
+| The agent to write CAD code you keep as source | [text-to-cad](https://github.com/earthtojake/text-to-cad), [agentcad](https://github.com/jdilla1277/agentcad), [torno](https://github.com/luisg0nc/torno) (build123d), [CADAM](https://github.com/Adam-CAD/CADAM) (OpenSCAD) | The model is a feature tree you can read and edit without reading code. Turnery exports build123d when you want the script. |
+| A full open-source CAD application with an agent interface | [SolidCraft](https://github.com/tangency-labs/solidcraft), [Chili3D](https://github.com/xiangechen/chili3d), [Zoo Design Studio](https://github.com/KittyCAD/modeling-app) | Turnery is not a general CAD program. It is narrower: the agent builds, the kernel checks, you steer. Faces are selected by meaning, and your requirements stay in the file as checks. |
+| An agent inside the CAD package you already use | [freecad-mcp](https://github.com/neka-nat/freecad-mcp), Autodesk's Fusion MCP, Onshape's FeatureScript MCP | No CAD package needed. The file is plain JSON in your repository. |
+
+What we have not found elsewhere in one tool: semantic selectors, a persistent requirement check list, notes pinned to faces, and the agent asking you to click a face when your words are ambiguous. If another project does this and we missed it, open an issue and we will correct this table.
+
+## Also in this repository: the course
+
+[arbor.linjiejim.com](https://arbor.linjiejim.com) is a Chinese-language, software-neutral course on mechanical CAD built on the same kernel and file format: 21 interactive lessons, 17 illustrated cards, 9 teardowns of real parts that replay feature by feature, a command atlas across 8 CAD packages, and a browser workbench with an AI tutor. The desktop app is for making things; the site is for learning why they are made that way.
+
+## Develop
 
 ```bash
-cd app
-npm install --registry=https://registry.npmmirror.com   # 本机代理慢时 npmjs 会卡住
-npm run dev        # http://localhost:5287
-STUDIO_MOCK=1 npm run dev:api   # 工作台的对话 API（脚本模型，不需要 key；真模型见 docs/dev/studio.md）
-npm run check      # 类型检查 + lint + 设计守卫 + 单元测试
-npm run build
-npm run e2e        # 冒烟测试：构建后在 http://127.0.0.1:4391 起 vite preview，用 Playwright 跑
+cd app && npm install
+npm run dev          # the website on http://localhost:5287
+npm run check        # types, lint, design guards, unit tests
+
+cd ../desktop && npm install
+npm run build && npm start     # the desktop app from source
 ```
 
-冒烟测试（`app/e2e/`）走一遍每节课（逐步点「下一步」、交小测、完成本课）和每个拆解（逐步回滚、切参数、装配爆炸和播放），再看首页、学习路径、图鉴和术语表。课程从 `src/content/lessons/index.ts`、模型从 `public/models/index.json` 自动发现，新增内容不用改测试。任何页面报错、`console.error` 或画布空白都算失败，失败截图按路由命名，在 `test-results/` 和 `npx playwright show-report` 里看。
+See [`CONTRIBUTING.md`](CONTRIBUTING.md), and [`README.zh-CN.md`](README.zh-CN.md) for the full developer notes: end-to-end tests, baking teardown models, the layout of the repository.
 
-- 第一次跑先装浏览器：`npx playwright install chromium`。本机下载慢时加 `PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright`；还是装不上，用本机的 Google Chrome：`E2E_CHANNEL=chrome npm run e2e`。
-- 只跑一部分：`npx playwright test -g revolve`；看着跑：`npm run e2e:ui`。端口被占用时设 `E2E_PORT`。
-- WebGL 用 SwiftShader 软件渲染，不需要显卡。
-- CI（`.github/workflows/ci.yml`）在每个 PR 和非 main 分支的推送上跑 check、build 和 e2e；部署（`deploy.yml`）也先跑 e2e，不通过不发布。失败时报告作为 `playwright-report` 制品上传。
+## License
 
-改了 `models/` 才需要 Python：
-
-```bash
-python3 -m venv .venv && .venv/bin/pip install -r models/requirements.txt
-cd app && npm run bake
-```
-
-- 写一节课、一张图文卡：`docs/dev/lesson-authoring.md`
-- 写一个拆解模型：`docs/dev/models.md`
-- AI 建模工作台：`docs/dev/studio.md`
-
-## 技术取舍
-
-- **拆解的几何离线烘焙。** 实测 replicad（OpenCascade 的 WebAssembly 版）压缩后约 4.8 MB（brotli），内存会涨到约 1 GB，随机参数下约 30% 的组合会失败（`docs/research/notes/kernel_spike.md`）。所以拆解模型用 build123d 写一份，离线把每个特征、每组沙盒参数都算好，网页只下载看到的那一份 GLB。
-- **只有工作台在浏览器里跑内核。** 对话建模需要即时重算，内核放在 Web Worker 里，只在 `/studio` 加载；服务器只转发对话，不碰几何。特征树是 JSON，AI 只能通过有 schema 的工具改它，不执行模型写的代码；选面选边用语义选择器，每次重建重新解析，避开拓扑命名问题。
-- **课程里的示意几何是程序化的。** 拉伸、旋转、圆角这些演示用 three.js 直接生成，参数一拖就变；草图约束课用 FreeCAD 的求解器 planegcs（WebAssembly）。
-- **设计系统** 基于 [jim-uiux](https://design.linjiejim.com)，强调色「工程蓝」，亮暗两套。
-
-## 许可
-
-- **代码**用 MIT，见 [`LICENSE`](LICENSE)：
-  - 网站 `app/`
-  - 桌面版 `desktop/`（含图标）
-  - 模型与烘焙器 `models/`
-  - 烘焙出的 GLB
-  - `spikes/`
-- **课程文字和文档**用 [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/deed.zh-hans)，见 [`LICENSE-content`](LICENSE-content)：
-  - 课程讲解和小测
-  - 术语表和概念卡
-  - 命令说明
-  - 课程大纲
-  - 拆解讲解
-  - `docs/`，包括调研
-
-同一个文件里两种都有时（例如课程的 `.tsx`），代码按 MIT，给学习者读的文字按 CC BY 4.0。转载课程文字请注明出处 Arbor 和许可协议。
-
-## 第三方
-
-完整清单、版本和链接见 [`THIRD_PARTY.md`](THIRD_PARTY.md)。要点：
-
-- **随网站发布**：
-  - three.js、React、React Router、Radix UI、Tailwind CSS：MIT。
-  - Lucide：ISC。
-  - Inter、JetBrains Mono：OFL 1.1。
-  - @salusoft89/planegcs：LGPL-2.1。它是独立的 wasm 文件，只在约束课按需加载；源码见 <https://github.com/Salusoft89/planegcs>。
-- **只在离线烘焙时用，不随网站发布**：
-  - build123d：Apache-2.0。
-  - OCP：Apache-2.0。
-  - Open CASCADE Technology：LGPL-2.1，附 OCCT 例外条款。
-- **`app/src/components/ui/`**：来自作者的 jim-uiux 设计系统（基于 shadcn/ui，MIT）。
+Code is MIT ([`LICENSE`](LICENSE)). Course text and documentation are CC BY 4.0 ([`LICENSE-content`](LICENSE-content)). Third-party components, including OpenCascade (LGPL-2.1 with exception, shipped as a separate WASM file), are listed in [`THIRD_PARTY.md`](THIRD_PARTY.md).

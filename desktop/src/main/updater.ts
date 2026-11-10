@@ -1,7 +1,7 @@
-// Self-update from GitHub Releases. The latest release's arbor-update.json names the version and,
-// per platform, a zip of Arbor.app with its size, SHA-256 and a signature from Arbor's own key.
+// Self-update from GitHub Releases. The latest release's turnery-update.json names the version and,
+// per platform, a zip of Turnery.app with its size, SHA-256 and a signature from Turnery's own key.
 // A newer version is downloaded in the background (Chromium's network stack, so the system
-// proxy applies), checked, unpacked next to the installed app, and swapped in when Arbor quits;
+// proxy applies), checked, unpacked next to the installed app, and swapped in when Turnery quits;
 // the window offers 重启 to do that now. Checks run shortly after launch and every few hours,
 // unless 自动检查更新 is off in the app menu.
 import { app, net } from "electron"
@@ -21,9 +21,9 @@ const reason = (e: unknown) => (e instanceof Error ? e.message : String(e))
 export type Updater = ReturnType<typeof createUpdater>
 
 export function createUpdater(hooks: { status: (s: UpdateStatus) => void; notice: (n: Notice) => void }) {
-  const url = process.env.ARBOR_UPDATE_URL || UPDATE_URL
+  const url = process.env.TURNERY_UPDATE_URL || UPDATE_URL
   const bundle = process.platform === "darwin" && app.isPackaged ? bundleOf(app.getPath("exe")) : null
-  // An update unpacked and checked, waiting for Arbor to quit.
+  // An update unpacked and checked, waiting for Turnery to quit.
   let staged: { version: string; app: string } | null = null
   let status: UpdateStatus = { phase: "idle" }
   let running: Promise<void> | null = null
@@ -53,14 +53,14 @@ export function createUpdater(hooks: { status: (s: UpdateStatus) => void; notice
     if (why) throw new Error(why)
     const manifest = await fetchManifest()
     if (!manifest || compareVersions(manifest.version, app.getVersion()) <= 0) {
-      if (asked) hooks.notice({ tone: "success", text: `Arbor ${app.getVersion()} 已是最新版本` })
+      if (asked) hooks.notice({ tone: "success", text: `Turnery ${app.getVersion()} 已是最新版本` })
       return
     }
     const { version } = manifest
     const asset = assetFor(manifest, platformKey(), UPDATE_PUBLIC_KEY)
     await clearOnce()
     const dir = stagingDir(bundle!)
-    const zip = path.join(dir, `Arbor-${version}.zip`)
+    const zip = path.join(dir, `Turnery-${version}.zip`)
     set({ phase: "downloading", version, percent: 0, asked })
     let shown = -1
     try {
@@ -83,12 +83,12 @@ export function createUpdater(hooks: { status: (s: UpdateStatus) => void; notice
       throw e
     }
     set({ phase: "ready", version })
-    if (asked) hooks.notice({ tone: "success", text: `Arbor ${version} 已下载好，重启后生效` })
+    if (asked) hooks.notice({ tone: "success", text: `Turnery ${version} 已下载好，重启后生效` })
   }
 
   function check(manual: boolean) {
     if (staged) {
-      if (manual) hooks.notice({ tone: "info", text: `Arbor ${staged.version} 已下载好，重启后生效` })
+      if (manual) hooks.notice({ tone: "info", text: `Turnery ${staged.version} 已下载好，重启后生效` })
       return Promise.resolve()
     }
     if (manual) {
@@ -99,7 +99,7 @@ export function createUpdater(hooks: { status: (s: UpdateStatus) => void; notice
     running ??= update()
       .catch((e) => {
         if (asked) hooks.notice({ tone: "error", text: `检查更新失败：${reason(e)}` })
-        else console.warn("[arbor] update:", reason(e))
+        else console.warn("[turnery] update:", reason(e))
       })
       .finally(() => {
         running = null
@@ -118,7 +118,7 @@ export function createUpdater(hooks: { status: (s: UpdateStatus) => void; notice
   }
 
   return {
-    /** Only a packaged Arbor.app on macOS updates itself. */
+    /** Only a packaged Turnery.app on macOS updates itself. */
     supported: Boolean(bundle),
     status: () => status,
     check,
@@ -147,7 +147,7 @@ export function createUpdater(hooks: { status: (s: UpdateStatus) => void; notice
       try {
         swapBundles(bundle, staged.app)
       } catch (e) {
-        console.error("[arbor] update: could not install", reason(e))
+        console.error("[turnery] update: could not install", reason(e))
       }
       staged = null
       // Starts whichever version is in place now: the new one, or the old one if the swap failed.

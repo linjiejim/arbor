@@ -1,4 +1,4 @@
-// `arbor`: the command line. `arbor mcp` is the MCP server; the rest call the
+// `turnery`: the command line. `turnery mcp` is the MCP server; the rest call the
 // same engine commands from a shell or a script. Talks to the running app
 // when there is one (the person sees the change), otherwise runs in-process.
 import { spawn } from "node:child_process"
@@ -12,34 +12,34 @@ import { readAppInfo } from "../engine/home"
 import { agentSetup } from "../main/setup"
 import { runMcp } from "../mcp/server"
 
-declare const __ARBOR_VERSION__: string
+declare const __TURNERY_VERSION__: string
 
 const distDir = new URL("./", import.meta.url)
 
-const HELP = `arbor ${__ARBOR_VERSION__}：让 coding agent 在 Arbor 里建参数化零件
+const HELP = `turnery ${__TURNERY_VERSION__}：让 coding agent 在 Turnery 里建参数化零件
 
 用法：
-  arbor mcp                         MCP 服务（stdio），给 Claude Code、Codex 等 agent 用
-  arbor setup                       打印接入各个 agent 的命令
-  arbor open [零件]                 打开 Arbor App（并打开这个零件）
-  arbor status                      App 是否在运行、打开了哪些零件
-  arbor tools [--json]              列出所有命令和它们的参数
-  arbor call <命令> [参数]          调一个命令。参数写 JSON，或 key=value（值按 JSON 解析）
-  arbor check <零件> [JSON]         重建并核对需求（不需要窗口）
-  arbor export <零件> <输出文件>    导出 .step / .stl / .py / .json
-  arbor look <零件> [-o 目录]       渲染视图 PNG（需要 App，会自动启动）
+  turnery mcp                         MCP 服务（stdio），给 Claude Code、Codex 等 agent 用
+  turnery setup                       打印接入各个 agent 的命令
+  turnery open [零件]                 打开 Turnery App（并打开这个零件）
+  turnery status                      App 是否在运行、打开了哪些零件
+  turnery tools [--json]              列出所有命令和它们的参数
+  turnery call <命令> [参数]          调一个命令。参数写 JSON，或 key=value（值按 JSON 解析）
+  turnery check <零件> [JSON]         重建并核对需求（不需要窗口）
+  turnery export <零件> <输出文件>    导出 .step / .stl / .py / .json
+  turnery look <零件> [-o 目录]       渲染视图 PNG（需要 App，会自动启动）
 
 选项：
   --part <零件>   命令作用在哪个零件（缺省是 App 里当前的零件）
   --headless      App 没在运行时在后台启动它，不显示窗口（look 照常出图）；
-                  arbor mcp --headless 让 agent 这样用
+                  turnery mcp --headless 让 agent 这样用
   --no-app        不连 App，在这个进程里起一个没有窗口的引擎（适合 CI；没有 look）
   --json          输出 JSON
 
 例子：
-  arbor call open_part path=box create=true
-  arbor call set_params '{"set":{"L":80,"W":50}}'
-  arbor check box '{"size":[80,50,30]}'
+  turnery call open_part path=box create=true
+  turnery call set_params '{"set":{"L":80,"W":50}}'
+  turnery check box '{"size":[80,50,30]}'
 `
 
 type Flags = { part?: string; headless: boolean; noApp: boolean; json: boolean; out?: string }
@@ -103,8 +103,8 @@ const ctxOf = (flags: Flags) => ({ cwd: process.cwd(), part: flags.part })
 async function main() {
   const { flags, rest } = parseArgs(process.argv.slice(2))
   const [cmd, ...args] = rest
-  if (flags.headless) process.env.ARBOR_HEADLESS = "1"
-  if (flags.noApp) process.env.ARBOR_NO_APP = "1"
+  if (flags.headless) process.env.TURNERY_HEADLESS = "1"
+  if (flags.noApp) process.env.TURNERY_NO_APP = "1"
 
   switch (cmd) {
     case undefined:
@@ -115,35 +115,35 @@ async function main() {
       return
     case "--version":
     case "version":
-      process.stdout.write(`${__ARBOR_VERSION__}\n`)
+      process.stdout.write(`${__TURNERY_VERSION__}\n`)
       return
     case "mcp":
       return runMcp(distDir)
     case "setup": {
-      const s = agentSetup(process.env.ARBOR_BIN || process.argv[1])
+      const s = agentSetup(process.env.TURNERY_BIN || process.argv[1])
       process.stdout.write(`Claude Code：\n  ${s.claude}\n\nCodex：\n  ${s.codex}\n\n其他 agent（mcpServers JSON）：\n${s.json}\n`)
       return
     }
     case "open": {
       const target = args[0] ? normalizePartPath(args[0], process.cwd()) : null
       const app = readAppInfo()
-      if (!app) throw new Error("还没有启动过 Arbor App：先手动打开一次，之后 arbor open 就能找到它。")
+      if (!app) throw new Error("还没有启动过 Turnery App：先手动打开一次，之后 turnery open 就能找到它。")
       const env = { ...process.env }
       delete env.ELECTRON_RUN_AS_NODE
       // A second instance hands its arguments to the running one and quits.
       const child = spawn(app.exec, [...app.args, ...(target ? ["--open", target] : [])], { detached: true, stdio: "ignore", env })
       child.on("error", () => {})
       child.unref()
-      process.stdout.write(target ? `已在 Arbor 里打开 ${target}\n` : "已打开 Arbor\n")
+      process.stdout.write(target ? `已在 Turnery 里打开 ${target}\n` : "已打开 Turnery\n")
       return
     }
     case "status": {
       const app = await runningApp()
       if (!app) {
-        process.stdout.write("Arbor App 没在运行。\n")
+        process.stdout.write("Turnery App 没在运行。\n")
         return
       }
-      process.stdout.write(`Arbor App 正在运行（${app.version}，pid ${app.pid}）。\n`)
+      process.stdout.write(`Turnery App 正在运行（${app.version}，pid ${app.pid}）。\n`)
       await withLink(flags, false, async (link) => print(await link.call("list_parts", {}, ctxOf(flags)), flags))
       return
     }
@@ -155,28 +155,28 @@ async function main() {
     }
     case "call": {
       const [name, ...params] = args
-      if (!name) throw new Error("要写命令名：arbor call <命令> [参数]（arbor tools 看有哪些）")
-      if (!COMMANDS.some((c) => c.name === name)) throw new Error(`没有这个命令：${name}（arbor tools 看有哪些）`)
+      if (!name) throw new Error("要写命令名：turnery call <命令> [参数]（turnery tools 看有哪些）")
+      if (!COMMANDS.some((c) => c.name === name)) throw new Error(`没有这个命令：${name}（turnery tools 看有哪些）`)
       const input = parseInput(params)
       await withLink(flags, name === "look" || name === "request_pick", async (link) => print(await link.call(name, input, ctxOf(flags)), flags))
       return
     }
     case "check": {
       const [part, json] = args
-      if (!part) throw new Error("要写零件：arbor check <零件> [JSON]")
+      if (!part) throw new Error("要写零件：turnery check <零件> [JSON]")
       const input = json ? JSON.parse(json) : {}
       await withLink(flags, false, async (link) => print(await link.call("check", input, { cwd: process.cwd(), part }), flags))
       return
     }
     case "export": {
       const [part, out] = args
-      if (!part || !out) throw new Error("用法：arbor export <零件> <输出文件>")
+      if (!part || !out) throw new Error("用法：turnery export <零件> <输出文件>")
       await withLink(flags, false, async (link) => print(await link.call("export", { path: out }, { cwd: process.cwd(), part }), flags))
       return
     }
     case "look": {
       const [part] = args
-      if (!part) throw new Error("用法：arbor look <零件> [-o 目录]")
+      if (!part) throw new Error("用法：turnery look <零件> [-o 目录]")
       await withLink(flags, true, async (link) => {
         const res = await link.call("look", {}, { cwd: process.cwd(), part })
         if (res.images?.length) {
@@ -197,11 +197,11 @@ async function main() {
       return
     }
     default:
-      throw new Error(`没有这个子命令：${cmd}（arbor help 看用法）`)
+      throw new Error(`没有这个子命令：${cmd}（turnery help 看用法）`)
   }
 }
 
 main().catch((e) => {
-  process.stderr.write(`arbor: ${(e as Error).message}\n`)
+  process.stderr.write(`turnery: ${(e as Error).message}\n`)
   process.exitCode = 1
 })

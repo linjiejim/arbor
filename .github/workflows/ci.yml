@@ -44,7 +44,7 @@ jobs:
             app/test-results/
           retention-days: 14
 
-  # Arbor (desktop/): type check, the updater's tests, and a build of the bundles and the window.
+  # Turnery (desktop/): type check, the updater's tests, and a build of the bundles and the window.
   desktop:
     runs-on: ubuntu-latest
     timeout-minutes: 15

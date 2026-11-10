@@ -1,0 +1,104 @@
+/*
+ * Turnery tokens on top of jim-uiux (import after jim-theme.css).
+ *
+ * 1. The one accent: 工程蓝. In CAD an under-defined sketch is blue and a
+ *    fully defined one is black, so the accent doubles as "active / not yet
+ *    fixed" in the viewport, and `--scene-defined` is plain foreground.
+ * 2. The 3D scene palette. The viewport reads these at runtime
+ *    (src/three/tokens.ts), so light/dark switch the scene with the UI.
+ *    Axis colours follow the X red / Y green / Z blue convention every CAD
+ *    package uses; they only appear on the axis triad and view cube.
+ */
+:root {
+  --primary: #2759e0;
+  --primary-foreground: #ffffff;
+
+  --scene-bg: #f2f2f2;
+  --scene-grid: #e2e2e2;
+  --scene-grid-strong: #cdcdcd;
+  --scene-model: #cdcdcd;
+  --scene-model-dark: #4a4a4a;
+  --scene-metal: #b9b9b9;
+  --scene-edge: #2b2b2b;
+  --scene-edge-soft: #8f8f8f;
+  --scene-ghost: #9a9a9a;
+  --scene-plane: #8a8a8a;
+  --scene-hover: #78c9d8;
+  --scene-highlight: var(--primary);
+  /* Faces a feature changed but did not create (trimmed, split, offset). */
+  --scene-modified: #d9761c;
+  --scene-sketch: var(--primary);
+  --scene-defined: #1a1a1a;
+  --scene-cut: #7a7a7a;
+  /* Analysis colours (draft, overhang, fit checks): ok / needs attention / fails. */
+  --scene-good: #2f8f43;
+  --scene-warn: #d9761c;
+  --scene-bad: #cc4136;
+
+  /* code (build123d snippets) */
+  --code-keyword: #8a3ffc;
+  --code-string: #1a7f37;
+  --code-number: #b35900;
+  --code-call: #2759e0;
+
+  --axis-x: #cc4136;
+  --axis-y: #2f8f43;
+  --axis-z: #2f6fd8;
+}
+
+.dark {
+  --primary: #7ea6ff;
+  --primary-foreground: #191919;
+
+  --scene-bg: #121212;
+  --scene-grid: #222222;
+  --scene-grid-strong: #2f2f2f;
+  --scene-model: #b3b3b3;
+  --scene-model-dark: #3c3c3c;
+  --scene-metal: #9c9c9c;
+  --scene-edge: #101010;
+  --scene-edge-soft: #5c5c5c;
+  --scene-ghost: #8c8c8c;
+  --scene-plane: #9c9c9c;
+  --scene-defined: #f0f0f0;
+  --scene-modified: #f0a055;
+  --scene-cut: #5e5e5e;
+  --scene-good: #5cc06c;
+  --scene-warn: #f0a055;
+  --scene-bad: #e8675d;
+
+  --code-keyword: #c49bff;
+  --code-string: #6fd08c;
+  --code-number: #f0a055;
+  --code-call: #7ea6ff;
+
+  --axis-x: #e8675d;
+  --axis-y: #5cc06c;
+  --axis-z: #6f9cf0;
+}
+
+@theme inline {
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --color-scene: var(--scene-bg);
+  --color-axis-x: var(--axis-x);
+  --color-axis-y: var(--axis-y);
+  --color-axis-z: var(--axis-z);
+  --color-scene-modified: var(--scene-modified);
+  --color-scene-model: var(--scene-model);
+  --color-scene-model-dark: var(--scene-model-dark);
+  --color-code-keyword: var(--code-keyword);
+  --color-code-string: var(--code-string);
+  --color-code-number: var(--code-number);
+  --color-code-call: var(--code-call);
+}
+
+/* Engineering-paper backdrop for marketing sections: two grid scales in hairline colours. */
+.bg-blueprint {
+  background-image:
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px),
+    linear-gradient(color-mix(in oklab, var(--border) 55%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--border) 55%, transparent) 1px, transparent 1px);
+  background-size: 80px 80px, 80px 80px, 16px 16px, 16px 16px;
+  background-position: -1px -1px;
+}

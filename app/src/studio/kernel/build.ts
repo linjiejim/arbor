@@ -1290,7 +1290,7 @@ export class Kernel {
       }
       case "import": {
         const asset = this.assets.get(f.file)
-        if (!asset) throw new InputError(this.assetsGiven ? `没有读到「${f.file}」` : "导入 STEP 只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
+        if (!asset) throw new InputError(this.assetsGiven ? `没有读到「${f.file}」` : "导入 STEP 只能在桌面版 Turnery 里用：网页读不到你电脑上的文件")
         if (!asset.shape) throw new InputError(`「${f.file}」读不了：${asset.error ?? "不是能读的 STEP 文件"}`)
         let shape = asset.shape.clone() as AnyShape
         for (const r of f.rotate ?? []) shape = shape.rotate(n(r.angle), [0, 0, 0], AXIS[r.axis])
@@ -1767,7 +1767,7 @@ export class Kernel {
       source = `标准件 ${des.name}`
     } else {
       const got = this.components.get(f.file!)
-      if (!got) throw new InputError(this.componentsGiven ? `没有读到「${f.file}」` : "装配只能在桌面版 Arbor 里用：网页读不到你电脑上的文件")
+      if (!got) throw new InputError(this.componentsGiven ? `没有读到「${f.file}」` : "装配只能在桌面版 Turnery 里用：网页读不到你电脑上的文件")
       built = buildComponent(got.source)
       source = f.file!
     }
@@ -2717,7 +2717,7 @@ function contentHash(bytes: Uint8Array) {
 /** A STEP file as a shape, read synchronously through the wasm file system (replicad's importSTEP is async). */
 function readStep(bytes: Uint8Array): AnyShape {
   const oc = getOC()
-  const name = `/arbor-import-${Math.random().toString(36).slice(2)}.step`
+  const name = `/turnery-import-${Math.random().toString(36).slice(2)}.step`
   oc.FS.writeFile(name, bytes)
   const reader = new oc.STEPControl_Reader()
   try {

@@ -13,8 +13,8 @@ const display: DisplayData = {
 }
 
 it("moves a portable preview with its project, validates dependencies/version, and preserves typed geometry", async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), "arbor-preview-"))
-  const file = path.join(dir, "model.arbor-asm.json"), copy = path.join(dir, "relocated.arbor-asm.json")
+  const dir = await mkdtemp(path.join(tmpdir(), "turnery-preview-"))
+  const file = path.join(dir, "model.turnery-asm.json"), copy = path.join(dir, "relocated.turnery-asm.json")
   const store = new ProjectPreview()
   const source = { tree: { params: { width: 10 } }, parts: [{ file: "part.json", tree: { params: { length: 20 } } }] }
   const key = assemblyKey(source)

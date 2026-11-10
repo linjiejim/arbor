@@ -21,7 +21,7 @@ from build123d import (
     sweep,
 )
 
-from arborbake import Dim, Feature, Param, PartModel
+from turnerybake import Dim, Feature, Param, PartModel
 
 ISO = (1.0, -1.1, 0.85)
 

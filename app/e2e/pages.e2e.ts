@@ -60,10 +60,10 @@ test.describe("页面", () => {
 
   test("/desktop 桌面版介绍", async ({ page }) => {
     await page.goto("/desktop")
-    await expect(page.getByRole("heading", { name: "Arbor 桌面版" })).toBeVisible()
-    await expect(page.getByRole("link", { name: "下载 macOS 版" })).toHaveAttribute("href", "https://github.com/linjiejim/arbor/releases/latest")
-    await expect(page.getByText("claude mcp add --scope user arbor")).toBeVisible()
-    await expect(page).toHaveTitle(/桌面版 · Arbor/)
+    await expect(page.getByRole("heading", { name: "Turnery 桌面版" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "下载 macOS 版" })).toHaveAttribute("href", "https://github.com/linjiejim/turnery/releases/latest")
+    await expect(page.getByText("claude mcp add --scope user turnery")).toBeVisible()
+    await expect(page).toHaveTitle(/桌面版 · Turnery/)
   })
 
   test("旧域名交接页：带上进度去新域名，到了合并进来", async ({ page }) => {
