@@ -135,10 +135,10 @@ const own: CommandSpec[] = [
     name: "export",
     audience: "both",
     description:
-      "导出当前零件或装配：step（实体；多个零件时一个文件里多个带名字的零件）/ stl（多个零件时打包成 zip，每个零件一个文件）、py（等价的 build123d 代码，装配不能导出）、json（特征树）、bom（零件清单 Markdown：名称、文件、数量、体积、外形）。",
+      "导出当前零件或装配：step（实体；多个零件时一个文件里多个带名字的零件）/ stl（多个零件时打包成 zip，每个零件一个文件）/ 3mf（给切片软件：一个文件，每个零件一个对象，单位毫米）、py（等价的 build123d 代码，装配不能导出）、json（特征树）、bom（零件清单 Markdown：名称、文件、数量、体积、外形）。",
     input: z.object({
       path: z.string().describe("输出文件路径，相对当前目录；扩展名决定格式，除非写了 format"),
-      format: z.enum(["step", "stl", "py", "json", "bom"]).optional(),
+      format: z.enum(["step", "stl", "3mf", "py", "json", "bom"]).optional(),
     }),
   },
   {
@@ -412,13 +412,14 @@ export const AGENT_GUIDE = `# Turnery：用工具建参数化零件
 5. 需求里有具体数字时，建完调用 check：每个数值要求一项（外形 size、壁厚 thickness、孔 holes、距离 distance、节圆 pcd、角度 angle、体积 volume、坐标 position），said 写用户的原话，期望值写用户给的数字（不写参数名）。这些要求存进零件，之后每次重建都自动重算，窗口里也看得到。size 只量整个零件的外形；局部尺寸用 distance 或 thickness，让选择器正好选中要量的面。✗ 时先确认量的位置对不对；确实没做到再改模型，不要为了通过去改期望值。
    验证要看得到、量得出，不要只凭自己推算就说做好了：
    - 用 look 看外形和方向。结果里写着每张图 1 px 多少 mm：小于几个像素的细节看不清，用 focus（特征 id、{ part }、{ faces }）放大，用 section 剖开看里面（间隙、壁厚、内腔），用 hide 藏起挡住的零件。最后一步改动很小时会自动加一张特写，看它。不要说「请到窗口里放大看」就收尾。
+   - 要 3D 打印的零件，建完再加三项：overhang（不加支撑能不能打；up 写打印时朝上的方向，上盖翻过来打就写 "-Z"）、min_wall（最薄的壁，0.4 喷嘴写 0.8）、bed（贴在打印平台上的面积）。有多个零件时用 part 分开核对。悬垂不过，先想换个方向打或者把朝下的面改成 45° 的倒角，不要直接说「需要支撑」。
    - 应该贴在一起的地方（笔尖压在笔舌上、盖子落在止口上），加一条 gap（a、b 写 face / edge / feature / part，max: 0 = 必须贴上；min = 至少隔多远）。
    - 两处之间的距离、某个面或孔在哪，用 measure（也能量两个特征或两个零件之间），不要自己算。
    - 每步结果里的 ⚠（没接上、只碰到边、极小碎面、窄缝、薄壁、零件重叠）要处理或说明。窄缝多半是该贴上的没贴上（凸台差一点碰到墙）；薄壁是孔、槽离边太近。
    - of 选不到时，报错会说满足其余条件的面记在哪个特征名下：共面的面合并后记在先生成它的特征名下，去掉 of 改用 normal、extreme、near。
 6. 用户在窗口里留的备注用 get_notes 读，处理完用 resolve_note 写一句回复。说不清用户指的是哪个面时，用 request_pick 请用户在窗口里点一下；要指给用户看时用 show。
 7. 结果开头写着「自你上次调用以来……」时，说明用户或文件改过模型：以最新状态为准，不要把用户的改动改回去。
-8. 交付用 export（step / stl / py / json）。特征树文件也可以直接读写，保存后窗口会自动重建；改完文件用 get_state 看重建结果。
+8. 交付用 export（step / stl / 3mf / py / json）。特征树文件也可以直接读写，保存后窗口会自动重建；改完文件用 get_state 看重建结果。
 
 ${promptSections(["数值", "坐标与基准面", "扫掠、放样、拔模", "建模习惯", "文字", "选择器"])}
 
@@ -457,7 +458,7 @@ ${promptSections(["数值", "坐标与基准面", "扫掠、放样、拔模", "�
 
 ## 导入 STEP（开发板、元件的官方模型）
 - import 读一个 STEP 文件，路径相对零件文件所在的文件夹（可以是子文件夹，如 "vendor/board.step"）。先用 import 把它放进来（缺省是参考体），再用 inspect body 或 get_state 看它的尺寸，用 rotate、at 摆到要的位置（先旋转后平移，单位 mm）。
-- 参考体半透明显示，不并入零件、不导出，选择器也选不到它的面。围着它建外壳：用它的包围盒定尺寸，再把间隙做成参数。
+- 参考体半透明显示，不并入零件、不导出。它的面可以选：选择器里 of 写 import 的 id（或名字），再加 normal、extreme、near、kind，例如板子底面 { "of": "board", "normal": "-Z", "extreme": "-Z" }。可以用在 inspect、measure、check（distance / gap / position）和 sketch、hole 的 on.face 上：开口、支撑柱直接对着板上的面定位，板子换了位置它们跟着走，不要自己抄坐标。参考体的面不能改（圆角、倒角、抽壳选不到）；不写 of 的选择器只在零件自己的面里选。在装配里改零件时，旁边的零件同样可以用 of 写它的名字来选面。
 - 核对配合用 check：clearance（ref 写 import 的 id，min 写最小间隙）和 interference（不能相交）。改了参数或外壳以后，它们每次重建都会重算。
 - mode=cut 从实体里减去整个导入体（给元件挖让位槽，通常先把元件的外形放大一点更合适）；mode=add 并入实体。
 - 文件换了新版本，窗口会自动重建。

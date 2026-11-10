@@ -151,7 +151,7 @@ What does not, yet:
 - **No sketch constraint solver in the modeling tools.** Sketches are written with parameters and expressions.
 - **No free-form "code feature"** for shapes the tree cannot express.
 - **Mates place parts once, in order.** They are not a constraint system and there is no motion.
-- **An imported STEP file is one body.** Clearance and interference are checked against the whole of it.
+- **Faces of an imported STEP can be measured, checked and sketched on, but not clicked in the window yet.**
 
 ## Turnery and its neighbours
 

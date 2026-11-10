@@ -386,6 +386,8 @@ const Where = z
   .describe("一处：face 或 edge（选择器正好选中一个）、feature 或 part，写一个")
 const CheckBase = { id: z.string().describe("短英文 id，如 size、wall、holes；同 id 会覆盖原来那一项"), said: Said, tol: z.number().positive().optional().describe("容差，缺省长度 0.01 mm、角度 0.05°") }
 
+const PrintPart = z.string().optional().describe("只看这个零件（名字）；不写就每个零件都看")
+
 /** A requirement the learner stated, measured by the kernel on every rebuild (expected values are plain numbers). */
 export const Check = z.discriminatedUnion("kind", [
   z.object({ ...CheckBase, kind: z.literal("size"), expect: z.array(z.number()).length(3).describe("沿 X、Y、Z 的外形尺寸"), axes: z.enum(["xyz", "any"]).optional().describe("any = 不管方向，排序后比较") }),
@@ -421,10 +423,27 @@ export const Check = z.discriminatedUnion("kind", [
     min: z.number().optional().describe("至少隔这么远（相交就不过）"),
     max: z.number().optional().describe("最多隔这么远；0 = 必须贴上"),
   }),
+  // 3D printing: can it be printed as modelled, without support, with walls a nozzle can lay down?
+  z.object({
+    ...CheckBase,
+    kind: z.literal("overhang"),
+    max: z.number().optional().describe("允许的悬垂角（度），缺省 45：竖直的墙是 0，水平朝下的面是 90"),
+    up: Dir.optional().describe("打印时朝上的方向，缺省 +Z；上盖要翻过来打就写 -Z"),
+    area: z.number().optional().describe("允许需要支撑的面积 mm²，缺省 1"),
+    part: PrintPart,
+  }),
+  z.object({ ...CheckBase, kind: z.literal("min_wall"), min: z.number().positive().describe("壁最薄允许多少 mm（0.4 喷嘴一般写 0.8）"), part: PrintPart }),
+  z.object({
+    ...CheckBase,
+    kind: z.literal("bed"),
+    up: Dir.optional().describe("打印时朝上的方向，缺省 +Z"),
+    min: z.number().optional().describe("贴在打印平台上的面积至少多少 mm²；不写就只报告"),
+    part: PrintPart,
+  }),
 ])
 
 /** Check kinds only the desktop app's agents get (the site's assistant keeps its tested set). */
-export const DESKTOP_CHECKS = new Set(["position", "gap"])
+export const DESKTOP_CHECKS = new Set(["position", "gap", "overhang", "min_wall", "bed"])
 export type Check = z.infer<typeof Check>
 
 export const Tree = z.object({

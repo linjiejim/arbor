@@ -160,6 +160,38 @@ export function narrowSpot(faces: FaceLike[], isNew: boolean[], group: number[],
   return best
 }
 
+/**
+ * The thinnest wall of one solid below `limit`: two of its faces back to back across material, as
+ * narrowSpot finds them, but among all faces and for any limit. Planes and cylinders only. `capped`:
+ * more candidate pairs than `maxPairs`, so a thinner place may have gone unmeasured.
+ */
+export function thinnestWall(faces: FaceLike[], limit: number, maxPairs = 400): { d: number | null; at: V3 | null; pair: [number, number] | null; capped: boolean } {
+  const boxes = faces.map((f) => f.boundingBox.bounds as [V3, V3])
+  const near = (a: [V3, V3], b: [V3, V3]) => [0, 1, 2].every((k) => a[0][k] <= b[1][k] + limit && b[0][k] <= a[1][k] + limit)
+  const geo = faces.map(geoOf)
+  let best: { d: number; at: V3; pair: [number, number] } | null = null
+  let pairs = 0
+  for (let i = 0; i < faces.length; i++) {
+    if (!geo[i]) continue
+    for (let j = i + 1; j < faces.length; j++) {
+      if (!geo[j] || !near(boxes[i], boxes[j]) || !mayBeNarrow(geo[i], geo[j], limit)) continue
+      if (++pairs > maxPairs) return { d: best?.d ?? null, at: best?.at ?? null, pair: best?.pair ?? null, capped: true }
+      const c = closest(faces[i] as unknown as AnyShape, faces[j] as unknown as AnyShape)
+      if (!c || c.d <= TOUCH || c.d >= limit || (best && c.d >= best.d)) continue
+      const [pa, pb] = c.segment
+      const v = [pb[0] - pa[0], pb[1] - pa[1], pb[2] - pa[2]]
+      const len = Math.hypot(...v)
+      const u = v.map((x) => x / len)
+      const na = normalAt(faces[i], pa)
+      const nb = normalAt(faces[j], pb)
+      // Back to back: normals opposite, the line between them running into the material from each side.
+      if (!na || !nb || dot3(na, nb) > -0.7 || dot3(na, u) > -0.7) continue
+      best = { d: c.d, at: [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2, (pa[2] + pb[2]) / 2], pair: [i, j] }
+    }
+  }
+  return { d: best?.d ?? null, at: best?.at ?? null, pair: best?.pair ?? null, capped: false }
+}
+
 const dot3 = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 /** Outward normal of a face at a point on it (null where OpenCascade can't tell). */

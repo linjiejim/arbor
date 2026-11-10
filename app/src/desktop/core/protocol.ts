@@ -134,7 +134,7 @@ export type KernelCall =
   | { op: "measure"; targets: MeasureTarget[] }
   | { op: "dims" }
   | { op: "drawing"; iso: boolean }
-  | { op: "export"; format: "step" | "stl"; index?: number }
+  | { op: "export"; format: "step" | "stl" | "3mf"; index?: number }
 
 export type AgentSetup = {
   /** The `turnery` command on this machine. */
@@ -200,7 +200,7 @@ export type Notice = { tone: "info" | "success" | "error"; text: string }
 
 export type MenuAction = "undo" | "redo" | "agent-setup" | "focus"
 
-export type ExportFormat = "step" | "stl" | "py" | "json"
+export type ExportFormat = "step" | "stl" | "3mf" | "py" | "json"
 
 export type { BuildReport, DisplayData, PickInfo, Tree }
 
