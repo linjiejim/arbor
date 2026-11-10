@@ -4,7 +4,7 @@
 
 **Parametric CAD that your coding agent builds and you can read, check and change.**
 
-[简体中文](README.zh-CN.md) · [Download for macOS](https://github.com/linjiejim/turnery/releases/latest) · [Website and course](https://arbor.linjiejim.com) · [Example](examples/sensor-enclosure)
+[简体中文](README.zh-CN.md) · [Download for macOS](https://github.com/linjiejim/turnery/releases/latest) · [Website and course](https://turnery.linjiejim.com) · [Example](examples/sensor-enclosure)
 
 ![Every number in the request lands on the part, then in a check the kernel measures](docs/media/turnery-intro-en.gif)
 
@@ -183,7 +183,7 @@ What we have not found elsewhere in one tool: semantic selectors, a persistent r
 
 ## Also in this repository: the course
 
-[arbor.linjiejim.com](https://arbor.linjiejim.com) is a Chinese-language, software-neutral course on mechanical CAD built on the same kernel and file format: 21 interactive lessons, 17 illustrated cards, 9 teardowns of real parts that replay feature by feature, a command atlas across 8 CAD packages, and a browser workbench with an AI tutor. The desktop app is for making things; the site is for learning why they are made that way.
+[turnery.linjiejim.com](https://turnery.linjiejim.com) is a Chinese-language, software-neutral course on mechanical CAD built on the same kernel and file format: 21 interactive lessons, 17 illustrated cards, 9 teardowns of real parts that replay feature by feature, a command atlas across 8 CAD packages, and a browser workbench with an AI tutor. The desktop app is for making things; the site is for learning why they are made that way.
 
 ## Develop
 

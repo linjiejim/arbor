@@ -1,9 +1,9 @@
-# Arbor → https://arbor.linjiejim.com (the old featuretree.linjiejim.com serves or redirects to it)
-# Static site: built here, rsynced to /srv/arbor/releases/<sha7> on jim-server,
-# then /srv/arbor/current is flipped atomically. Last 5 releases kept for rollback:
-#   ssh jim-server 'ls -t /srv/arbor/releases'  → ln -sfn <release> /srv/arbor/current
-# Studio API (app/server): bundled here, uploaded to /root/arbor/api/releases/<sha7>,
-# `current` flipped, PM2 process `arbor-api` reloaded. Secrets: /root/arbor/shared/.env.
+# Turnery site → https://turnery.linjiejim.com (arbor. and featuretree.linjiejim.com hand visitors over to it)
+# Static site: built here, rsynced to /srv/turnery/releases/<sha7> on jim-server,
+# then /srv/turnery/current is flipped atomically. Last 5 releases kept for rollback:
+#   ssh jim-server 'ls -t /srv/turnery/releases'  → ln -sfn <release> /srv/turnery/current
+# Studio API (app/server): bundled here, uploaded to /root/turnery/api/releases/<sha7>,
+# `current` flipped, PM2 process `turnery-api` reloaded. Secrets: /root/turnery/shared/.env.
 # Requires environment `jim-server` with DEV_SERVER_HOST / PORT / USERNAME / SSH_KEY.
 name: Deploy
 
@@ -64,27 +64,34 @@ jobs:
           mkdir -p ~/.ssh && printf '%s\n' "$KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
           SSH="ssh -i $HOME/.ssh/deploy -p $PORT -o StrictHostKeyChecking=accept-new -o IdentitiesOnly=yes"
           SHA=${GITHUB_SHA::7}
-          REL="/srv/arbor/releases/$SHA"
-          API="/root/arbor/api/releases/$SHA"
+          REL="/srv/turnery/releases/$SHA"
+          API="/root/turnery/api/releases/$SHA"
           $SSH "$USER@$HOST" "mkdir -p $REL $API"
           # Hard-link files unchanged since the live release: only what changed crosses the wire.
-          rsync -az --delete --link-dest=/srv/arbor/current/ -e "$SSH" dist/ "$USER@$HOST:$REL/"
+          rsync -az --delete --link-dest=/srv/turnery/current/ -e "$SSH" dist/ "$USER@$HOST:$REL/"
           rsync -az -e "$SSH" dist-server/index.mjs server/ecosystem.config.cjs "$USER@$HOST:$API/"
           $SSH "$USER@$HOST" "set -e
-            ln -sfn $API /root/arbor/api/current.tmp && mv -Tf /root/arbor/api/current.tmp /root/arbor/api/current
-            mkdir -p /root/arbor/api/logs /root/arbor/api/data
+            ln -sfn $API /root/turnery/api/current.tmp && mv -Tf /root/turnery/api/current.tmp /root/turnery/api/current
+            mkdir -p /root/turnery/api/logs /root/turnery/api/data
+            # The move from /root/arbor (2026-11-10): the old process holds the same port, so it
+            # stops first and its share data comes along. It is forgotten only after the copy, so a
+            # run that broke off in between copies again. Nothing to do once it is gone.
+            # app/scripts/move-to-turnery.sh prepare puts the secrets in place; without them stop here.
+            test -f /root/turnery/shared/.env
+            source ~/.nvm/nvm.sh >/dev/null
+            if pm2 describe arbor-api >/dev/null 2>&1; then
+              pm2 stop arbor-api >/dev/null
+              cp -an /root/arbor/api/data/. /root/turnery/api/data/
+              pm2 delete arbor-api >/dev/null
+            fi
             source ~/.nvm/nvm.sh >/dev/null && pm2 startOrReload $API/ecosystem.config.cjs --update-env && pm2 save >/dev/null
-            ln -sfn $REL /srv/arbor/current.tmp && mv -Tf /srv/arbor/current.tmp /srv/arbor/current
-            cd /srv/arbor/releases && ls -1t | tail -n +6 | xargs -r rm -rf
-            cd /root/arbor/api/releases && ls -1t | tail -n +6 | xargs -r rm -rf"
+            ln -sfn $REL /srv/turnery/current.tmp && mv -Tf /srv/turnery/current.tmp /srv/turnery/current
+            cd /srv/turnery/releases && ls -1t | tail -n +6 | xargs -r rm -rf
+            cd /root/turnery/api/releases && ls -1t | tail -n +6 | xargs -r rm -rf"
 
       - name: Verify
         run: |
-          # The new host until its DNS is live, then the old one (which serves the site, or
-          # redirects to the new host once that is switched on: -L follows it).
-          SITE=https://arbor.linjiejim.com
-          curl -s -o /dev/null --max-time 10 "$SITE/" || SITE=https://featuretree.linjiejim.com
-          echo "verifying $SITE"
+          SITE=https://turnery.linjiejim.com
           for url in / /lesson/revolve /models/index.json /api/health; do
             for i in 1 2 3 4 5; do
               S=$(curl -sL -o /dev/null -w '%{http_code}' "$SITE$url")

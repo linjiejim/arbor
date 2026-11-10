@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex" />
-    <title>FeatureTree 改名为 Arbor</title>
-    <noscript><meta http-equiv="refresh" content="0; url=https://arbor.linjiejim.com/" /></noscript>
+    <title>Arbor 改名为 Turnery</title>
+    <noscript><meta http-equiv="refresh" content="0; url=https://turnery.linjiejim.com/" /></noscript>
     <style>
       body { margin: 0; height: 100vh; display: grid; place-items: center; font: 15px/1.6 system-ui, sans-serif; background: #191919; color: #ececec; }
       a { color: #7ea6ff; }
@@ -13,18 +13,18 @@
   </head>
   <body>
     <!--
-      Served by the old host (featuretree.linjiejim.com) for every page. localStorage belongs to the
-      host, so this carries the browser's progress, model and settings to arbor.linjiejim.com in the
+      Served by the old hosts (arbor.linjiejim.com, and featuretree.linjiejim.com before it) for every page. localStorage belongs to the
+      host, so this carries the browser's progress, model and settings to turnery.linjiejim.com in the
       fragment (never sent to a server), together with the link's own fragment. The new host merges it
       (safe to repeat: it is sent on every visit) and clears the address. See src/lib/moved.ts.
     -->
-    <p>FeatureTree 改名为 Arbor，正在带上你的学习进度去 <a id="to" href="https://arbor.linjiejim.com/">arbor.linjiejim.com</a>……</p>
+    <p>Arbor 改名为 Turnery，正在带上你的学习进度去 <a id="to" href="https://turnery.linjiejim.com/">turnery.linjiejim.com</a>……</p>
     <script>
       ;(function () {
-        var NEW = "https://arbor.linjiejim.com"
+        var NEW = "https://turnery.linjiejim.com"
         var LIMIT = 1500000
         // On the new host itself (someone typed the path): home, keeping any hand-over.
-        if (location.host === "arbor.linjiejim.com") return location.replace("/" + location.search + location.hash)
+        if (location.host === "turnery.linjiejim.com") return location.replace("/" + location.search + location.hash)
         var path = location.pathname === "/moved.html" ? "/" : location.pathname
         var to = NEW + path + location.search
         var keys = ["arbor:progress", "featuretree:progress", "ft-studio-v1", "ft-studio-mode", "ft-studio-panel-w", "ft-studio-shares-v1", "arbor:practice"]

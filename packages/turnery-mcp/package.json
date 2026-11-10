@@ -4,7 +4,7 @@
   "description": "Launcher for the MCP server that ships inside the Turnery desktop app (parametric CAD for coding agents)",
   "mcpName": "io.github.linjiejim/turnery",
   "license": "MIT",
-  "homepage": "https://arbor.linjiejim.com/desktop",
+  "homepage": "https://turnery.linjiejim.com/desktop",
   "repository": { "type": "git", "url": "git+https://github.com/linjiejim/turnery.git", "directory": "packages/turnery-mcp" },
   "bin": { "turnery-mcp": "bin/turnery-mcp.js" },
   "files": ["bin"],

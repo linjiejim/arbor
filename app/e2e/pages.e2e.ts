@@ -74,17 +74,17 @@ test.describe("页面", () => {
       localStorage.setItem("featuretree:progress", JSON.stringify({ done: ["1.1.1"], last: "1.1.1" }))
       localStorage.setItem("ft-studio-v1", JSON.stringify({ tree: { params: { L: 9 }, features: [] }, history: [{ params: {}, features: [] }] }))
     })
-    await page.route("https://arbor.linjiejim.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<p>new host</p>" }))
+    await page.route("https://turnery.linjiejim.com/**", (route) => route.fulfill({ contentType: "text/html", body: "<p>new host</p>" }))
     await page.goto("/moved.html")
     await expect(page.getByText("new host")).toBeVisible()
     const url = new URL(page.url())
-    expect(url.origin).toBe("https://arbor.linjiejim.com")
+    expect(url.origin).toBe("https://turnery.linjiejim.com")
     expect(url.pathname, "/moved.html itself goes to the home page").toBe("/")
     const handed = JSON.parse(decodeURIComponent(url.hash.slice("#arbor-move=".length))).d
     expect(Object.keys(handed).sort()).toEqual(["featuretree:progress", "ft-studio-v1"])
     expect(JSON.parse(handed["featuretree:progress"]).done).toEqual(["1.1.1"])
     expect(JSON.parse(handed["ft-studio-v1"]).history, "the undo history stays behind").toEqual([])
-    await page.unroute("https://arbor.linjiejim.com/**")
+    await page.unroute("https://turnery.linjiejim.com/**")
 
     // The new host (here: the same preview server, fresh storage): merged once, the fragment gone.
     await page.goto("/")
