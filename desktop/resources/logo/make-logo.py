@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turnery's mark: a geometric lowercase "t" pulled into depth, the way a sketch
+"""Turnery's mark: a geometric lowercase "t", its top cut at a slant, pulled into depth, the way a sketch
 becomes a solid. Builds the glyph with build123d (exact circles and lines), then
 the region the face sweeps when it is extruded up and to the right, and writes
 both as SVG paths:
@@ -21,7 +21,8 @@ OUT = Path(__file__).resolve().parent
 
 S = 20.0  # stroke
 STEM_X = 32.0  # left edge of the stem
-TOP = 110.0  # the stem's flat top, above the bar
+TOP = 110.0  # the stem's top, above the bar
+CUT = 14.0  # how far the slanted cut drops across the stem
 BAR = (10.0, 86.0, 66.0)  # crossbar: x from, x to, bottom y
 FOOT_C, FOOT_RO = (62.0, 30.0), 30.0  # the foot curls round this centre and runs out flat
 FOOT_END = 82.0  # where the flat run ends
@@ -44,7 +45,9 @@ def glyph() -> Face:
     run = rect(cx, 0, FOOT_END, S)
     stem = rect(STEM_X, cy, STEM_X + S, TOP)
     bar = rect(BAR[0], BAR[2], BAR[1], BAR[2] + S)
-    return (foot + run + stem + bar).clean()
+    # One cut across the top of the stem, the way a turning tool leaves it.
+    cut = make_face(Polyline(*[Vector(x, y, 0) for x, y in [(STEM_X - 12, TOP + 2), (STEM_X + S + 8, TOP + 2), (STEM_X + S + 8, TOP - CUT), (STEM_X - 12, TOP + 2)]]))
+    return ((foot + run + stem + bar) - cut).clean()
 
 
 def outline(face) -> list[list[tuple[float, float]]]:

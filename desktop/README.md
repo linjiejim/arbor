@@ -4,7 +4,7 @@
 
 让本机的 coding agent（Claude Code、Codex……）通过 MCP 或命令行建参数化零件；你在 Turnery 窗口里实时看它每一步建了什么，拖参数、改特征，在面或边上留备注，agent 下一次调用就会知道。
 
-名字：turnery 是车削工坊，把料夹在轴上一刀刀车出形状的地方；turn 也是 agent 的一轮。标志是一个拉出厚度的小写 t：草图拉伸成实体。标志和图标由 `resources/logo/make-logo.py`（build123d 精确生成几何）和 `scripts/make-icons.py` 生成。
+名字：turnery 是车削工坊，把料夹在轴上一刀刀车出形状的地方；turn 也是 agent 的一轮。标志是一个拉出厚度的小写 t，顶上斜切一刀：草图拉伸成实体。标志和图标由 `resources/logo/make-logo.py`（build123d 精确生成几何）和 `scripts/make-icons.py` 生成。
 
 - 建模能力和网页版 Turnery 工作台是同一套：特征树 JSON、语义选择器、OpenCascade 内核（`app/src/studio`）。
 - AI 来自你自己的 agent：Turnery 不调用任何模型，也不需要 key。

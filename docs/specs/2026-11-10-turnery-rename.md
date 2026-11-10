@@ -25,7 +25,7 @@ Turnery：车削工坊；turn 也是 agent 的一轮。查的时候 GitHub 上�
 | 位置 | 旧 | 新 |
 | --- | --- | --- |
 | 产品名、窗口标题、菜单、文案、提示词 | Arbor | Turnery |
-| 标志 | 拉出厚度的小写 a | 拉出厚度的小写 t，同一套画法（`desktop/resources/logo/make-logo.py`）；备选见 `docs/brand/turnery-logo-options.png` |
+| 标志 | 拉出厚度的小写 a | 拉出厚度的小写 t，顶上斜切一刀（像车刀留下的），同一套画法（`desktop/resources/logo/make-logo.py`）；备选见 `docs/brand/turnery-logo-options.png` |
 | 命令行、MCP 服务名、插件名 | `arbor` | `turnery` |
 | bundle id | `com.linjiejim.arbor` | `com.linjiejim.turnery` |
 | 零件、装配文件 | `*.arbor.json`、`*.arbor-asm.json` | `*.turnery.json`、`*.turnery-asm.json` |
