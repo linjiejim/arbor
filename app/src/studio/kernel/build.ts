@@ -1552,9 +1552,13 @@ export class Kernel {
         const pts = evalPoints(f.path.points, n)
         const corner = f.path.corner !== undefined ? n(f.path.corner) : 0
         let pen = draw(pts[0].to)
+        const straight = (p: PathPoint) => !p.via && !p.spline
         pts.slice(1).forEach((p, i) => {
-          pen = p.via ? pen.threePointsArcTo(p.to, p.via) : pen.lineTo(p.to)
-          if (corner > 0 && i < pts.length - 2 && !pts[i + 2].via && !p.via) pen = pen.customCorner(corner)
+          const next = pts[i + 2]
+          if (p.r !== undefined && !next) throw new InputError("路径的终点不是拐角，不能倒圆角：r 写在中间的点上")
+          // path.corner rounds the corners between two straight segments a point doesn't round itself.
+          const r = p.r ?? (corner > 0 && next && straight(p) && straight(next) ? corner : undefined)
+          pen = penTo(pen, { ...p, r })
         })
         const path = sketchOn(pen.done(), plane)
         const prof = f.profile
@@ -2496,8 +2500,10 @@ function shapeName(s: SketchShape) {
 }
 
 type V2 = [number, number]
+type PathPoint = { to: V2; via?: V2; r?: number; spline?: V2[] }
+
 /** Sketch points with numbers worked out: a corner (rounded by r), an arc through `via`, or a spline ending at `to`. */
-function evalPoints(points: Point[], n: (v: number | string) => number): { to: V2; via?: V2; r?: number; spline?: V2[] }[] {
+function evalPoints(points: Point[], n: (v: number | string) => number): PathPoint[] {
   const v2 = (p: (number | string)[]): V2 => [n(p[0]), n(p[1])]
   return points.map((p) => {
     if (Array.isArray(p)) return { to: v2(p) }
@@ -2508,6 +2514,19 @@ function evalPoints(points: Point[], n: (v: number | string) => number): { to: V
     if ("via" in p) return { to: v2(p.to), via: v2(p.via) }
     return { to: v2(p.to), r: n(p.r) }
   })
+}
+
+/**
+ * One point of a sketch outline or a sweep path, drawn from where the pen is: a line, a
+ * three-point arc or a smooth spline through each point, then the corner rounded by `r`.
+ */
+function penTo(pen: ReturnType<typeof draw>, p: PathPoint): ReturnType<typeof draw> {
+  if (p.via) pen = pen.threePointsArcTo(p.to, p.via)
+  else if (p.spline) for (const q of p.spline) pen = pen.smoothSplineTo(q)
+  else pen = pen.lineTo(p.to)
+  if (p.r === undefined) return pen
+  if (!(p.r > 0)) throw new InputError("拐角圆角半径必须大于 0")
+  return pen.customCorner(p.r)
 }
 
 /** `mirrorText`: the sketch is seen from behind its datum plane, so text is mirrored to read right from outside. */
@@ -2577,15 +2596,7 @@ function sketchDrawing(shapes: SketchShape[], scope: Scope, mirrorText = false):
         if (!last.via && !last.spline && Math.hypot(last.to[0] - first[0], last.to[1] - first[1]) < 1e-9) pts.pop()
         if (pts.length < 3 && !pts.some((p) => p.via || p.spline)) throw new InputError("轮廓至少要 3 个点才能围成面")
         let pen = draw(first)
-        for (const p of pts.slice(1)) {
-          if (p.via) pen = pen.threePointsArcTo(p.to, p.via)
-          else if (p.spline) for (const q of p.spline) pen = pen.smoothSplineTo(q)
-          else pen = pen.lineTo(p.to)
-          if (p.r !== undefined) {
-            if (!(p.r > 0)) throw new InputError("拐角圆角半径必须大于 0")
-            pen = pen.customCorner(p.r)
-          }
-        }
+        for (const p of pts.slice(1)) pen = penTo(pen, p)
         try {
           d = pen.close()
         } catch {

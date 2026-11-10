@@ -4,7 +4,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { z } from "zod"
 import { toBuild123d } from "@/studio/codegen"
-import type { Feature, Tree } from "@/studio/dsl"
+import type { Feature, Point, Tree } from "@/studio/dsl"
 import { Kernel } from "@/studio/kernel/build"
 import { initNodeKernel } from "@/studio/kernel/node"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "@/studio/tools"
@@ -98,6 +98,33 @@ describe("spline and rounded-corner points", () => {
     ])
     expect(states(r)).toEqual(["s:ok", "w:ok", "sw:ok"])
     expect(r.body!.bbox[1][1]).toBeGreaterThan(4)
+  })
+})
+
+describe("sweep path points", () => {
+  const sweep = (points: Point[], corner?: number) =>
+    build([{ id: "sw", op: "sweep", path: { on: { plane: "XZ" }, points, ...(corner !== undefined ? { corner } : {}) }, profile: { type: "circle", d: 4 } }])
+
+  it("passes through every spline point, not straight to the last one", () => {
+    // The middle point is 15 mm off the line from start to end (X = 0): a straight
+    // segment would keep the pipe within X ∈ [−2, 2].
+    const r = sweep([[0, 0], { spline: [[15, 20], [0, 40]] }])
+    expect(states(r)).toEqual(["sw:ok"])
+    expect(r.body!.bbox[1][0]).toBeGreaterThan(15 + 1.9)
+    expect(r.body!.bbox[1][2]).toBeGreaterThan(40)
+  })
+
+  it("rounds a { to, r } corner like path.corner does", () => {
+    // Two 30 mm legs with an R8 bend: 2 × 22 straight + a quarter circle of R8.
+    const bent = Math.PI * 4 * (2 * 22 + (Math.PI * 8) / 2)
+    const r = sweep([[0, 0], { to: [0, 30], r: 8 }, [30, 30]])
+    expect(states(r)).toEqual(["sw:ok"])
+    expect(r.body!.volume).toBeCloseTo(bent, 0)
+    expect(sweep([[0, 0], [0, 30], [30, 30]], 8).body!.volume).toBeCloseTo(bent, 0)
+  })
+
+  it("says a rounded corner needs a next segment", () => {
+    expect(states(sweep([[0, 0], { to: [0, 30], r: 8 }]))[0]).toMatch(/^sw:error .*终点/)
   })
 })
 
