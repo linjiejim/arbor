@@ -194,6 +194,19 @@ describe("appearance: the engine", () => {
     expect(rebuild.mock.calls.length).toBe(builds)
   })
 
+  it("leaves a part file someone changed since alone on undo, and says so", async () => {
+    const { run, disk, files, touch } = setup()
+    await files.write("/work/parts/block.turnery.json", JSON.stringify({ params: {}, features: box(10, 10, 10) }))
+    await run("open_part", { path: "asm.turnery-asm.json", create: true })
+    await run("component", { id: "a", name: "块", file: "parts/block.turnery.json" })
+    expect((await run("set_appearance", { parts: ["块"], color: "orange" }, USER)).ok).toBe(true)
+    const theirs = JSON.stringify({ params: {}, features: box(10, 10, 10), appearance: { color: "pink" } })
+    await touch("/work/parts/block.turnery.json", theirs)
+    const r = await run("undo", {}, USER)
+    expect(r.text).toMatch(/block 之后又被改过，没有改回去/)
+    expect(disk.get("/work/parts/block.turnery.json")).toBe(theirs)
+  })
+
   it("follows a part file whose colour someone else changed, without rebuilding the assembly", async () => {
     const { run, rebuild, touch, files } = setup()
     await files.write("/work/parts/block.turnery.json", JSON.stringify({ params: {}, features: box(10, 10, 10) }))

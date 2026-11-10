@@ -141,7 +141,7 @@ function InstanceLook({ part, group, onLook }: { part: Instance; group: Instance
             <p className="pl-6 text-caption text-faint-foreground">{here ? "写在装配上，零件文件不变" : "写进零件文件，用到它的地方都跟着变"}</p>
           </div>
         ) : (
-          <p className="text-caption text-faint-foreground">标准件和外购件的颜色写在这个装配里。</p>
+          <p className="text-caption text-faint-foreground">标准件、外购件和子装配没有自己的零件文件，颜色写在这个装配里。</p>
         )
       }
     />

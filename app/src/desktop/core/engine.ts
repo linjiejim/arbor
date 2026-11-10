@@ -1084,13 +1084,18 @@ export class Engine {
       doc.redo = doc.redo.slice(0, -1)
       doc.undo = [...doc.undo, { tree: doc.tree, summary: entry.summary, ...(files ? { files } : {}) }]
     }
-    // A colour given from the assembly went into a component's file: that file goes back (or forward) too.
+    // A colour given from the assembly went into a component's file: that file goes back (or forward) too,
+    // unless someone changed it since (theirs stays, and the result says so).
+    const kept: string[] = []
     for (const f of files ?? []) {
       const [from, to] = which === "undo" ? [f.after, f.before] : [f.before, f.after]
-      await this.rewrite(f.path, (text) => (text === from ? to : null), ctx, `${which === "undo" ? "撤销" : "重做"}：${entry.summary}`, doc)
+      let changed = false
+      await this.rewrite(f.path, (text) => (text === from ? to : ((changed = text !== to), null)), ctx, `${which === "undo" ? "撤销" : "重做"}：${entry.summary}`, doc)
+      if (changed) kept.push(partName(f.path))
     }
     await this.adopt(doc, entry.tree, ctx.actor, { summary: `${which === "undo" ? "撤销" : "重做"}：${entry.summary}`, undoable: false })
-    return { ok: true, text: `已${which === "undo" ? "撤销" : "重做"}：${entry.summary}\n${treeText(doc.tree, doc.report!)}` }
+    const note = kept.length ? `\n⚠ ${kept.join("、")} 之后又被改过，没有${which === "undo" ? "改回去" : "重新写入"}。` : ""
+    return { ok: true, text: `已${which === "undo" ? "撤销" : "重做"}：${entry.summary}${note}\n${treeText(doc.tree, doc.report!)}` }
   }
 
   /** Notes don't change the tree (no new version) but belong in the activity list: who wrote, handled or removed what. */
