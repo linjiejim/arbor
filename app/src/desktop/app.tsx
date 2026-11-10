@@ -15,7 +15,10 @@ import { useReselect } from "@/studio/use-reselect"
 import { turnery } from "./bridge"
 import type { DocState, PartNote, PickRequest, ShowRequest } from "./core/protocol"
 import { asNote, useDesktopNotes, useDesktopStudio, useEngine } from "./use-desktop"
-import { AssistantPanel } from "./ui/assistant-panel"
+import { AssistantProvider } from "./use-assistant"
+import { useAssistantLayout } from "./assistant-layout"
+import { AssistantDock, AssistantFloat } from "./ui/assistant-window"
+import { StatusBar } from "./ui/status-bar"
 import { AgentSetupDialog } from "./ui/agent-setup"
 import { AddPartMenu, ComponentActions } from "./ui/assembly"
 import { NoteComposer } from "./ui/note-composer"
@@ -45,6 +48,7 @@ export function DesktopApp() {
   const [stepSlot, setStepSlot] = React.useState<HTMLDivElement | null>(null)
   const [setupOpen, setSetupOpen] = React.useState(false)
   const [tab, setTab] = React.useState("notes")
+  const chatLayout = useAssistantLayout()
   /** 「工程图」 over the 3D view; parameters stay editable beside it. */
   const [sheet, setSheet] = React.useState(false)
 
@@ -128,9 +132,9 @@ export function DesktopApp() {
   const loading = snapshot?.loading ?? (doc && !doc.error && snapshot?.kernel.phase !== "error" && (!studio.display || studio.display.provisional || presented !== studio.display) ? { path: doc.path, name: doc.name, startedAt: 0, progress: { stage: "mesh" as const, completed: 0, total: 1 } } : null)
   return (
     <WordsContext.Provider value={DESKTOP_WORDS}>
-    <>
+    <AssistantProvider project={snapshot?.project?.root ?? null} part={doc?.path ?? null}>
     <div className="flex h-dvh flex-col bg-background">
-      <TitleBar snapshot={snapshot} doc={doc} pick={pick} onSetup={() => setSetupOpen(true)} sheet={sheet && Boolean(doc)} onSheet={setSheet} />
+      <TitleBar snapshot={snapshot} doc={doc} onSetup={() => setSetupOpen(true)} sheet={sheet && Boolean(doc)} onSheet={setSheet} chat={{ open: chatLayout.layout.mode !== "hidden", onToggle: chatLayout.toggle }} />
       <div className="flex min-h-0 flex-1">
         {/* The start page is just the start page: the sidebar comes with a project or an open file. */}
         {(doc || snapshot?.project || snapshot?.parts.length || loading) && <PartsSidebar snapshot={snapshot} instances={assembly ? assemblyParts : []} selected={selectedNames}
@@ -207,17 +211,12 @@ export function DesktopApp() {
               <TabsTrigger value="notes">
                 备注{doc.notes.some((n) => n.status === "open") ? ` ${doc.notes.filter((n) => n.status === "open").length}` : ""}
               </TabsTrigger>
-              <TabsTrigger value="chat">对话</TabsTrigger>
               <TabsTrigger value="activity">动态</TabsTrigger>
               <TabsTrigger value="params">参数</TabsTrigger>
               <TabsTrigger value="code">代码</TabsTrigger>
             </TabsList>
             <TabsContent value="notes" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
               <NotesPanel doc={doc} onLocate={(n) => onSpot(n) && void notes.show(asNote(n))} onWrite={() => notes.setCompose("")} />
-            </TabsContent>
-            {/* Kept mounted: a turn in progress goes on while another tab is shown. */}
-            <TabsContent value="chat" forceMount className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-              <AssistantPanel />
             </TabsContent>
             <TabsContent value="activity" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
               <ActivityPanel doc={doc} snapshot={snapshot} />
@@ -232,7 +231,10 @@ export function DesktopApp() {
             <div ref={setStepSlot} className="pointer-events-none absolute inset-0 z-20" />
           </Tabs>
         )}
+        {chatLayout.layout.mode === "dock" && <AssistantDock state={chatLayout} />}
       </div>
+      <StatusBar snapshot={snapshot} doc={doc} pick={pick} onNotes={() => setTab("notes")} />
+      {chatLayout.layout.mode === "float" && <AssistantFloat state={chatLayout} />}
       <AgentSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
       <NoteComposer
         text={notes.compose}
@@ -245,7 +247,7 @@ export function DesktopApp() {
         }}
       />
     </div>
-    </>
+    </AssistantProvider>
     </WordsContext.Provider>
   )
 }

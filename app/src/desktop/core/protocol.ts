@@ -1,6 +1,7 @@
 // Turnery: the desktop workbench. Types shared by the engine (Electron main
 // process, or in-process in the CLI), the preload bridge, the renderer and the
 // MCP / CLI front ends. No runtime code beyond constants.
+import type { ChatRecord, ChatSummary } from "./chats"
 import type { PickInfo } from "../../studio/annotations"
 import type { Tree } from "../../studio/dsl"
 import type { BuildReport, BuildProgress, DisplayData } from "../../studio/kernel/build"
@@ -177,6 +178,12 @@ export interface TurneryBridge {
   assistantStop(id: string): Promise<void>
   /** Chunks of a turn's UI message stream; `null` ends it. */
   onAssistant(listener: (id: string, chunk: unknown | null) => void): () => void
+  /** Saved conversations, newest first: `here` = held in this window's project (or among loose parts). */
+  chats(scope: "here" | "all"): Promise<ChatSummary[]>
+  chatRead(id: string): Promise<ChatRecord | null>
+  chatSave(record: ChatRecord): Promise<void>
+  chatRename(id: string, title: string): Promise<void>
+  chatDelete(id: string): Promise<void>
   /** File dialog for something to put in an assembly: a part or assembly file, or a STEP. */
   pickFile(kind: "part" | "step"): Promise<string | null>
   reveal(path: string): Promise<void>

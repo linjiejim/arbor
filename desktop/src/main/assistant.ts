@@ -6,6 +6,8 @@ import { assistantStream } from "../../../app/src/desktop/core/assistant"
 import type { Engine } from "../../../app/src/desktop/core/engine"
 import { languageModel, presetOf, PRESETS } from "../../../app/src/desktop/core/providers"
 import type { ModelSettings } from "../../../app/src/desktop/core/protocol"
+import type { ChatRecord } from "../../../app/src/desktop/core/chats"
+import { deleteChat, listChats, readChat, renameChat, saveChat } from "../engine/chats"
 import { currentModel, listModels, setKey, useModel, type SecretBox } from "../engine/models"
 
 /**
@@ -63,6 +65,24 @@ export function wireAssistant(ipcMain: IpcMain, engineOf: (e: IpcMainInvokeEvent
 
   ipcMain.handle("turnery:assistant-stop", (_e, id: string) => running.get(id)?.abort())
 
+  // Saved conversations. A window lists the ones held in its own project (or among loose parts).
+  ipcMain.handle("turnery:chats", (e, scope: "here" | "all") => listChats(scope === "all" ? undefined : (engineOf(e).snapshot().project?.root ?? null)))
+  ipcMain.handle("turnery:chat-read", (_e, id: string) => readChat(String(id)))
+  ipcMain.handle("turnery:chat-save", (_e, record: ChatRecord) => {
+    if (!record || typeof record !== "object" || !Array.isArray(record.messages)) return
+    saveChat({
+      id: String(record.id),
+      title: String(record.title ?? "").slice(0, 80) || "新对话",
+      project: typeof record.project === "string" ? record.project : null,
+      part: typeof record.part === "string" ? record.part : null,
+      createdAt: Number(record.createdAt) || Date.now(),
+      updatedAt: Date.now(),
+      messages: record.messages,
+    })
+  })
+  ipcMain.handle("turnery:chat-rename", (_e, id: string, title: string) => renameChat(String(id), String(title)))
+  ipcMain.handle("turnery:chat-delete", (_e, id: string) => deleteChat(String(id)))
+
   ipcMain.handle("turnery:assistant-send", async (e, id: string, messages: unknown[]) => {
     const wc: WebContents = e.sender
     const send = (chunk: unknown) => !wc.isDestroyed() && wc.send("turnery:assistant", id, chunk)
@@ -75,8 +95,10 @@ export function wireAssistant(ipcMain: IpcMain, engineOf: (e: IpcMainInvokeEvent
     const resolved = languageModel(chosen.config, chosen.key, fetchVia)
     if ("error" in resolved) return fail(resolved.error)
     const engine = engineOf(e)
-    const part = engine.snapshot().active ?? undefined
-    const ctx = { actor: "assistant" as const, session: `assistant-${wc.id}`, part }
+    const snap = engine.snapshot()
+    const part = snap.active ?? undefined
+    // Relative paths (open_part parts/lid) land in the project folder, as they would for an agent started there.
+    const ctx = { actor: "assistant" as const, session: `assistant-${wc.id}`, part, cwd: snap.project?.root }
     const stop = new AbortController()
     running.set(id, stop)
     wc.once("destroyed", () => stop.abort())
