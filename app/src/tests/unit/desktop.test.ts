@@ -137,10 +137,11 @@ describe("turnery: paths and catalog", () => {
     // Was ~236 000 characters with every selector inlined (set_tree alone ~100 000), then ~86 000 with
     // selectors under $defs. Now a selector's `not` only says "same fields", and anything else written
     // twice in one tool (a path's and a polyline's points, the two ends of a distance) is hoisted too.
-    expect(total).toBeLessThan(64_000)
+    // (62 400 then; the three printing checks and 3MF added about 1 600.)
+    expect(total).toBeLessThan(66_000)
     const byName = (n: string) => JSON.stringify(inputJsonSchema(agentCommands().find((c) => c.name === n)!)).length
     expect(byName("set_tree")).toBeLessThan(4_000)
-    expect(byName("check")).toBeLessThan(9_000)
+    expect(byName("check")).toBeLessThan(10_500)
     const sketch = inputJsonSchema(agentCommands().find((c) => c.name === "sketch")!)
     expect(Object.keys(sketch.$defs as object)).toContain("Points")
     expect(JSON.stringify(sketch)).toContain("倒圆角的拐角")

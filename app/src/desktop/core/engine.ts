@@ -79,7 +79,7 @@ export interface KernelHost {
   measure(targets: MeasureSpec[]): Promise<MeasureResult | null>
   dimensions(): Promise<Dim[]>
   drawing(withIso: boolean): Promise<DrawingData | null>
-  exportBody(format: "step" | "stl", index?: number): Promise<Uint8Array | null>
+  exportBody(format: "step" | "stl" | "3mf", index?: number): Promise<Uint8Array | null>
   /** Show a source-validated portable mesh before preparing native components. */
   preparePreview?(path: string, tree: Tree, assets: ComponentSource["assets"], components: ComponentSource[], context: ContextSource | null): Promise<void>
   /** Files `import` features read (absent: this host can't read files). */
@@ -512,7 +512,7 @@ export class Engine {
         return { ok: true, text: measureText(res) }
       }
       case "export":
-        return this.exportPart(doc, input as { path: string; format?: "step" | "stl" | "py" | "json" }, ctx)
+        return this.exportPart(doc, input as { path: string; format?: "step" | "stl" | "3mf" | "py" | "json" | "bom" }, ctx)
       case "get_notes": {
         const who = readerOf(ctx.actor)
         if (who) doc.seen[who].note = Math.max(doc.seen[who].note, ...doc.notes.notes.map((n) => n.n))
@@ -1482,13 +1482,13 @@ export class Engine {
     return { ok: true, text: `已在窗口里高亮 ${hashes.length} ${kind === "face" ? "个面" : "条边"}。` }
   }
 
-  private async exportPart(doc: Doc, input: { path: string; format?: "step" | "stl" | "py" | "json" | "bom" }, ctx: CallContext): Promise<CommandResult> {
+  private async exportPart(doc: Doc, input: { path: string; format?: "step" | "stl" | "3mf" | "py" | "json" | "bom" }, ctx: CallContext): Promise<CommandResult> {
     let path = input.path.trim()
     if (!/^([A-Za-z]:)?[\\/]/.test(path) && ctx.cwd) path = `${ctx.cwd.replace(/[\\/]+$/, "")}/${path}`
     const ext = path.split(".").pop()?.toLowerCase()
     const format = input.format ?? (ext === "stp" ? "step" : ext === "md" ? "bom" : ext)
-    if (format !== "step" && format !== "stl" && format !== "py" && format !== "json" && format !== "bom")
-      return fail("不知道导出成什么：扩展名用 .step / .stl / .py / .json / .md（零件清单），或者写 format。")
+    if (format !== "step" && format !== "stl" && format !== "3mf" && format !== "py" && format !== "json" && format !== "bom")
+      return fail("不知道导出成什么：扩展名用 .step / .stl / .3mf / .py / .json / .md（零件清单），或者写 format。")
     let data: string | Uint8Array | null
     if (format === "py") {
       if (isAssembly(doc.path)) return fail("装配不能导出成 build123d 代码：请分别打开每个零件导出")
@@ -1506,7 +1506,7 @@ export class Engine {
     if (!data) return fail("还没有实体可以导出。")
     await this.opts.files.write(path, data)
     const bytes = typeof data === "string" ? new TextEncoder().encode(data).length : data.byteLength
-    const failed = format === "step" || format === "stl" ? doc.report?.features.filter((f) => f.state === "error").length : 0
+    const failed = format === "step" || format === "stl" || format === "3mf" ? doc.report?.features.filter((f) => f.state === "error").length : 0
     return { ok: true, text: `已导出 ${format.toUpperCase()} 到 ${path}（${(bytes / 1024).toFixed(1)} KB）${failed ? `。注意：有 ${failed} 个特征失败，导出的是最后一个成功的步骤` : ""}` }
   }
 

@@ -308,7 +308,7 @@ export class ThreadKernel implements KernelHost {
   drawing(withIso: boolean) {
     return this.call<DrawingData | null>("drawing", [withIso])
   }
-  exportBody(format: "step" | "stl", index?: number) {
+  exportBody(format: "step" | "stl" | "3mf", index?: number) {
     return this.call<Uint8Array | null>("exportBody", [format, index])
   }
 

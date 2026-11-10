@@ -177,7 +177,7 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
     ),
     showFeature: React.useCallback((id: string | null) => setRollback(id), []),
     exportBody: React.useCallback(
-      async (format: "step" | "stl") => {
+      async (format: "step" | "stl" | "3mf") => {
         if (!path) return null
         const bytes = (await turnery.kernel(path, { op: "export", format })) as Uint8Array | null
         return bytes ? new Blob([bytes as BlobPart]) : null

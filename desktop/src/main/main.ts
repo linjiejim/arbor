@@ -460,7 +460,7 @@ async function openPartDialog(ws: Workspace | null) {
   return (await openForUser(ws, picked)) ? picked : null
 }
 
-const EXPORT_NAMES: Record<ExportFormat, string> = { step: "STEP", stl: "STL", py: "build123d 代码", json: "特征树 JSON" }
+const EXPORT_NAMES: Record<ExportFormat, string> = { step: "STEP", stl: "STL", "3mf": "3MF", py: "build123d 代码", json: "特征树 JSON" }
 
 async function exportDialog(ws: Workspace | null, format: ExportFormat) {
   const doc = ws?.engine.docState()
@@ -583,6 +583,7 @@ function refreshMenu() {
         { type: "separator" },
         { label: "导出 STEP…", accelerator: "CmdOrCtrl+E", click: () => void exportDialog(focused(), "step") },
         { label: "导出 STL…", accelerator: "CmdOrCtrl+Shift+E", click: () => void exportDialog(focused(), "stl") },
+        { label: "导出 3MF…", click: () => void exportDialog(focused(), "3mf") },
         { type: "separator" },
         mac ? { role: "close" } : { role: "quit" },
       ],

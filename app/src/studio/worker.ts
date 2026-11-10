@@ -13,7 +13,7 @@ export type WorkerRequest =
   | { id: number; type: "rebuild"; tree: Tree }
   | { id: number; type: "display"; index?: number }
   | { id: number; type: "inspect"; what: "body" | "faces" | "edges"; selector?: unknown }
-  | { id: number; type: "export"; format: "step" | "stl"; index?: number }
+  | { id: number; type: "export"; format: "step" | "stl" | "3mf"; index?: number }
   | { id: number; type: "pick"; kind: "face" | "edge"; hash: number; point: [number, number, number] }
   | { id: number; type: "locate"; kind: "face" | "edge"; selector: unknown; before?: number }
   | { id: number; type: "measure"; targets: MeasureTarget[] }

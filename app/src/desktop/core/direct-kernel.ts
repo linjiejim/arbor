@@ -85,7 +85,7 @@ export class DirectKernel implements KernelHost {
   async setContext(ctx: ContextSource | null) {
     this.k.setContext(ctx)
   }
-  async exportBody(format: "step" | "stl", index?: number) {
+  async exportBody(format: "step" | "stl" | "3mf", index?: number) {
     const blob = await this.k.exportBody(format, index)
     return blob ? new Uint8Array(await blob.arrayBuffer()) : null
   }

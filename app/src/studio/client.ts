@@ -94,7 +94,7 @@ export class KernelClient implements KernelPort {
     return this.call("drawing", { type: "drawing", iso })
   }
 
-  exportBody(format: "step" | "stl", index?: number): Promise<Blob | null> {
+  exportBody(format: "step" | "stl" | "3mf", index?: number): Promise<Blob | null> {
     return this.call("export", { type: "export", format, index })
   }
 

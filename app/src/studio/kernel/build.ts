@@ -50,7 +50,7 @@ import { applyMate, applyRigid, axisAngle, FREE, IDENTITY, rotation, type Freedo
 import { fastenerShape } from "./fastener-shapes"
 import { designation, type FastenerSpec } from "../fasteners"
 import { packDisplay, restoreDisplay, placeDisplay, assemblyDisplay, type ComponentDisplay } from "./component-display"
-import { classifyFaces, faceSignatures, meshBody, meshEdges, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
+import { classifyFaces, faceSignatures, meshBody, meshEdges, meshShape, type EdgeMesh, type FaceSig, type FaceStatus, type Mesh } from "./mesh"
 import {
   axisDir,
   DIRS,
@@ -849,11 +849,13 @@ export class Kernel {
   /** Mesh hashes a selector picks on the latest body now (or on the body step `before` starts from); null when it no longer resolves. */
   locate(kind: "face" | "edge", selector: unknown, before?: number): number[] | null {
     const step = this.lastBuilt(before ?? this.steps.length)
-    if (!step?.body) return null
-    const faces = faceInfos(step.body, step.origins)
+    const of = kind === "face" ? (selector as FaceSelector | undefined)?.of : ((selector as EdgeSelector | undefined)?.of ?? (selector as EdgeSelector | undefined)?.faces?.of)
+    const src = step ? this.facesSource(step, of) : null
+    if (!src) return null
+    const faces = faceInfos(src.shape, src.origins)
     try {
       if (kind === "face") return selectFaces(selector as FaceSelector, faces, this.scope).map((f) => f.face.hashCode)
-      const edges = edgeInfos(step.body, faces)
+      const edges = edgeInfos(src.shape, faces)
       try {
         return selectEdges(selector as EdgeSelector, edges, faces, this.scope).map((e) => e.edge.hashCode)
       } finally {
@@ -891,12 +893,36 @@ export class Kernel {
     return dimensionsOf(this.tree, this.scope, geoms, Math.max(3, 0.06 * diag))
   }
 
+  /**
+   * Where a selector looks: a reference body's faces when `of` names one (an imported board, the part
+   * next door in an assembly), else the model's. Reference faces are there to measure against and to
+   * place things on; they are never edited.
+   */
+  private facesSource(step: Step, of: string | undefined): { shape: Shape3D; origins: string[]; ref: boolean } | null {
+    const ref = of ? [...(step.refs ?? []), ...this.context].find((r) => r.id === of || r.name === of) : undefined
+    if (ref) return { shape: ref.shape as Shape3D, origins: new Array(countOf(ref.shape as Shape3D, "face")).fill(of), ref: true }
+    return step.body ? { shape: step.body, origins: step.origins, ref: false } : null
+  }
+
+  /** The model and its reference bodies as one shape, for finding a face or edge by its hash wherever it is. */
+  private withRefs<T>(step: Step, fn: (shape: Shape3D) => T): T {
+    const refs = [...(step.refs ?? []), ...this.context]
+    if (!refs.length) return fn(step.body!)
+    const all = compoundOf([step.body!, ...refs.map((r) => r.shape)])
+    try {
+      return fn(all)
+    } finally {
+      all.delete()
+    }
+  }
+
   /** Sizes of one or two clicked faces / edges of the latest body, and how they relate. */
   measure(targets: MeasureSpec[]): MeasureResult | null {
     const step = this.lastBuilt(this.steps.length)
     if (!step?.body || !targets.length) return null
     const two = targets.slice(0, 2)
-    if (two.every((t) => t.kind === "face" || t.kind === "edge")) return measure(step.body, step.origins, two as MeasureTarget[])
+    if (two.every((t) => t.kind === "face" || t.kind === "edge"))
+      return measure(step.body, step.origins, two as MeasureTarget[]) ?? this.withRefs(step, (all) => measure(all, step.origins, two as MeasureTarget[]))
     const owned: AnyShape[] = []
     try {
       const items = two.map((t) => this.targetShape(step, t, owned))
@@ -924,8 +950,24 @@ export class Kernel {
       const names = [...(step.parts ?? []).map((p) => p.name), ...(step.refs ?? []).map((r) => r.name), ...this.context.map((r) => r.name)]
       throw new InputError(`没有叫「${t.name}」的零件或参考体${names.length ? `：现在有 ${names.join("、")}` : "（还没有拆件，整个模型只有一个实体）"}`)
     }
+    // A face or an edge is found by its hash, on the model or on a reference body.
+    if (t.kind === "face" || t.kind === "edge")
+      return this.withRefs(step, (all) => {
+        const fs = faceInfos(all, step.origins)
+        const es = t.kind === "edge" ? edgeInfos(all, fs) : []
+        try {
+          const x = t.kind === "face" ? fs.find((f) => f.face.hashCode === t.hash) : es.find((e) => e.edge.hashCode === t.hash)
+          if (!x) throw new InputError("要量的面或边找不到了")
+          const shape = ("face" in x ? x.face : x.edge).clone() as AnyShape
+          owned.push(shape)
+          const res = measure(all, step.origins, [t])
+          return { shape, solid: false, item: res?.items[0] ?? { kind: t.kind, hash: t.hash, what: t.kind === "face" ? "面" : "边", facts: [] } }
+        } finally {
+          disposeInfos(fs, es)
+        }
+      })
     const faces = faceInfos(body, step.origins)
-    const edges = t.kind === "edge" ? edgeInfos(body, faces) : []
+    const edges: EdgeInfo[] = []
     try {
       if (t.kind === "feature") {
         const mine = faces.filter((f) => f.origin === t.id)
@@ -936,22 +978,18 @@ export class Kernel {
         owned.push(shape)
         return { shape, solid: false, item: { kind: "feature", hash: -1, what: `「${displayName(this.tree, f)}」的面`, facts: [`${mine.length} 个面`] } }
       }
-      const x = t.kind === "face" ? faces.find((f) => f.face.hashCode === t.hash) : edges.find((e) => e.edge.hashCode === t.hash)
-      if (!x) throw new InputError("要量的面或边找不到了")
-      const shape = ("face" in x ? x.face : x.edge).clone() as AnyShape
-      owned.push(shape)
-      const res = measure(body, step.origins, [t])
-      return { shape, solid: false, item: res?.items[0] ?? { kind: t.kind, hash: t.hash, what: t.kind === "face" ? "面" : "边", facts: [] } }
+      throw new InputError("要量的面或边找不到了")
     } finally {
       disposeInfos(faces, edges)
     }
   }
 
   /** STEP or STL of the body; after a split, one STEP with a named solid per part, or a zip of one STL per part. */
-  async exportBody(format: "step" | "stl", index?: number): Promise<Blob | null> {
+  async exportBody(format: "step" | "stl" | "3mf", index?: number): Promise<Blob | null> {
     const step = this.lastBuilt(index === undefined ? this.steps.length : index + 1)
     if (!step?.body) return null
     const parts = step.parts && step.parts.length > 1 ? step.parts : null
+    if (format === "3mf") return threeMF(parts ? parts.map((p) => ({ name: p.name, body: p.body })) : [{ name: step.mainName ?? "零件", body: step.body }])
     if (!parts) return format === "step" ? step.body.blobSTEP() : stlOf(step.body, step.mainName ?? "零件")
     if (format === "step") {
       const blob = exportSTEP(parts.map((p) => ({ shape: p.body, name: p.name })))
@@ -1193,8 +1231,9 @@ export class Kernel {
     let label = ref.offset !== undefined && coord !== 0 ? `${P.label}偏移 ${fmt(coord)}` : P.label
     let flipped = false
     if (ref.face) {
-      if (!prev?.body) throw new InputError("还没有实体，草图不能贴在面上")
-      const faces = faceInfos(prev.body, prev.origins)
+      const src = prev ? this.facesSource(prev, ref.face.of) : null
+      if (!src) throw new InputError("还没有实体，草图不能贴在面上")
+      const faces = faceInfos(src.shape, src.origins)
       try {
         const sel = selectFaces(ref.face, faces, this.scope)
         if (sel.some((x) => x.kind !== "plane" || !x.normal)) throw new InputError("选中的面不是平面，草图贴不上去")
@@ -2406,6 +2445,37 @@ function count(v: number, min: number, what: string): number {
  * Binary STL of a body. Chords stay within 0.01 mm of the surface, ten times finer than a 0.1 mm print
  * layer; replicad's default of 0.001 mm made a 1.9 mm O-ring 5 MB and a whole assembly 160 MB.
  */
+/**
+ * 3MF for a slicer: one object per part in one file, millimetres, meshed as finely as the STL.
+ * A zip of three XML files (stored, like the STL zip).
+ */
+function threeMF(parts: { name: string; body: Shape3D }[]): Blob {
+  const esc = (s: string) => s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!)
+  const num = (x: number) => String(Math.round(x * 1e4) / 1e4)
+  const objects = parts.map((p, i) => {
+    let m
+    try {
+      m = meshShape(p.body, 0.01, 0.1)
+    } catch (e) {
+      throw new Error(`「${p.name}」没能三角化成 3MF（${describeError(e).message}）；可以先导出 STEP`)
+    }
+    const v: string[] = []
+    for (let k = 0; k < m.vertices.length; k += 3) v.push(`<vertex x="${num(m.vertices[k])}" y="${num(m.vertices[k + 1])}" z="${num(m.vertices[k + 2])}"/>`)
+    const t: string[] = []
+    for (let k = 0; k < m.triangles.length; k += 3) t.push(`<triangle v1="${m.triangles[k]}" v2="${m.triangles[k + 1]}" v3="${m.triangles[k + 2]}"/>`)
+    return `<object id="${i + 1}" type="model" name="${esc(p.name)}"><mesh><vertices>${v.join("")}</vertices><triangles>${t.join("")}</triangles></mesh></object>`
+  })
+  const model = `<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Application">Turnery</metadata><resources>${objects.join("")}</resources><build>${parts.map((_, i) => `<item objectid="${i + 1}"/>`).join("")}</build></model>\n`
+  const types = `<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>\n`
+  const rels = `<?xml version="1.0" encoding="UTF-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>\n`
+  const enc = new TextEncoder()
+  return zipStore([
+    { name: "[Content_Types].xml", data: enc.encode(types) },
+    { name: "_rels/.rels", data: enc.encode(rels) },
+    { name: "3D/3dmodel.model", data: enc.encode(model) },
+  ])
+}
+
 function stlOf(body: Shape3D, name: string): Blob {
   try {
     return body.blobSTL({ binary: true, tolerance: 0.01, angularTolerance: 0.1 }) as Blob

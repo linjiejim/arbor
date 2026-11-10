@@ -90,6 +90,7 @@ export function TitleBar({
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onSelect={() => void turnery.exportPart("step")}>导出 STEP…</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void turnery.exportPart("stl")}>导出 STL…</DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void turnery.exportPart("3mf")}>导出 3MF…</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void turnery.exportPart("py")}>导出 build123d 代码…</DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void turnery.exportPart("json")}>导出特征树 JSON…</DropdownMenuItem>
               </DropdownMenuContent>
