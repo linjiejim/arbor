@@ -7,7 +7,7 @@
 名字：turnery 是车削工坊，把料夹在轴上一刀刀车出形状的地方；turn 也是 agent 的一轮。标志是一个拉出厚度的小写 t，顶上斜切一刀：草图拉伸成实体。标志和图标由 `resources/logo/make-logo.py`（build123d 精确生成几何）和 `scripts/make-icons.py` 生成。
 
 - 建模能力和网页版 Turnery 工作台是同一套：特征树 JSON、语义选择器、OpenCascade 内核（`app/src/studio`）。
-- AI 来自你自己的 agent：Turnery 不调用任何模型，也不需要 key。
+- AI 来自你自己的 agent（这时 Turnery 不调用任何模型，也不需要 key），或者来自内置助手：窗口右侧「对话」页签，用你自己配的模型和 key（`~/.turnery/providers.json`，或环境变量 `TURNERY_API_KEY_<预设>`）。命令行是 `turnery model`、`turnery ask "<一句话>"`。助手只能调建模命令；它和外部 agent 各记各的「自你上次调用以来」。
 - 零件就是一个 `.turnery.json` 文件（特征树 JSON），可以放进 git、可以直接编辑；备注在旁边的 `.notes.json`。
 - 一个文件夹就是一个项目：左栏列出里面的装配和零件。「文件 → 新建项目」建一个文件夹，里面放同名的空装配和共享参数文件；装配的特征树底部「+ 零件」新建零件（放在 `parts/` 下，共用项目参数）、放进已有零件或 STEP。
 - 新建项目缺省放在 `~/.turnery/projects/` 下，不改名就用时间命名（`YYYYMMDDhhmmss`）。打开项目时优先打开和文件夹同名的装配。

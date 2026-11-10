@@ -33,7 +33,7 @@ agent 交给你的是一棵**特征树**：有名字的参数，一步步的特�
 - **agent 能看、能量。** `look` 给它渲染视图、剖面和特写；`measure` 的距离由内核算出。它不用相信自己的心算，你也不用。
 - **需求存下来，反复核对。** `check` 把「80×50×28、壁厚 2、四个 M3 孔」变成内核每次改动后都重量一遍的条目：外形、壁厚、孔数和孔径、和导入的开发板之间的间隙、零件之间贴没贴上。
 - **和你双向配合。** 点一个面，写「这里开 USB-C 口，下沿离底 6」，agent 下一次调用就读到这条备注，连同这个面和坐标。agent 拿不准你指的是哪个面时，也能请你在模型上点一下。
-- **用你自己的 agent 和订阅。** Turnery 不调用任何模型，不需要 API key。
+- **用你自己的 agent 和订阅。** 接了 Claude Code 或 Codex 时，Turnery 不调用任何模型，不需要 API key。没有 agent 时，内置助手用你自己选的模型和 key。
 
 ## 一次建模是什么样
 
@@ -112,6 +112,22 @@ agent 交给你的是一棵**特征树**：有名字的参数，一步步的特�
 4. 对 agent 说要建什么，以「用 turnery……」开头。
 
 还没有 agent？Turnery 第一次启动会打开上面这个示例：在「参数」里改一下 `t`，看核对表的变化。
+
+### 或者用内置助手
+
+窗口右侧的「对话」页签用你选的模型跑同一套工具：DeepSeek、OpenRouter、Anthropic、OpenAI、Gemini、Moonshot（Kimi）、智谱、通义、SiliconFlow、本机的 Ollama，或任何 OpenAI 兼容的地址。它只能调 Turnery 的建模命令，碰不到别的文件，也不能运行程序。key 留在你的电脑上，不进项目文件夹。
+
+![内置助手把开口加宽后重新核对](docs/media/window-assistant.png)
+
+同一个循环也能在终端里跑，开不开窗口都行：
+
+```bash
+turnery model use deepseek
+```
+
+```bash
+turnery ask "把壁厚改成 3，再核对一遍" --part box
+```
 
 装好以后 Turnery 从 GitHub Releases 自动更新，更新包用内置在 App 里的公钥校验。
 

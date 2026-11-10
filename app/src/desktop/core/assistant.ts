@@ -3,8 +3,9 @@
 // It can do exactly what an outside agent can do over MCP and nothing else: no files beyond the
 // part it works on, no shell. Runs wherever the engine runs (the Electron main process, the CLI,
 // a unit test); nothing here imports Electron.
-import { isStepCount, jsonSchema, streamText, tool, type LanguageModel, type ModelMessage, type ToolSet } from "ai"
+import { convertToModelMessages, isStepCount, jsonSchema, streamText, tool, type LanguageModel, type ModelMessage, type ToolSet, type UIMessage } from "ai"
 import { withState } from "../../studio/prompt"
+import { trimMessages } from "../../studio/trim"
 import { AGENT_GUIDE, agentCommands, inputJsonSchema } from "./catalog"
 import { normalizePartPath, type Engine } from "./engine"
 import type { CallContext, CommandResult } from "./protocol"
@@ -106,4 +107,16 @@ export async function runAssistant(run: AssistantRun) {
     abortSignal: run.abortSignal,
     providerOptions: run.providerOptions,
   })
+}
+
+/**
+ * One turn for a window: the conversation as the chat UI holds it goes in, the UI message stream of
+ * the answer comes out (text, reasoning, each tool call and its result). Old turns and old pictures
+ * are trimmed first, as on the site.
+ */
+export async function assistantStream(run: Omit<AssistantRun, "messages"> & { messages: UIMessage[]; onError?: (error: unknown) => string }): Promise<ReadableStream<unknown>> {
+  const tools = assistantTools({ engine: run.engine, ctx: run.ctx, vision: run.vision })
+  const messages = await convertToModelMessages(trimMessages(run.messages), { tools, ignoreIncompleteToolCalls: true })
+  const result = await runAssistant({ ...run, messages })
+  return result.toUIMessageStream({ sendReasoning: true, onError: run.onError }) as ReadableStream<unknown>
 }

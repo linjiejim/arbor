@@ -13,6 +13,7 @@ import { addRecentProject, adoptLegacyHome, clearEngineInfo, HOME, PROJECTS_DIR,
 import { startEngine } from "../engine/host"
 import { serveEngine } from "../engine/rpc"
 import { agentSetup } from "./setup"
+import { wireAssistant } from "./assistant"
 import { createUpdater } from "./updater"
 
 declare const __TURNERY_VERSION__: string
@@ -639,6 +640,7 @@ function wireIpc() {
   ipcMain.handle("turnery:open-project-at", (e, root: string) => openProjectAt(wsOf(e), String(root)))
   ipcMain.handle("turnery:recent-projects", () => recentProjects())
   ipcMain.handle("turnery:open-example", (e) => openExample(wsOf(e)))
+  wireAssistant(ipcMain, (e) => wsOf(e).engine)
   ipcMain.handle("turnery:pick-file", (e, kind: "part" | "step") => pickFileDialog(wsOf(e), kind === "step" ? "step" : "part"))
   ipcMain.handle("turnery:reveal", (_e, p: string) => shell.showItemInFolder(p))
   ipcMain.handle("turnery:export", (e, format: ExportFormat) => exportDialog(wsOf(e), format))
