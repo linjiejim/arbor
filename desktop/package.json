@@ -1,7 +1,7 @@
 {
   "name": "turnery",
   "productName": "Turnery",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Desktop workbench where a local coding agent builds parametric parts over MCP or a CLI, and you watch, tweak and annotate.",
   "private": true,
   "license": "MIT",
