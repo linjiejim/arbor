@@ -302,6 +302,46 @@ describe("arbor: the engine", () => {
     expect(res.text).toContain("用户补充：前面这块")
   }, 30_000)
 
+  it("exports STL of an O-ring: a whole torus, alone and as one part of several", async () => {
+    // Revolving a full circle merges into one torus face with no edges; it used to mesh to nothing,
+    // so the ring was invisible and every STL export failed with "WRITE STL FILE FAILED".
+    const triangles = (stl: Uint8Array) => {
+      const n = new DataView(stl.buffer, stl.byteOffset).getUint32(80, true)
+      expect(stl.byteLength).toBe(84 + 50 * n)
+      return n
+    }
+    const mem = memFiles()
+    const engine = new Engine({ kernel: new DirectKernel(), files: mem.files })
+    const run = (name: string, input: unknown) => engine.run(name, input, AGENT)
+    await run("open_part", { path: "ring", create: true })
+    await run("sketch", { id: "sec", on: { plane: "XZ" }, shapes: [{ type: "circle", d: 1.9, center: [20, 5] }] })
+    expect((await run("revolve", { id: "ring", sketch: "sec", axis: "Z" })).ok).toBe(true)
+    const alone = await run("export", { path: "out/ring.stl" })
+    expect(alone.text).toMatch(/已导出 STL/)
+    const ring = triangles(mem.disk.get("/work/out/ring.stl") as Uint8Array)
+    expect(ring).toBeGreaterThan(1000)
+    // Fine enough to print, not millions of triangles for a 2 mm cord.
+    expect(ring).toBeLessThan(100_000)
+
+    await run("sketch", { id: "s", on: { plane: "XY" }, shapes: [{ type: "rect", w: 10, h: 10 }] })
+    expect((await run("extrude", { id: "blk", sketch: "s", distance: 10, part: "块" })).ok).toBe(true)
+    const both = await run("export", { path: "out/ring.stl" })
+    expect(both.text).toMatch(/已导出 STL 到 \/work\/out\/ring\.zip/)
+    const zip = mem.disk.get("/work/out/ring.zip") as Uint8Array
+    const entries = new Map<string, Uint8Array>()
+    for (let at = 0; new DataView(zip.buffer, zip.byteOffset).getUint32(at, true) === 0x04034b50; ) {
+      const v = new DataView(zip.buffer, zip.byteOffset + at)
+      const size = v.getUint32(18, true)
+      const nameLen = v.getUint16(26, true)
+      const start = at + 30 + nameLen + v.getUint16(28, true)
+      entries.set(new TextDecoder().decode(zip.slice(at + 30, at + 30 + nameLen)), zip.slice(start, start + size))
+      at = start + size
+    }
+    expect([...entries.keys()]).toEqual(["主体.stl", "块.stl"])
+    expect(triangles(entries.get("主体.stl")!)).toBe(ring)
+    expect(triangles(entries.get("块.stl")!)).toBe(12)
+  }, 30_000)
+
   it("refuses look without a window, and window-only commands from the agent", async () => {
     const { run } = await boxEngine()
     expect((await run("look", {})).text).toMatch(/先打开 Arbor App/)

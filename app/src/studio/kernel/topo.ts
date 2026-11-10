@@ -57,6 +57,62 @@ export function faceProps(face: { wrapped: unknown }): { area: number; center: V
   return out
 }
 
+/**
+ * True when a face of `shape` has no edges at all. Merging same-domain faces (replicad's simplify, and the
+ * clean-up after every boolean) turns the two halves of a revolved full circle (an O-ring) into one torus face
+ * with no boundary. OCCT's mesher leaves such a face empty: nothing on screen, and the STL writer refuses the shape.
+ */
+function hasBareFace(shape: { wrapped: unknown }): boolean {
+  const oc: OC = getOC()
+  const faces = new oc.TopExp_Explorer(shape.wrapped, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
+  try {
+    for (; faces.More(); faces.Next()) {
+      const face = faces.Current()
+      const edges = new oc.TopExp_Explorer(face, oc.TopAbs_ShapeEnum.TopAbs_EDGE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE)
+      const bare = !edges.More()
+      edges.delete()
+      face.delete()
+      if (bare) return true
+    }
+    return false
+  } finally {
+    faces.delete()
+  }
+}
+
+/**
+ * `shape` with every boundaryless face given its natural boundary (seam edges) back, so it meshes; solids
+ * without such a face are kept as they are. Returns `shape` itself when nothing needed it, else a new
+ * shape (and frees `shape`).
+ */
+export function bounded(shape: Shape3D): Shape3D {
+  if (!hasBareFace(shape)) return shape
+  const oc: OC = getOC()
+  const fix = (solid: { wrapped: unknown }) => {
+    const fixer = new oc.ShapeFix_Solid(solid.wrapped)
+    const progress = new oc.Message_ProgressRange()
+    fixer.Perform(progress)
+    const out = cast(fixer.Solid()) as Shape3D
+    progress.delete()
+    fixer.delete()
+    return out
+  }
+  const solids = solidsOf(shape)
+  if (!solids.length) return shape
+  let out: Shape3D
+  // A lone solid is fixed whole; a compound (parts, or bodies that don't touch) is rebuilt from its solids.
+  if (solids.length === 1 && (solids[0].wrapped as Native).IsSame(shape.wrapped)) out = fix(shape)
+  else {
+    const pieces = solids.map((s) => (hasBareFace(s) ? fix(s) : s))
+    out = compoundOf(pieces)
+    // The compound holds its own handles: the wrappers can go.
+    pieces.forEach((p) => !solids.includes(p) && p.delete())
+  }
+  solids.forEach((s) => s.delete())
+  shape.delete()
+  return out
+}
+
 /** A compound of `shapes` that, unlike replicad's makeCompound, leaves them alive (the parts of a split body). */
 export function compoundOf(shapes: { wrapped: unknown }[]): Shape3D {
   const oc: OC = getOC()
