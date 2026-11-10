@@ -320,6 +320,8 @@ export class Kernel {
   /** Editing a part inside an assembly: the other parts, placed in this part's frame, drawn see-through (read-only). */
   private context: Ref[] = []
   private contextKey = ""
+  /** The context the last rebuild measured its checks against (a restyle must not keep checks of an old one). */
+  private builtContextKey = ""
   /** An assembly's components as the host read them, by the file name written in the feature, and their content keys. */
   private components = new Map<string, { source: ComponentSource; key: string }>()
   private componentsGiven = false
@@ -337,7 +339,8 @@ export class Kernel {
    * frame as see-through, read-only reference bodies. Null leaves the assembly.
    */
   setContext(ctx: ContextSource | null) {
-    const key = ctx ? JSON.stringify([ctx.self, ctx.tree, ctx.components.map(componentKey)]) : ""
+    // Context parts draw see-through and uncoloured: their colours never rebuild the context.
+    const key = ctx ? JSON.stringify([ctx.self, withoutLooks(ctx.tree), ctx.components.map(componentKey)]) : ""
     if (key === this.contextKey) return
     this.context.forEach((r) => r.shape.delete())
     this.context = []
@@ -414,6 +417,7 @@ export class Kernel {
   rebuild(tree: Tree, hooks: BuildHooks = {}): BuildReport {
     const t0 = performance.now()
     this.overlapJobs = []
+    this.builtContextKey = this.contextKey
     // Purely geometric selectors never read feature provenance. Intermediate
     // tessellations then exist only for the part editor's colours, not geometry.
     const trackOrigins = !this.componentOnly || usesOrigins(tree.features)
@@ -531,7 +535,8 @@ export class Kernel {
    * changed too (the caller rebuilds then).
    */
   restyle(tree: Tree): boolean {
-    if (!this.steps.length || this.steps.length !== tree.features.length || JSON.stringify(tree.checks) !== JSON.stringify(this.tree.checks)) return false
+    // Checks measure against the assembly around a part too: a moved neighbour means measuring again.
+    if (!this.steps.length || this.steps.length !== tree.features.length || this.contextKey !== this.builtContextKey || JSON.stringify(tree.checks) !== JSON.stringify(this.tree.checks)) return false
     const keys = this.keysOf(tree)
     if (keys.some((k, i) => this.steps[i].key !== k)) return false
     this.tree = tree

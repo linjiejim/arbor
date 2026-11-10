@@ -1134,7 +1134,8 @@ export class Engine {
     if (!k.restyle || !sameGeometry(prev, doc.tree)) return false
     await this.select(doc)
     if (this.built.get(doc.path) !== prev) return false
-    await this.syncAssets(doc, doc.tree)
+    // Handing over new sources stops the background checks of the last build: then only a rebuild restarts them.
+    if ((await this.syncAssets(doc, doc.tree)) && doc.report?.checksPending) return false
     if (!(await k.restyle(this.effective(doc, doc.tree)))) return false
     this.built.set(doc.path, doc.tree)
     return true
@@ -1171,6 +1172,8 @@ export class Engine {
       d.rev += 1
       d.changes = [{ rev: d.rev, actor: ctx.actor, at: Date.now(), summary, seq: ++d.seq }, ...d.changes].slice(0, MAX_CHANGES)
       if (!(await this.restyle(d, d.tree))) await this.ensureKernel(d, true)
+      // The window shows a new version only when told (a restyle doesn't go through the loading state).
+      this.emitDoc(d)
     }
     return { path, before, after: written }
   }

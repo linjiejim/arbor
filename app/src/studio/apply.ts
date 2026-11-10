@@ -202,11 +202,12 @@ export async function executeTool(port: KernelPort, tree: Tree, name: string, in
       const parts = (input.parts as string[] | undefined)?.filter(Boolean)
       const change = { color: input.color as string | null | undefined, finish: input.finish as Finish | null | undefined }
       if (change.color === undefined && change.finish === undefined) return { tree, output: { ok: false, text: "✗ 写 color 或 finish（写 null 是清除）。" } }
-      const next = setPartLook(tree, parts?.length ? parts : undefined, change)
-      const report = await port.rebuild(next)
-      const names = report.parts?.map((p) => p.name) ?? []
+      // The names are checked against the model as it is (built already: nothing rebuilds), before anything changes.
+      const names = (await port.rebuild(tree)).parts?.map((p) => p.name) ?? []
       const unknown = (parts ?? []).filter((p) => !names.includes(p))
       if (unknown.length) return { tree, output: { ok: false, text: names.length ? `✗ 没有叫「${unknown.join("、")}」的零件：现在有 ${names.join("、")}` : "✗ 这个零件没有拆开：不写 parts，就是整个零件。" } }
+      const next = setPartLook(tree, parts?.length ? parts : undefined, change)
+      const report = await port.rebuild(next)
       const one = (name?: string) => lookText(ownLook(next.appearance, name), "未设置（白模）")
       const now = names.length ? names.map((n) => `${n} ${one(n)}`).join("、") : one()
       return { tree: next, output: { ok: true, text: `已设置${changeText(change) ? `（${changeText(change)}）` : ""}，不改几何。外观：${now}${isSet(next.appearance) && names.length ? "（整体的颜色用在没有自己颜色的零件上）" : ""}` }, report }

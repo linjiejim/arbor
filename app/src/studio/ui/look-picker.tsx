@@ -131,7 +131,8 @@ export function LookPicker({
             aria-label="质感"
             className="ml-auto"
             value={finish}
-            onValueChange={(f) => pick({ finish: f === defaultFinish(look) ? null : f })}
+            // Always the finish chosen: null would fall back to an inherited one (a metal whole part), not to matte.
+            onValueChange={(f) => pick({ finish: f })}
             options={FINISHES.map((f) => ({ value: f, label: FINISH_NAMES[f] }))}
           />
         </div>

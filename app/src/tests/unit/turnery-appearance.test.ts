@@ -400,3 +400,62 @@ describe("appearance: the project list and the site's assistant", () => {
     k.dispose()
   })
 })
+
+describe("appearance: where restyling must not cut corners (review)", () => {
+  it("measures again when the assembly around a part moved, but not for its colours", () => {
+    const part = (n: number): Tree => ({ params: {}, features: box(n, n, n) })
+    const ctx = (at: number, look?: string) => ({
+      assembly: "asm",
+      self: "a.turnery.json",
+      components: [{ file: "a.turnery.json", tree: part(10) }, { file: "b.turnery.json", tree: part(10) }],
+      tree: { params: {}, features: [{ id: "a", op: "component" as const, file: "a.turnery.json" }, { id: "b", op: "component" as const, file: "b.turnery.json", at: [at, 0, 0], ...(look ? { appearance: { color: look } } : {}) }] },
+    })
+    const k = new Kernel()
+    const tree = part(10)
+    k.setContext(ctx(10))
+    k.rebuild(tree)
+    k.setContext(ctx(10, "red"))
+    expect(k.restyle(tree)).toBe(true)
+    k.setContext(ctx(20))
+    expect(k.restyle(tree)).toBe(false)
+    k.dispose()
+  })
+
+  it("rebuilds rather than restyles while background checks are pending, and tells the window about every assembly it restyled", async () => {
+    const { run, rebuild, touch, files, engine } = setup()
+    await files.write("/work/parts/block.turnery.json", JSON.stringify({ params: {}, features: box(10, 10, 10) }))
+    await run("open_part", { path: "a.turnery-asm.json", create: true })
+    await run("component", { id: "a", name: "块", file: "parts/block.turnery.json" })
+    await run("open_part", { path: "b.turnery-asm.json", create: true })
+    await run("component", { id: "b", name: "块", file: "parts/block.turnery.json" })
+    // Changed through b: a (open, not shown) restyles and is told; its version moves on.
+    const seen: string[] = []
+    engine.on((e) => e.type === "doc" && seen.push(e.doc.path))
+    const revA = engine.docState("/work/a.turnery-asm.json")!.rev
+    await run("set_appearance", { parts: ["块"], color: "blue" }, USER)
+    expect(seen).toContain("/work/a.turnery-asm.json")
+    expect(engine.docState("/work/a.turnery-asm.json")!.rev).toBeGreaterThan(revA)
+
+    // Checks still running in the background (the desktop's worker): a file's colour change rebuilds.
+    const real = DirectKernel.prototype.rebuild
+    rebuild.mockImplementation(async function (this: DirectKernel, ...args: Parameters<DirectKernel["rebuild"]>) {
+      return { ...(await real.apply(this, args)), checksPending: true }
+    })
+    await run("component", { id: "c", name: "块2", file: "parts/block.turnery.json", at: [20, 0, 0] })
+    const before = rebuild.mock.calls.length
+    await touch("/work/parts/block.turnery.json", JSON.stringify({ params: {}, features: box(10, 10, 10), appearance: { color: "red" } }))
+    await run("get_state", {})
+    expect(rebuild.mock.calls.length).toBeGreaterThan(before)
+  })
+
+  it("leaves the site's kernel as it was when a part name is wrong", async () => {
+    const { executeTool } = await import("@/studio/apply")
+    const k = new Kernel()
+    const port = { rebuild: async (t: Tree) => k.rebuild(t), inspect: async () => "" }
+    k.rebuild(shell)
+    const run = await executeTool(port, shell, "set_appearance", { parts: ["上盖", "顶盖"], color: "orange" })
+    expect(run.output.ok).toBe(false)
+    expect(k.looks().map((l) => l.look.color)).toEqual([undefined, undefined])
+    k.dispose()
+  })
+})
