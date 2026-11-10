@@ -1,6 +1,7 @@
 import { z } from "zod"
 import { FASTENER_TYPES, SCREW_HEADS } from "./fasteners"
 import { SCREW_SIZES } from "./holes"
+import { Appearance, PartAppearance } from "./appearance"
 
 /**
  * The studio's model: a parameter table plus an ordered feature tree, as plain
@@ -338,6 +339,7 @@ export const Feature = z.discriminatedUnion("op", [
       .optional()
       .describe("贴合摆放：先按 rotate、at 放，再按顺序一条条满足（后一条只在前面留下的自由度里移动、转动），不用自己算坐标。to.face 选中几个面（例如 4 个孔）就放几个，零件清单里数量照算"),
     hidden: z.boolean().optional().describe("先不显示（还在装配里，导出、核对照常）"),
+    appearance: Appearance.optional().describe("只在这个装配里的颜色和质感，比零件文件自己的优先；标准件、外购件（STEP）的颜色写在这里。同一个 component 放的几个一起变"),
   }),
   z.object({
     ...Base,
@@ -455,6 +457,8 @@ export const Tree = z.object({
   features: z.array(Feature),
   /** The learner's numeric requirements, re-measured on every rebuild. */
   checks: z.array(Check).optional(),
+  /** Colour and finish: the whole part, and per part after a split. Never changes the geometry. */
+  appearance: PartAppearance.optional(),
 })
 export type Tree = z.infer<typeof Tree>
 

@@ -14,7 +14,6 @@ import {
   drawPolysides,
   drawRectangle,
   drawRoundedRectangle,
-  exportSTEP,
   getOC,
   makeCompound,
   makeCylinder,
@@ -30,6 +29,7 @@ import {
   type Shape3D,
 } from "replicad"
 import type { PickInfo } from "../annotations"
+import { ownLook, mergeLook, withoutLooks, hexOf, colorName, type Appearance, type Look } from "../appearance"
 import { componentName, displayName, EMPTY_TREE, OP_NAMES, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type Point, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
 import { MAX_COUNT } from "../limits"
@@ -175,8 +175,13 @@ export type DisplayData = {
   edges: Float32Array | null
   /** One per edge: a run of points in `edges` (segment pairs). */
   edgeGroups: { start: number; count: number; hash: number; part?: number }[]
-  /** After a split: the parts, with where each moves at full explode. */
-  parts?: { name: string; explode: V3; center: V3; hidden?: boolean }[]
+  /**
+   * After a split: the parts, with where each moves at full explode, their colour and finish, and in an
+   * assembly which component placed each (`sub`: its name inside that component's file).
+   */
+  parts?: { name: string; explode: V3; center: V3; hidden?: boolean; look?: Look; component?: string; sub?: string }[]
+  /** The whole body's look when it isn't split into parts. */
+  look?: Look
   /** Reference bodies (`import`, desktop app): drawn see-through, not part of the model. */
   refs?: { id: string; name: string; mesh: { vertices: Float32Array; normals: Float32Array; triangles: Uint32Array }; edges: Float32Array | null }[]
   /** Outline of the sketch, when the shown step is a sketch. */
@@ -233,10 +238,17 @@ export type ComponentSource = {
   compiled?: CompiledComponent
 }
 
-export type CompiledComponent = { parts: { name: string | null; brep: string; display?: ComponentDisplay; bounds?: [V3, V3]; volume?: number }[]; failed: number }
+export type CompiledComponent = { parts: { name: string | null; brep: string; display?: ComponentDisplay; bounds?: [V3, V3]; volume?: number; trail?: Trail }[]; failed: number }
+
+/**
+ * Where a part of an assembly comes from, outermost first: the component feature that placed it and the
+ * part's name in what it placed (null: a single body). Deeper entries: inside a sub-assembly. Structure
+ * only (never colours), so it survives every cache that ignores looks.
+ */
+export type Trail = { component: string; sub: string | null }[]
 
 /** A built component: its parts' final shapes (unnamed: a single-body part), and how many features failed. */
-type Built = { parts: { name: string | null; shape: Shape3D }[]; failed: number }
+type Built = { parts: { name: string | null; shape: Shape3D; trail?: Trail }[]; failed: number }
 
 /** Built components by content, shared by every kernel in the thread (switching parts doesn't rebuild them). */
 const BUILT = new Map<string, Built>()
@@ -275,6 +287,8 @@ type Part = {
   /** An assembly's component: which `component` feature placed it, and where. */
   component?: string
   placement?: Placement
+  /** In an assembly: where it comes from, for its colour (see Trail). */
+  trail?: Trail
 }
 
 /** New faces smaller than this (mm²) are reported as slivers. */
@@ -413,27 +427,13 @@ export class Kernel {
       this.paramsKey = paramsKey
     }
 
-    // Suppressing a feature suppresses what is built on it, as in SolidWorks.
-    const off = new Map<string, string | null>()
-    for (const f of tree.features) {
-      if (f.suppressed) off.set(f.id, null)
-      else {
-        const parent = referencesOf(f).find((r) => off.has(r))
-        if (parent) off.set(f.id, parent)
-      }
-    }
-
-    let key = paramsKey
+    const off = suppressedOf(tree)
+    const keys = this.keysOf(tree)
     let failed = paramError !== undefined
     for (let i = 0; i < tree.features.length; i++) {
       const f = tree.features[i]
       hooks.progress?.({ stage: "build", completed: i, total: tree.features.length, label: displayName(tree, f) })
-      key +=
-        "\n" +
-        JSON.stringify(f) +
-        (off.has(f.id) ? "\noff" : "") +
-        (f.op === "import" ? `\n${this.assets.get(f.file)?.hash ?? "-"}` : "") +
-        (f.op === "component" ? `\n${(f.file && this.components.get(f.file)?.key) ?? "-"}` : "")
+      const key = keys[i]
       const cached = this.steps[i]
       if (cached && cached.key === key) {
         if (cached.result.state === "error" || cached.result.state === "skipped") failed = true
@@ -501,6 +501,60 @@ export class Kernel {
     }
   }
 
+  /**
+   * Each step's cache key: everything its result depends on (parameters, the features up to it, the files
+   * they read), never colours or finishes.
+   */
+  private keysOf(tree: Tree): string[] {
+    const off = suppressedOf(tree)
+    let key = JSON.stringify(tree.params)
+    return tree.features.map((f) => {
+      key +=
+        "\n" +
+        featureKey(f) +
+        (off.has(f.id) ? "\noff" : "") +
+        (f.op === "import" ? `\n${this.assets.get(f.file)?.hash ?? "-"}` : "") +
+        (f.op === "component" ? `\n${(f.file && this.components.get(f.file)?.key) ?? "-"}` : "")
+      return key
+    })
+  }
+
+  /**
+   * Only colours or finishes changed (here or in a component's file, handed over with setComponents):
+   * take the new tree for drawing and exporting without rebuilding anything. False when anything else
+   * changed too (the caller rebuilds then).
+   */
+  restyle(tree: Tree): boolean {
+    if (!this.steps.length || this.steps.length !== tree.features.length || JSON.stringify(tree.checks) !== JSON.stringify(this.tree.checks)) return false
+    const keys = this.keysOf(tree)
+    if (keys.some((k, i) => this.steps[i].key !== k)) return false
+    this.tree = tree
+    return true
+  }
+
+  /**
+   * How a part is drawn: in a part file, the file's own look for it; in an assembly, the component's
+   * look in this assembly over the look its file gives it (a sub-assembly: followed down its trail),
+   * standard parts and STEP files by what they are.
+   */
+  private lookOf(p: Pick<Part, "name" | "trail">): Look {
+    if (!p.trail?.length) return { ...ownLook(this.tree.appearance, p.name), source: "part" }
+    return trailLook(this.tree, this.components, p.trail, 0)
+  }
+
+  /** Each part of the last body that built and how it looks (one entry for an unsplit body). */
+  looks(): { name: string; look: Look }[] {
+    const last = this.lastBuilt(this.steps.length)
+    return last?.body ? this.looksOf(last).map(({ name, look }) => ({ name, look })) : []
+  }
+
+  /** The look of each part of a step's body (one entry for an unsplit body), for exports. */
+  private looksOf(step: Step): { name: string; body: Shape3D; look: Look }[] {
+    if (step.parts && step.parts.length > 1) return step.parts.map((p) => ({ name: p.name, body: p.body, look: this.lookOf(p) }))
+    const only = step.parts?.length === 1 ? step.parts[0] : null
+    return [{ name: only?.name ?? step.mainName ?? "零件", body: step.body!, look: only ? this.lookOf(only) : { ...ownLook(this.tree.appearance, step.mainName), source: "part" } }]
+  }
+
   /** What checks can name: reference bodies (and the assembly context) by id and name, parts by name. */
   private checkBodies(step: Step): CheckBodies {
     const refs = new Map<string, AnyShape>()
@@ -556,12 +610,21 @@ export class Kernel {
           fs.forEach((f) => f.delete())
           es.forEach((e) => e.delete())
           const [a, b] = boundsOf(p.body)
-          return { name: p.name, explode: p.auto ? add(p.explode, auto[k]) : p.explode, center: mul(add(a, b), 0.5), hidden: p.hidden }
+          const where = p.trail?.[0]
+          return {
+            name: p.name,
+            explode: p.auto ? add(p.explode, auto[k]) : p.explode,
+            center: mul(add(a, b), 0.5),
+            hidden: p.hidden,
+            look: this.lookOf(p),
+            ...(where ? { component: where.component, ...(where.sub ? { sub: where.sub } : {}) } : {}),
+          }
         })
         out.groups = out.groups.map((g) => ({ ...g, part: faceToPart.get(g.hash) }))
         out.edgeGroups = out.edgeGroups.map((g) => ({ ...g, part: edgeToPart.get(g.hash) }))
       }
     }
+    if (body?.body && !out.parts) out.look = body.parts?.length === 1 ? this.lookOf(body.parts[0]) : { ...ownLook(this.tree.appearance, body.mainName), source: "part" }
     // The assembly around a part being edited in context draws like reference bodies.
     const refs = [...((body ?? step)?.refs ?? []), ...this.context]
     if (refs.length) {
@@ -984,19 +1047,21 @@ export class Kernel {
     }
   }
 
-  /** STEP or STL of the body; after a split, one STEP with a named solid per part, or a zip of one STL per part. */
+  /**
+   * STEP or STL of the body; after a split, one STEP with a named solid per part, or a zip of one STL per
+   * part. STEP and 3MF carry the colours set on the parts (STL has none).
+   */
   async exportBody(format: "step" | "stl" | "3mf", index?: number): Promise<Blob | null> {
     const step = this.lastBuilt(index === undefined ? this.steps.length : index + 1)
     if (!step?.body) return null
-    const parts = step.parts && step.parts.length > 1 ? step.parts : null
-    if (format === "3mf") return threeMF(parts ? parts.map((p) => ({ name: p.name, body: p.body })) : [{ name: step.mainName ?? "零件", body: step.body }])
-    if (!parts) return format === "step" ? step.body.blobSTEP() : stlOf(step.body, step.mainName ?? "零件")
-    if (format === "step") {
-      const blob = exportSTEP(parts.map((p) => ({ shape: p.body, name: p.name })))
-      return new Blob([stepAscii(await blob.text())], { type: "application/STEP" })
-    }
+    const split = !!step.parts && step.parts.length > 1
+    const looks = this.looksOf(step)
+    if (format === "3mf") return threeMF(looks)
+    if (!split && format === "step" && !hexOf(looks[0].look.color)) return step.body.blobSTEP()
+    if (!split && format === "stl") return stlOf(step.body, step.mainName ?? "零件")
+    if (format === "step") return new Blob([stepAscii(new TextDecoder().decode(stepWithLooks(looks)))], { type: "application/STEP" })
     const files = await Promise.all(
-      parts.map(async (p) => ({ name: `${p.name.replace(/[\\/:*?"<>|]/g, "_")}.stl`, data: new Uint8Array(await stlOf(p.body, p.name).arrayBuffer()) })),
+      looks.map(async (p) => ({ name: `${p.name.replace(/[\\/:*?"<>|]/g, "_")}.stl`, data: new Uint8Array(await stlOf(p.body, p.name).arrayBuffer()) })),
     )
     return zipStore(files)
   }
@@ -1834,6 +1899,7 @@ export class Kernel {
         hidden: f.hidden,
         component: f.id,
         placement: pl,
+        trail: [{ component: f.id, sub: p.name }, ...(p.trail ?? [])],
       })),
     )
     // A screw or an insert bites into the material it goes in: overlap is the point, not news.
@@ -2105,11 +2171,49 @@ function usesOrigins(value: unknown): boolean {
   return Object.entries(value).some(([key, child]) => key === "of" || usesOrigins(child))
 }
 
+/** A feature as far as building it goes: a component's colour in the assembly never rebuilds it. */
+function featureKey(f: Feature) {
+  if (f.op !== "component" || !f.appearance) return JSON.stringify(f)
+  const { appearance: _a, ...rest } = f
+  void _a
+  return JSON.stringify(rest)
+}
+
+/** Suppressing a feature suppresses what is built on it, as in SolidWorks. Value: the suppressed one it uses (null: itself). */
+function suppressedOf(tree: Tree) {
+  const off = new Map<string, string | null>()
+  for (const f of tree.features) {
+    if (f.suppressed) off.set(f.id, null)
+    else {
+      const parent = referencesOf(f).find((r) => off.has(r))
+      if (parent) off.set(f.id, parent)
+    }
+  }
+  return off
+}
+
+/** Follow a part's trail from `tree` (an assembly) down to the file it comes from; nearer looks win. */
+function trailLook(tree: Tree, components: Map<string, { source: ComponentSource }>, trail: Trail, i: number): Look {
+  const at = trail[i]
+  const f = tree.features.find((x): x is Extract<Feature, { op: "component" }> => x.op === "component" && x.id === at.component)
+  if (!f) return { source: "part" }
+  let inner: Look
+  if (f.standard) inner = { source: "standard" }
+  else {
+    const src = f.file ? components.get(f.file)?.source : undefined
+    if (f.file && /\.(step|stp)$/i.test(f.file)) inner = { source: "step" }
+    else if (!src?.tree) inner = { source: "part" }
+    else if (i + 1 < trail.length) inner = trailLook(src.tree, new Map((src.components ?? []).map((c) => [c.file, { source: c }])), trail, i + 1)
+    else inner = { ...ownLook(src.tree.appearance, at.sub), source: "part" }
+  }
+  return { ...mergeLook(f.appearance, inner), source: inner.source }
+}
+
 /** What a component's built shape depends on: its tree, the bytes it reads, its own components. */
 export function componentKey(c: ComponentSource): string {
   if (c.error) return `error:${c.error}`
   if (c.bytes !== undefined) return `step:${c.bytes ? contentHash(c.bytes) : "missing"}`
-  return JSON.stringify([c.tree, (c.assets ?? []).map((a) => [a.name, a.bytes ? contentHash(a.bytes) : a.error]), (c.components ?? []).map(componentKey)])
+  return JSON.stringify([c.tree ? withoutLooks(c.tree) : c.tree, (c.assets ?? []).map((a) => [a.name, a.bytes ? contentHash(a.bytes) : a.error]), (c.components ?? []).map(componentKey)])
 }
 
 /** Build a component (a part file in a kernel of its own, or a STEP file), or take it from the cache. */
@@ -2128,7 +2232,7 @@ function buildComponent(src: ComponentSource): Built {
     try {
       for (const p of src.compiled.parts) {
         const shape = deserializeShape(p.brep) as Shape3D
-        parts.push({ name: p.name, shape })
+        parts.push({ name: p.name, shape, trail: p.trail })
         if (p.display) restoreDisplay(shape, p.display)
         if (p.bounds) BOUNDS.set(shape, p.bounds)
         if (p.volume !== undefined) VOLUMES.set(shape, p.volume)
@@ -2156,7 +2260,7 @@ function buildComponent(src: ComponentSource): Built {
         throw new InputError(`「${src.file}」一步都没有建成${err ? `：${err}` : ""}`)
       }
       const failed = rep.features.filter((x) => x.state === "error").length
-      const parts = last.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, shape: p.body.clone() })) : [{ name: null, shape: last.body.clone() }]
+      const parts = last.parts && last.parts.length > 1 ? last.parts.map((p) => ({ name: p.name, shape: p.body.clone(), trail: p.trail })) : [{ name: null, shape: last.body.clone(), trail: last.parts?.[0]?.trail }]
       built = { parts, failed }
     } finally {
       sub.dispose()
@@ -2174,7 +2278,7 @@ function buildComponent(src: ComponentSource): Built {
 /** Portable OCCT geometry for a component worker/cache; no session-specific face hashes. */
 export function compileComponent(source: ComponentSource): CompiledComponent {
   const built = buildComponent(source)
-  return { parts: built.parts.map((p) => ({ name: p.name, brep: p.shape.serialize(), display: packDisplay(p.shape), bounds: boundsOf(p.shape), volume: volumeOf(p.shape) })), failed: built.failed }
+  return { parts: built.parts.map((p) => ({ name: p.name, brep: p.shape.serialize(), display: packDisplay(p.shape), bounds: boundsOf(p.shape), volume: volumeOf(p.shape), trail: p.trail })), failed: built.failed }
 }
 
 /** Rotate (in order, about the origin) then move: a component's place in its assembly. */
@@ -2449,9 +2553,12 @@ function count(v: number, min: number, what: string): number {
  * 3MF for a slicer: one object per part in one file, millimetres, meshed as finely as the STL.
  * A zip of three XML files (stored, like the STL zip).
  */
-function threeMF(parts: { name: string; body: Shape3D }[]): Blob {
+function threeMF(parts: { name: string; body: Shape3D; look?: Appearance }[]): Blob {
   const esc = (s: string) => s.replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!)
   const num = (x: number) => String(Math.round(x * 1e4) / 1e4)
+  const colored = parts.filter((p) => hexOf(p.look?.color))
+  // Resource ids: the materials first, the objects after them (ids are unique across resources).
+  const MATERIALS = parts.length + 1
   const objects = parts.map((p, i) => {
     let m
     try {
@@ -2463,9 +2570,14 @@ function threeMF(parts: { name: string; body: Shape3D }[]): Blob {
     for (let k = 0; k < m.vertices.length; k += 3) v.push(`<vertex x="${num(m.vertices[k])}" y="${num(m.vertices[k + 1])}" z="${num(m.vertices[k + 2])}"/>`)
     const t: string[] = []
     for (let k = 0; k < m.triangles.length; k += 3) t.push(`<triangle v1="${m.triangles[k]}" v2="${m.triangles[k + 1]}" v3="${m.triangles[k + 2]}"/>`)
-    return `<object id="${i + 1}" type="model" name="${esc(p.name)}"><mesh><vertices>${v.join("")}</vertices><triangles>${t.join("")}</triangles></mesh></object>`
+    const k = colored.indexOf(p)
+    const material = k >= 0 ? ` pid="${MATERIALS}" pindex="${k}"` : ""
+    return `<object id="${i + 1}" type="model" name="${esc(p.name)}"${material}><mesh><vertices>${v.join("")}</vertices><triangles>${t.join("")}</triangles></mesh></object>`
   })
-  const model = `<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Application">Turnery</metadata><resources>${objects.join("")}</resources><build>${parts.map((_, i) => `<item objectid="${i + 1}"/>`).join("")}</build></model>\n`
+  // The core spec's base materials: one per coloured part, its display colour sRGB (clear ones see-through).
+  const bases = colored.map((p) => `<base name="${esc(colorName(p.look!.color))}" displaycolor="${hexOf(p.look!.color)!.toUpperCase()}${p.look!.finish === "clear" ? "66" : "FF"}"/>`)
+  const resources = (bases.length ? `<basematerials id="${MATERIALS}">${bases.join("")}</basematerials>` : "") + objects.join("")
+  const model = `<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02"><metadata name="Application">Turnery</metadata><resources>${resources}</resources><build>${parts.map((_, i) => `<item objectid="${i + 1}"/>`).join("")}</build></model>\n`
   const types = `<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/></Types>\n`
   const rels = `<?xml version="1.0" encoding="UTF-8"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/></Relationships>\n`
   const enc = new TextEncoder()
@@ -2474,6 +2586,62 @@ function threeMF(parts: { name: string; body: Shape3D }[]): Blob {
     { name: "_rels/.rels", data: enc.encode(rels) },
     { name: "3D/3dmodel.model", data: enc.encode(model) },
   ])
+}
+
+/** sRGB 0–1 → linear: OpenCascade keeps colours linear and writes them to STEP as sRGB again. */
+const toLinear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+
+/**
+ * STEP with a named solid per part, coloured where a colour is set (clear ones partly see-through).
+ * replicad's exportSTEP colours every part, red when none is given; here an unset part stays unset.
+ */
+function stepWithLooks(parts: { name: string; body: Shape3D; look?: Appearance }[]): Uint8Array {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const oc = getOC() as any
+  const made: { delete(): void }[] = []
+  const keep = <T extends { delete(): void }>(x: T) => (made.push(x), x)
+  const text = (s: string) => keep(new oc.TCollection_ExtendedString(s, true))
+  const file = `/turnery-export-${Math.random().toString(36).slice(2)}.step`
+  try {
+    const doc = keep(new oc.TDocStd_Document(text("XmlOcaf")))
+    oc.XCAFDoc_ShapeTool.SetAutoNaming(false)
+    const main = keep(doc.Main())
+    const shapes = oc.XCAFDoc_DocumentTool.ShapeTool(main)
+    const colors = oc.XCAFDoc_DocumentTool.ColorTool(main)
+    for (const p of parts) {
+      const node = keep(shapes.NewShape())
+      shapes.SetShape(node, p.body.wrapped)
+      oc.TDataStd_Name.Set(node, text(p.name))
+      const hex = hexOf(p.look?.color)
+      if (!hex) continue
+      const [r, g, b] = [1, 3, 5].map((i) => toLinear(parseInt(hex.slice(i, i + 2), 16) / 255))
+      colors.SetColor(node, keep(new oc.Quantity_ColorRGBA(r, g, b, p.look?.finish === "clear" ? 0.4 : 1)), oc.XCAFDoc_ColorType.XCAFDoc_ColorSurf)
+    }
+    shapes.UpdateAssemblies()
+    const writer = keep(new oc.STEPCAFControl_Writer(keep(new oc.XSControl_WorkSession()), false))
+    writer.SetColorMode(true)
+    writer.SetNameMode(true)
+    writer.SetLayerMode(true)
+    oc.Interface_Static.SetIVal("write.surfacecurve.mode", 1)
+    oc.Interface_Static.SetIVal("write.precision.mode", 0)
+    oc.Interface_Static.SetIVal("write.step.assembly", 2)
+    oc.Interface_Static.SetIVal("write.step.schema", 5)
+    if (!writer.Perform(doc, file, keep(new oc.Message_ProgressRange()))) throw new Error("STEP 文件没能写出来")
+    return oc.FS.readFile(file) as Uint8Array
+  } finally {
+    try {
+      getOC().FS.unlink(file)
+    } catch {
+      /* never written */
+    }
+    for (const x of made.reverse()) {
+      try {
+        x.delete()
+      } catch {
+        /* owned by the document */
+      }
+    }
+  }
 }
 
 function stlOf(body: Shape3D, name: string): Blob {

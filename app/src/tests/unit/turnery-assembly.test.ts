@@ -297,7 +297,7 @@ describe("shared parameters and assemblies", () => {
     const bom = await run("export", { path: "pen-bom.md" })
     expect(bom.ok, bom.text).toBe(true)
     const md = disk.get("/work/pen-bom.md") as string
-    expect(md).toMatch(/\| 1 \| 笔杆 \| parts\/barrel\.turnery\.json \| 1 \| 4\.71 \| 10 × 10 × 60 \|/)
+    expect(md).toMatch(/\| 1 \| 笔杆 \| parts\/barrel\.turnery\.json \| 1 \| — \| 4\.71 \| 10 × 10 × 60 \|/)
     expect(md).toMatch(/共 2 件/)
     const step = await run("export", { path: "pen.step" })
     expect(step.ok, step.text).toBe(true)

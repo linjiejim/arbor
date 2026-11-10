@@ -2,6 +2,7 @@ import * as THREE from "three"
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js"
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js"
 import type { MaterialKit } from "@/three/materials"
+import { isSet } from "./appearance"
 import type { DisplayData } from "./kernel/build"
 
 /**
@@ -26,15 +27,38 @@ export type Hover = {
   edges?: number[]
 }
 
+/** The look a part (by index; none: the unsplit body) is drawn with. */
+const lookAt = (d: DisplayData, k: number | undefined) => (k !== undefined && d.parts ? d.parts[k]?.look : d.look)
+
+/** Something to colour: a part with a colour or finish set, or a standard part or a STEP file (they draw apart). */
+export function hasLooks(d: DisplayData | null | undefined) {
+  if (!d) return false
+  const list = d.parts ? d.parts.map((p) => p.look) : [d.look]
+  return list.some((l) => !!l && (isSet(l) || l.source !== "part"))
+}
+
 /**
  * The live model as three.js objects: one mesh with a group per B-rep face
  * (painted by this step's new / modified status, or by provenance when a
- * feature is highlighted), its edges, and the sketch outline if any.
+ * feature is highlighted), its edges, and the sketch outline if any. At rest
+ * each part shows its own colour and finish (`looks`; off: a white model).
  */
-export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view: PartsView = NO_PARTS_VIEW): THREE.Group {
+export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view: PartsView = NO_PARTS_VIEW, looks = true): THREE.Group {
   const root = new THREE.Group()
   root.name = "studio-model"
-  const materials = [kit.model, kit.highlight, kit.modified, kit.ghost, kit.modelDark, kit.hovered, kit.added]
+  const materials: THREE.Material[] = [kit.model, kit.highlight, kit.modified, kit.ghost, kit.modelDark, kit.hovered, kit.added]
+  // Each part's resting material: an index into `materials` (0, the white model, when looks are off).
+  const restOf = (k: number | undefined) => {
+    const look = lookAt(d, k)
+    if (!looks || !look) return 0
+    const m = kit.forLook(look).surface
+    const i = materials.indexOf(m)
+    return i >= 0 ? i : materials.push(m) - 1
+  }
+  const edgeOf = (k: number | undefined) => {
+    const look = lookAt(d, k)
+    return looks && look ? kit.forLook(look).edge : kit.edge
+  }
   // Parts pulled apart or hidden: one mesh (and edge set) per part, moved along its explode vector.
   if (d.parts && (view.explode > 0 || view.hidden.size || view.focus || d.parts.some((p) => p.hidden))) {
     d.parts.forEach((part, k) => {
@@ -51,10 +75,12 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
       geo.setAttribute("position", new THREE.BufferAttribute(d.mesh.vertices, 3))
       geo.setAttribute("normal", new THREE.BufferAttribute(d.mesh.normals, 3))
       geo.setIndex(index)
-      for (const g of own) geo.addGroup(g.start, g.count, materialIndex(g, paint))
+      const rest = restOf(k)
+      for (const g of own) geo.addGroup(g.start, g.count, materialIndex(g, paint, rest))
       const mesh = new THREE.Mesh(geo, ghost ? kit.ghost : materials)
       mesh.userData.contextGhost = ghost
       mesh.userData.groups = own
+      mesh.userData.rests = own.map(() => rest)
       mesh.userData.part = k
       const at = new THREE.Vector3(...part.explode).multiplyScalar(view.explode)
       mesh.position.copy(at)
@@ -64,7 +90,7 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
         for (const g of d.edgeGroups) if (g.part === k) for (let i = g.start * 3; i < (g.start + g.count) * 3; i++) pts.push(d.edges[i])
         const eg = new THREE.BufferGeometry()
         eg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3))
-        const lines = new THREE.LineSegments(eg, ghost ? kit.edgeGhost : kit.edge)
+        const lines = new THREE.LineSegments(eg, ghost ? kit.edgeGhost : edgeOf(k))
         lines.position.copy(at)
         root.add(lines)
       }
@@ -78,15 +104,36 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
     geo.setAttribute("position", new THREE.BufferAttribute(d.mesh.vertices, 3))
     geo.setAttribute("normal", new THREE.BufferAttribute(d.mesh.normals, 3))
     geo.setIndex(new THREE.BufferAttribute(d.mesh.triangles, 1))
-    for (const g of d.groups) geo.addGroup(g.start, g.count, materialIndex(g, paint))
+    const rests = d.groups.map((g) => restOf(g.part))
+    d.groups.forEach((g, i) => geo.addGroup(g.start, g.count, materialIndex(g, paint, rests[i])))
     const mesh = new THREE.Mesh(geo, materials)
     mesh.userData.groups = d.groups
+    mesh.userData.rests = rests
     root.add(mesh)
   }
   if (d.edges?.length) {
-    const eg = new THREE.BufferGeometry()
-    eg.setAttribute("position", new THREE.BufferAttribute(d.edges, 3))
-    root.add(new THREE.LineSegments(eg, kit.edge))
+    // One set of lines per edge material (parts in different colours have edges of their own).
+    const runs = new Map<THREE.Material, number[]>()
+    const parted = looks && d.parts && d.edgeGroups.some((g) => g.part !== undefined)
+    if (parted) {
+      for (const g of d.edgeGroups) {
+        const m = edgeOf(g.part)
+        const pts = runs.get(m) ?? []
+        for (let i = g.start * 3; i < (g.start + g.count) * 3; i++) pts.push(d.edges[i])
+        runs.set(m, pts)
+      }
+    }
+    if (!parted || runs.size === 1) {
+      const eg = new THREE.BufferGeometry()
+      eg.setAttribute("position", new THREE.BufferAttribute(d.edges, 3))
+      root.add(new THREE.LineSegments(eg, parted ? [...runs.keys()][0] : edgeOf(undefined)))
+    } else {
+      for (const [m, pts] of runs) {
+        const eg = new THREE.BufferGeometry()
+        eg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3))
+        root.add(new THREE.LineSegments(eg, m))
+      }
+    }
   }
   if (d.threads?.length) {
     // Cosmetic threads: dashed rings at the nominal diameter, as on a drawing.
@@ -139,9 +186,8 @@ function addRefs(root: THREE.Group, d: DisplayData, kit: MaterialKit) {
   }
 }
 
-function materialIndex(g: DisplayData["groups"][number], paint: Paint) {
-  // A neutral white model is the default; interaction and optional changes go on top.
-  const rest = 0
+function materialIndex(g: DisplayData["groups"][number], paint: Paint, rest = 0) {
+  // At rest: the part's own look (or the neutral white model); interaction and optional changes go on top.
   if (g.part !== undefined && paint.selected?.includes(g.part)) return 1
   if (paint.hovered?.includes(g.hash)) return 5
   if (paint.faces) return paint.faces.includes(g.hash) ? 1 : rest
@@ -170,7 +216,8 @@ export function repaint(root: THREE.Object3D, paint: Paint) {
     const mesh = o as THREE.Mesh
     if (!mesh.isMesh || !mesh.userData.groups || mesh.userData.contextGhost) return
     const groups = mesh.userData.groups as DisplayData["groups"]
-    mesh.geometry.groups.forEach((gr, i) => (gr.materialIndex = materialIndex(groups[i], paint)))
+    const rests = mesh.userData.rests as number[] | undefined
+    mesh.geometry.groups.forEach((gr, i) => (gr.materialIndex = materialIndex(groups[i], paint, rests?.[i])))
   })
 }
 

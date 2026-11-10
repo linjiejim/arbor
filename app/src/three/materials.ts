@@ -1,6 +1,10 @@
 import * as THREE from "three"
 import { LineMaterial } from "three/addons/lines/LineMaterial.js"
 import type { SceneTokens } from "./tokens"
+import { hexOf, luminance, type Look } from "@/studio/appearance"
+
+/** What a part draws with: its surface and its edges. */
+export type LookMaterials = { surface: THREE.Material; edge: THREE.LineBasicMaterial }
 
 /**
  * Every material the viewport uses, coloured from the scene tokens.
@@ -66,6 +70,8 @@ export class MaterialKit {
 
   private lineMaterials = [this.sketch, this.sketchThin, this.sketchDefined, this.construction, this.dimension, this.path]
   private sectionOn = false
+  /** Parts' own colours, by colour and finish: made on first use, kept for the viewer's life. */
+  private looks = new Map<string, LookMaterials>()
 
   constructor(tokens: SceneTokens) {
     this.applyTokens(tokens)
@@ -128,14 +134,70 @@ export class MaterialKit {
     return this[role]
   }
 
+  /**
+   * The materials a part draws with. Nothing set: the theme's own by where it comes from (white model,
+   * metal grey for standard parts, a darker grey for STEP files), so light and dark mode still apply.
+   * A colour: real colour, the same in either mode, its edges a shade apart so they read on it.
+   */
+  forLook(look: Look | undefined): LookMaterials {
+    const hex = hexOf(look?.color)
+    const finish = look?.finish ?? (look?.source === "standard" ? "metal" : "matte")
+    if (!hex) {
+      if (finish === "clear") return { surface: this.glass, edge: this.edgeSoft }
+      if (finish === "metal") return { surface: this.metal, edge: this.edge }
+      return look?.source === "step" ? { surface: this.modelDark, edge: this.edgeSoft } : { surface: this.model, edge: this.edge }
+    }
+    const key = `${hex}|${finish}`
+    let m = this.looks.get(key)
+    if (!m) {
+      m = this.makeLook(hex, finish)
+      this.looks.set(key, m)
+    }
+    return m
+  }
+
+  private makeLook(hex: string, finish: "matte" | "metal" | "clear"): LookMaterials {
+    const color = new THREE.Color(hex)
+    let surface: THREE.MeshStandardMaterial
+    if (finish === "clear") {
+      // See-through like the reference bodies, tinted: the parts inside stay readable.
+      surface = new THREE.MeshPhysicalMaterial({ color, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide })
+      // Both sides always: the far wall of a clear shell shows through the near one.
+      surface.userData.clear = true
+    } else {
+      surface = this.surface(finish === "metal" ? { roughness: 0.32, metalness: 0.85 } : { roughness: 0.62, metalness: 0 })
+      surface.color.copy(color)
+      // The cut face of a section: the part's own colour, darker, so a cut assembly shows whose material is whose.
+      ;(surface.userData.uCut as { value: THREE.Color }).value.copy(color).multiplyScalar(0.55)
+    }
+    // Dark parts get light edges, light ones darker edges of their own hue.
+    const edgeColor = luminance(hex) < 0.1 ? color.clone().lerp(new THREE.Color(1, 1, 1), 0.5) : color.clone().multiplyScalar(0.3)
+    const edge = new THREE.LineBasicMaterial({ color: edgeColor, ...(finish === "clear" ? { transparent: true, opacity: 0.6 } : {}) })
+    this.clip([surface, edge])
+    return { surface, edge }
+  }
+
+  private lookMaterials() {
+    return [...this.looks.values()].flatMap((m) => [m.surface, m.edge])
+  }
+
+  /** Clipping for these materials as for the rest (a section may be on when they're made). */
+  private clip(list: THREE.Material[]) {
+    for (const m of list) {
+      m.clippingPlanes = this.sectionOn ? this.clipping : null
+      if (m instanceof THREE.MeshStandardMaterial && !m.userData.clear) m.side = this.sectionOn ? THREE.DoubleSide : THREE.FrontSide
+      m.needsUpdate = true
+    }
+  }
+
   /** Clip every solid surface by `plane` (null turns the section off). */
   setSection(plane: THREE.Plane | null) {
     this.clipping.length = 0
     if (plane) this.clipping.push(plane)
     const on = !!plane
-    for (const m of [this.model, this.modelDark, this.metal, this.hovered, this.added, this.highlight, this.modified, this.glass, this.edge, this.edgeSoft, this.edgeHighlight]) {
+    for (const m of [this.model, this.modelDark, this.metal, this.hovered, this.added, this.highlight, this.modified, this.glass, this.edge, this.edgeSoft, this.edgeHighlight, ...this.lookMaterials()]) {
       m.clippingPlanes = on ? this.clipping : null
-      if (m instanceof THREE.MeshStandardMaterial) m.side = on ? THREE.DoubleSide : THREE.FrontSide
+      if (m instanceof THREE.MeshStandardMaterial && !m.userData.clear) m.side = on ? THREE.DoubleSide : THREE.FrontSide
       m.needsUpdate = this.sectionOn !== on
     }
     this.sectionOn = on
@@ -143,5 +205,7 @@ export class MaterialKit {
 
   dispose() {
     for (const v of Object.values(this)) if (v instanceof THREE.Material) v.dispose()
+    for (const m of this.lookMaterials()) m.dispose()
+    this.looks.clear()
   }
 }

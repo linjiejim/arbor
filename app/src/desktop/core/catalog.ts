@@ -3,6 +3,7 @@
 // as `turnery call <name>`, and the window uses the user's ones over IPC.
 import { z } from "zod"
 import { EdgeSelector, FaceSelector, Num, PlaneRef, Tree } from "../../studio/dsl"
+import { Color, Finish } from "../../studio/appearance"
 import { SYSTEM_PROMPT } from "../../studio/prompt"
 import { STARTERS } from "../../studio/starters"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
@@ -122,6 +123,19 @@ const own: CommandSpec[] = [
       dir: z.array(z.number()).length(3).optional().describe("再加一张从这个方向看的图，例如 [1, 1, 0.3]"),
       size: z.enum(["normal", "large"]).optional().describe("large = 896×672（缺省 448×336）"),
       hide: z.array(z.string()).optional().describe("不画这些零件或参考体（按名字），例如藏起笔帽看里面"),
+      plain: z.boolean().optional().describe("画成白模，不按零件的颜色和质感（看形状、对比明暗时用）"),
+    }),
+  },
+  {
+    name: "set_appearance",
+    audience: "both",
+    description:
+      "设零件的颜色和质感：窗口里按它显示，导出 3MF、STEP 时带上，零件清单里列出。只改外观，不改几何、不重建。零件文件里：不写 parts 是整个零件，写 parts 是拆件后的某几个零件。装配里：parts 写装配里的零件名；自建零件缺省写进它自己的零件文件（用到它的装配都跟着变），标准件、外购件（STEP）、子装配，以及写了 where: \"assembly\" 的，写在这个装配的 component 上。color、finish 写 null 是清除。",
+    input: z.object({
+      parts: z.array(z.string()).optional().describe("零件名：拆件后的零件，或装配里的零件（get_state 的「外观」一行列着）；零件文件里不写就是整个零件"),
+      color: Color.nullable().optional(),
+      finish: Finish.nullable().optional(),
+      where: z.enum(["file", "assembly"]).optional().describe("装配里：file = 写进零件文件（自建零件的缺省），assembly = 只在这个装配里"),
     }),
   },
   {
@@ -227,8 +241,8 @@ const own: CommandSpec[] = [
   {
     name: "add_part",
     audience: "user",
-    description: "往当前装配里加零件：name 新建 parts/<name>.turnery.json 并在装配里编辑它；file 放一个已有的零件、装配或 STEP。",
-    input: z.object({ name: z.string().optional(), file: z.string().optional() }),
+    description: "往当前装配里加零件：name 新建 parts/<name>.turnery.json 并在装配里编辑它（可以带上颜色和质感）；file 放一个已有的零件、装配或 STEP。",
+    input: z.object({ name: z.string().optional(), file: z.string().optional(), color: Color.optional(), finish: Finish.optional() }),
   },
 ]
 
@@ -435,6 +449,12 @@ ${promptSections(["数值", "坐标与基准面", "扫掠、放样、拔模", "�
 - 共用尺寸：share_params 让零件和装配用同一个共享参数文件（*.params.json，move 把已有参数移进去）。共享参数以文件为准，set_params 改到它们会写回文件，用到它的零件一起重建。
 - 在装配里改零件：open_part 带 context: "pen.turnery-asm.json"，装配里的其他零件按相对位置半透明地显示在旁边；look 能看到它们，measure 的 part、check 的 gap / clearance / interference 能写它们的名字。不带 context 再打开一次就退出。
 - 装配建好后：check 用 gap 核对该贴上的地方、interference 核对不该相交的地方；look 用 hide 和 section 看里面；export 出 step、stl（多零件打包成 zip）和 bom（零件清单）。
+
+## 颜色和质感
+- 用户说了颜色（「上盖做成橙色」「螺丝用黑色」），或者要看最终效果、区分几类零件时，用 set_appearance 设：color 写色板名（white、silver、gray、black、red、orange、yellow、green、teal、blue、purple、pink），要还原具体的耗材、喷漆颜色时写 #RRGGBB；finish 写 matte 哑光（缺省）、metal 金属、clear 透明（例如透明外壳，能看到里面的板子）。
+- 颜色只是外观：不改几何、不重建，窗口里随时可以关掉看白模。没设颜色的零件是白模，标准件按金属色、STEP 外购件按深灰显示。
+- 零件文件里：拆件后用 parts 分别设（上盖橙、底壳灰）；没拆就是整个零件。装配里：自建零件的颜色缺省写进它自己的零件文件，标准件和外购件写在装配的 component 上（component 也可以直接带 appearance）。同一类零件设同一种颜色，零件清单和导出的 3MF 也按颜色分开。
+- look 的图按颜色画，结果里有一行颜色图例；要看纯形状写 plain: true。
 
 ## 标准件和贴合摆放
 - 螺钉、螺母、垫圈、热熔螺母不用建零件文件：component 写 standard（不写 file），例如 {"type":"screw","size":"M3","head":"socket","length":10}；head：socket 内六角圆柱头（缺省）、button 半圆头、flat 沉头、pan 盘头。零件清单（export bom）按规格合并计数。

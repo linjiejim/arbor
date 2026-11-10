@@ -56,7 +56,7 @@ export function DesktopApp() {
   React.useEffect(
     () =>
       turnery.onLook(async (req) =>
-        req.shots ? renderShots(req.display, req.shots, { highlight: req.highlight, pins: req.pins, section: req.section, hide: req.hide, size: req.size }) : renderViews(req.display, req.views, req.highlight, { pins: req.pins }),
+        req.shots ? renderShots(req.display, req.shots, { highlight: req.highlight, pins: req.pins, section: req.section, hide: req.hide, size: req.size, plain: req.plain }) : renderViews(req.display, req.views, req.highlight, { pins: req.pins }),
       ),
     [],
   )
@@ -123,9 +123,10 @@ export function DesktopApp() {
   const hoverParts = pointedFeature ? (pointedPart === undefined ? [] : [pointedPart]) : selectedParts
   const modelHover: Hover | null = selectionHover ? { ids: [selectionHover], feature: selectionHover, label: "零件或步骤", faces: hoverParts.length ? studio.display?.groups.filter((g) => g.part !== undefined && hoverParts.includes(g.part)).map((g) => g.hash) : undefined } : agentHover
   const assemblyParts = studio.display?.parts?.map((p, index) => {
-    const id = studio.display?.groups.find((g) => g.part === index)?.origin ?? ""
+    const id = p.component ?? studio.display?.groups.find((g) => g.part === index)?.origin ?? ""
     const feature = studio.tree.features.find((f) => f.id === id)
-    return { name: p.name, index, id, file: feature?.op === "component" ? feature.file ?? "" : "" }
+    const file = feature?.op === "component" ? feature.file ?? "" : ""
+    return { name: p.name, index, id, file, look: p.look, own: !!file && !/\.(step|stp)$/i.test(file) && !/-asm\.json$/i.test(file) }
   }) ?? []
   const [presented, setPresented] = React.useState<unknown>(null)
   const assembly = doc?.kind === "assembly" && !doc.context
@@ -139,7 +140,11 @@ export function DesktopApp() {
         {/* The start page is just the start page: the sidebar comes with a project or an open file. */}
         {(doc || snapshot?.project || snapshot?.parts.length || loading) && <PartsSidebar snapshot={snapshot} instances={assembly ? assemblyParts : []} selected={selectedNames}
           onSelect={(p, additive) => selectFeature(p.id, p.index, additive)}
-          onPoint={(p) => pointFeature(p?.id ?? null, p?.index)} />}
+          onPoint={(p) => pointFeature(p?.id ?? null, p?.index)}
+          onLook={async (parts, change, here) => {
+            const r = await turnery.call("set_appearance", { parts, ...change, ...(here ? { where: "assembly" } : {}) }, path ?? undefined)
+            if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
+          }} />}
         <main className="relative min-h-0 min-w-0 flex-1" data-testid="model-viewport" data-document={path} data-pointed-part={pointed?.path === path ? pointed?.part ?? "" : ""} data-presented={Boolean(studio.display && presented === studio.display)} data-geometry-state={!studio.display ? "loading" : studio.display.provisional ? "preview" : "ready"}>
           {doc ? (
             <>
@@ -173,6 +178,7 @@ export function DesktopApp() {
                 parts={partsView}
                 onParts={setPartsView}
                 partsList={!assembly}
+                looks={!assembly}
                 rowActions={assembly ? (f) => <ComponentActions f={f} doc={doc} studio={studio} view={partsView} onView={setPartsView} /> : undefined}
                 footer={assembly ? <AddPartMenu doc={doc} /> : undefined}
                 detailsIn={stepSlot}

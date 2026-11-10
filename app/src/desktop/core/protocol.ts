@@ -112,6 +112,8 @@ export type LookRequest = {
   /** Parts and reference bodies (by name) left out of the pictures. */
   hide?: string[]
   size?: "normal" | "large"
+  /** Without the parts' colours and finishes (a white model). */
+  plain?: boolean
 }
 
 export type EngineEvent =

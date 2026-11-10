@@ -14,7 +14,7 @@ import { circled, type PickInfo } from "../annotations"
 import type { DisplayData } from "../kernel/build"
 import type { MeasureResult, MeasureTarget } from "../kernel/measure"
 import type { Pin } from "../look"
-import { edgeHighlight, groupAt, faceTarget, partOffset, partVisible, modelObject, NO_PARTS_VIEW, repaint, type Hover, type Paint, type PartsView } from "../scene"
+import { edgeHighlight, groupAt, faceTarget, hasLooks, partOffset, partVisible, modelObject, NO_PARTS_VIEW, repaint, type Hover, type Paint, type PartsView } from "../scene"
 import type { Annotations } from "../use-annotations"
 import type { Studio } from "../use-studio"
 import type { Reselect } from "../use-reselect"
@@ -29,6 +29,27 @@ import { useWords } from "./host-words"
 type V3 = [number, number, number]
 /** A press that moves less than this is a click, not a camera drag. */
 const CLICK_PX = 5
+
+const LOOKS_STORE = "ft-studio-looks"
+/** Colours or a white model: the person's own way of looking, kept across parts and launches (never in a file). */
+function useLooksSwitch(): [boolean, (on: boolean) => void] {
+  const [on, setOn] = React.useState(() => {
+    try {
+      return localStorage.getItem(LOOKS_STORE) !== "off"
+    } catch {
+      return true
+    }
+  })
+  const set = React.useCallback((v: boolean) => {
+    setOn(v)
+    try {
+      localStorage.setItem(LOOKS_STORE, v ? "on" : "off")
+    } catch {
+      /* private mode: this window only */
+    }
+  }, [])
+  return [on, set]
+}
 
 /** Wording and numbering for hosts other than the web studio (the desktop app's notes). */
 export type ViewportCopy = {
@@ -99,6 +120,7 @@ export function StudioViewport({
   const [picked, setPicked] = React.useState<MeasureTarget[]>([])
   const [measured, setMeasured] = React.useState<{ key: string; result: MeasureResult | null } | null>(null)
   const [section, setSection] = React.useState<Section | null>(null)
+  const [looks, setLooks] = useLooksSwitch()
   // A new model invalidates the picks (hashes belong to the old one).
   const [shownDisplay, setShownDisplay] = React.useState(display)
   if (shownDisplay !== display) {
@@ -186,9 +208,27 @@ export function StudioViewport({
     if (focus) return { status: false, faces: focus.kind === "face" ? focus.hashes : [] }
     return { status: showChanges, selected: selectedParts, hovered: hover?.faces ?? display?.groups.filter((g) => hover?.ids.includes(g.origin)).map((g) => g.hash) }
   }, [focus, hover, measuring, picked, rs, selectedParts, showChanges, display])
+  // Selected parts are outlined as well as lit: a part already blue still shows it is the one selected.
+  const selectedEdges = React.useMemo(
+    () => (selectedParts.length && display ? display.edgeGroups.filter((g) => g.part !== undefined && selectedParts.includes(g.part)).map((g) => g.hash) : []),
+    [selectedParts, display],
+  )
   const edgeHashes = React.useMemo(
-    () => (rs ? (rs.kind === "edge" ? rs.hashes : []) : hover?.edges?.length ? hover.edges : measuring ? picked.filter((t) => t.kind === "edge").map((t) => t.hash) : focus?.kind === "edge" ? focus.hashes : []),
-    [measuring, picked, focus, rs, hover],
+    () =>
+      rs
+        ? rs.kind === "edge"
+          ? rs.hashes
+          : []
+        : hover?.edges?.length
+          ? hover.edges
+          : measuring
+            ? picked.filter((t) => t.kind === "edge").map((t) => t.hash)
+            : focus?.kind === "edge"
+              ? focus.hashes
+              : focus
+                ? []
+                : selectedEdges,
+    [measuring, picked, focus, rs, hover, selectedEdges],
   )
   const paintRef = React.useRef(paint)
   React.useEffect(() => {
@@ -203,7 +243,7 @@ export function StudioViewport({
   }, [display, rs, parts])
   React.useEffect(() => {
     if (!viewer || !display) return
-    const g = modelObject(display, viewer.kit, paintRef.current, view)
+    const g = modelObject(display, viewer.kit, paintRef.current, view, looks)
     viewer.setContent(g)
     current.current = g
     const stop = viewer.onRendered(() => { stop(); onPresented?.(display) })
@@ -217,7 +257,7 @@ export function StudioViewport({
       }
     } else fittedSize.current = 0
     return stop
-  }, [viewer, display, view, onPresented])
+  }, [viewer, display, view, onPresented, looks])
 
   // Frame the pulled-apart parts once the learner lets go of the explode slider.
   const frameExploded = React.useCallback(() => {
@@ -547,10 +587,12 @@ export function StudioViewport({
           explode={display.parts && display.parts.length > 1 ? parts.explode : null}
           onExplode={(explode) => onParts?.({ ...parts, explode })}
           onExplodeEnd={frameExploded}
+          looks={{ on: looks, available: hasLooks(display) }}
+          onLooks={setLooks}
           tips={[
             ...(readOnly || copy?.hint === null ? [] : [`${copy?.hint ?? "单击模型上的面或边，标注要改的地方"}。`]),
             "拖动右上角的方块转动视角；点它的面、棱或角，转到对应的视图。",
-            "这一列工具可以测量、剖开看、标尺寸、把零件分开看。",
+            "这一列工具可以测量、剖开看、标尺寸、把零件分开看，颜色按钮在零件的颜色和白模之间切换。",
           ]}
         />
       )}

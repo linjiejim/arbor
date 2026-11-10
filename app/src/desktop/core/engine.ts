@@ -4,6 +4,7 @@
 // ports, so the same engine runs in Electron's main process and in the CLI.
 import type { PickInfo } from "../../studio/annotations"
 import { executeTool, moveFeature, treeText, type KernelPort } from "../../studio/apply"
+import { applyLook, changeText, isSet, lookText, sameGeometry, setPartLook, SOURCE_DEFAULT, type Finish, type Look, type LookChange } from "../../studio/appearance"
 import { toBuild123d } from "../../studio/codegen"
 import { EMPTY_TREE, Feature, Tree, componentName, displayName } from "../../studio/dsl"
 import { designation } from "../../studio/fasteners"
@@ -69,6 +70,10 @@ export interface KernelHost {
   readonly phase: KernelPhase
   readonly progress?: BuildProgress | null
   rebuild(tree: Tree, options?: { background?: boolean; interferences?: BuildReport["interferences"]; deferChecks?: boolean }): Promise<BuildReport>
+  /** Only colours or finishes changed since the last build: take the tree without rebuilding. False: rebuild. */
+  restyle?(tree: Tree): Promise<boolean>
+  /** Each part of the last body that built and how it looks (one entry for an unsplit body). */
+  looks?(): Promise<{ name: string; look: Look }[]>
   inspect(what: "body" | "faces" | "edges", selector?: unknown): Promise<string>
   display(index?: number): Promise<DisplayData>
   pick(kind: "face" | "edge", hash: number, point: V3): Promise<PickInfo | null>
@@ -125,7 +130,9 @@ export type EngineOptions = {
   home?: string
 }
 
-type Entry = { tree: Tree; summary: string }
+/** A file this change rewrote besides the part's own (a component's part file, given a colour from its assembly). */
+type FileEdit = { path: string; before: string; after: string }
+type Entry = { tree: Tree; summary: string; files?: FileEdit[] }
 
 type Doc = {
   path: string
@@ -441,7 +448,7 @@ export class Engine {
       if (name === "list_parts") return await this.listParts()
       if (name === "open_project") return await this.openProject(input as { path: string; create?: boolean }, ctx)
       if (name === "scan_project") return await this.rescan()
-      if (name === "add_part") return await this.addPart(input as { name?: string; file?: string }, ctx)
+      if (name === "add_part") return await this.addPart(input as Parameters<Engine["addPart"]>[0], ctx)
       if (name === "close_part") return this.closePart(this.partKey(String(input.path)))
       if (name === "close_project") return this.closeProject()
       const doc = await this.resolveDoc(ctx)
@@ -501,6 +508,8 @@ export class Engine {
       case "undo":
       case "redo":
         return this.undoRedo(doc, name, ctx)
+      case "set_appearance":
+        return this.setAppearance(doc, input as Parameters<Engine["setAppearance"]>[1], ctx)
       case "look":
         return this.look(doc, input)
       case "measure": {
@@ -880,7 +889,7 @@ export class Engine {
    * The window's 「+ 零件」 on an assembly: `name` makes parts/<name>.turnery.json (using the assembly's
    * parameter file) and opens it inside the assembly; `file` puts an existing part, assembly or STEP in.
    */
-  private async addPart(input: { name?: string; file?: string }, ctx: CallContext): Promise<CommandResult> {
+  private async addPart(input: { name?: string; file?: string; color?: string; finish?: Finish }, ctx: CallContext): Promise<CommandResult> {
     const asm = await this.resolveDoc(ctx)
     if (!asm || !isAssembly(asm.path)) return fail("先打开一个装配")
     const dir = dirName(asm.path)
@@ -892,7 +901,9 @@ export class Engine {
       const path = `${dir}/parts/${fname}`
       if ((await this.opts.files.read(path)) !== null) return fail(`已经有这个零件了：parts/${fname}`)
       const uses = asm.tree.uses ? relativePath(`${dir}/parts`, besides(asm.path, asm.tree.uses)) : undefined
-      await this.opts.files.write(path, `${JSON.stringify({ ...(uses ? { uses } : {}), params: {}, features: [] }, null, 2)}\n`)
+      // A colour chosen with the name: the part file's own, so it shows wherever the part is used.
+      const look = applyLook(undefined, { color: input.color, finish: input.finish })
+      await this.opts.files.write(path, `${JSON.stringify({ ...(uses ? { uses } : {}), params: {}, features: [], ...(look ? { appearance: look } : {}) }, null, 2)}\n`)
       file = `parts/${fname}`
       label = stripEnding(fname)
     } else if (input.file) {
@@ -1030,19 +1041,20 @@ export class Engine {
   // ---------------------------------------------------------- tree changes
 
   /** Make `tree` the part's current tree: rebuild, record who did what, save, tell the window. Undoable. */
-  private async adopt(doc: Doc, tree: Tree, actor: CallContext["actor"], opts: { report?: BuildReport; save?: boolean; summary?: string; undoable?: boolean } = {}) {
+  private async adopt(doc: Doc, tree: Tree, actor: CallContext["actor"], opts: { report?: BuildReport; save?: boolean; summary?: string; undoable?: boolean; files?: FileEdit[] } = {}) {
     const summary = opts.summary ?? (describeTreeChange(doc.tree, tree) || "重新保存（内容没变）")
     if (opts.undoable !== false) {
-      doc.undo = [...doc.undo, { tree: doc.tree, summary }].slice(-MAX_UNDO)
+      doc.undo = [...doc.undo, { tree: doc.tree, summary, ...(opts.files?.length ? { files: opts.files } : {}) }].slice(-MAX_UNDO)
       doc.redo = []
     }
+    const prev = doc.tree
     const usesChanged = doc.tree.uses !== tree.uses
     doc.tree = tree
     doc.rev += 1
     doc.error = undefined
     if (usesChanged) await this.refreshShared(doc)
     if (opts.report && this.slot === doc.path && this.built.get(doc.path) === tree) doc.report = opts.report
-    else await this.ensureKernel(doc, true)
+    else if (!(await this.restyle(doc, prev))) await this.ensureKernel(doc, true)
     doc.changes = [{ rev: doc.rev, actor, at: Date.now(), summary, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
     if (opts.save !== false && !(await this.save(doc, actor))) {
       // Someone saved the file while this ran: theirs wins, ours stays one undo away.
@@ -1057,12 +1069,18 @@ export class Engine {
     const from = which === "undo" ? doc.undo : doc.redo
     const entry = from[from.length - 1]
     if (!entry) return fail(which === "undo" ? "没有可以撤销的改动。" : "没有可以重做的改动。")
+    const files = entry.files
     if (which === "undo") {
       doc.undo = doc.undo.slice(0, -1)
-      doc.redo = [...doc.redo, { tree: doc.tree, summary: entry.summary }]
+      doc.redo = [...doc.redo, { tree: doc.tree, summary: entry.summary, ...(files ? { files } : {}) }]
     } else {
       doc.redo = doc.redo.slice(0, -1)
-      doc.undo = [...doc.undo, { tree: doc.tree, summary: entry.summary }]
+      doc.undo = [...doc.undo, { tree: doc.tree, summary: entry.summary, ...(files ? { files } : {}) }]
+    }
+    // A colour given from the assembly went into a component's file: that file goes back (or forward) too.
+    for (const f of files ?? []) {
+      const [from, to] = which === "undo" ? [f.after, f.before] : [f.before, f.after]
+      await this.rewrite(f.path, (text) => (text === from ? to : null), ctx, `${which === "undo" ? "撤销" : "重做"}：${entry.summary}`, doc)
     }
     await this.adopt(doc, entry.tree, ctx.actor, { summary: `${which === "undo" ? "撤销" : "重做"}：${entry.summary}`, undoable: false })
     return { ok: true, text: `已${which === "undo" ? "撤销" : "重做"}：${entry.summary}\n${treeText(doc.tree, doc.report!)}` }
@@ -1091,6 +1109,161 @@ export class Engine {
 
   private async saveNotes(doc: Doc) {
     await this.opts.files.write(notesPath(doc.path), `${JSON.stringify(doc.notes, null, 2)}\n`)
+  }
+
+  // ------------------------------------------------------------------ looks
+
+  /**
+   * Only colours or finishes changed since the kernel built `prev` (in the tree, or in a component's
+   * file): hand it the new sources and tree, no rebuild. False when anything else changed: rebuild.
+   */
+  private async restyle(doc: Doc, prev: Tree): Promise<boolean> {
+    const k = this.opts.kernel
+    if (!k.restyle || !sameGeometry(prev, doc.tree)) return false
+    await this.select(doc)
+    if (this.built.get(doc.path) !== prev) return false
+    await this.syncAssets(doc, doc.tree)
+    if (!(await k.restyle(this.effective(doc, doc.tree)))) return false
+    this.built.set(doc.path, doc.tree)
+    return true
+  }
+
+  /**
+   * Rewrite a file besides the doc being changed: a component's part file given a colour from its
+   * assembly, or put back by undo. `change` gets the text on disk and returns the new text (null: leave
+   * it). Through its doc when that is open (its own undo list gets it too). The other open files that
+   * read it (assemblies) restyle; `origin` is left to the caller, who adopts it. Returns the edit, or
+   * null when nothing was written.
+   */
+  private async rewrite(path: string, change: (text: string) => string | null, ctx: CallContext, summary: string, origin: Doc): Promise<FileEdit | null> {
+    const open = this.docs.get(path)
+    if (open) await this.fileChanged(open)
+    const before = await this.opts.files.read(path)
+    if (before === null) throw new InputError(`读不到 ${path}`)
+    const after = change(before)
+    if (after === null || after === before) return null
+    if (open) {
+      const parsed = parseTree(after)
+      if (!parsed.ok) throw new InputError(`${path} 不是合法的特征树：${parsed.error}`)
+      await this.adopt(open, parsed.tree, ctx.actor, { summary })
+    } else {
+      this.wrote.set(path, { text: after, actor: ctx.actor })
+      await this.opts.files.write(path, after)
+    }
+    const written = open?.written ?? after
+    for (const d of this.docs.values()) {
+      if (!d.assetWatch.has(path)) continue
+      // Its watcher would take this write for news: it is ours, followed right here.
+      d.assetSeen.set(path, `text:${written}`)
+      if (d === origin) continue
+      d.rev += 1
+      d.changes = [{ rev: d.rev, actor: ctx.actor, at: Date.now(), summary, seq: ++d.seq }, ...d.changes].slice(0, MAX_CHANGES)
+      if (!(await this.restyle(d, d.tree))) await this.ensureKernel(d, true)
+    }
+    return { path, before, after: written }
+  }
+
+  /**
+   * set_appearance. In a part file: the whole part, or the parts named. In an assembly: a self-made
+   * part's colour goes into its part file (every assembly using it follows); a standard part, a STEP
+   * file, a sub-assembly, or `where: assembly` goes onto the component in this assembly.
+   */
+  private async setAppearance(doc: Doc, input: { parts?: string[]; color?: string | null; finish?: Finish | null; where?: "file" | "assembly" }, ctx: CallContext): Promise<CommandResult> {
+    const change: LookChange = { color: input.color, finish: input.finish }
+    if (change.color === undefined && change.finish === undefined) return fail("写 color 或 finish（写 null 是清除）。")
+    const what = changeText(change)
+    const parts = [...new Set((input.parts ?? []).map((p) => p.trim()).filter(Boolean))]
+    if (!isAssembly(doc.path)) {
+      await this.ensureKernel(doc)
+      const names = doc.report?.parts?.map((p) => p.name) ?? []
+      const unknown = parts.filter((p) => !names.includes(p))
+      if (unknown.length) return fail(names.length ? `没有叫「${unknown.join("、")}」的零件：现在有 ${names.join("、")}` : "这个零件没有拆开：不写 parts，就是整个零件。")
+      const tree = setPartLook(doc.tree, parts.length ? parts : undefined, change)
+      if (tree === doc.tree) return { ok: true, text: `外观没变。\n${await this.looksText(doc)}` }
+      await this.adopt(doc, tree, ctx.actor, { summary: `${parts.length ? `「${parts.join("」「")}」` : "整个零件"}：${what}` })
+      const own = !parts.length ? Object.keys(doc.tree.appearance?.parts ?? {}) : []
+      return { ok: true, text: `已设置（不改几何，不重建）。${own.length ? `\n${own.join("、")} 另有自己的外观，以它们自己的为准。` : ""}\n${await this.looksText(doc)}` }
+    }
+
+    if (!parts.length) return fail("装配里要写 parts：装配里的零件名（get_state 的「外观」一行列着）。")
+    const comps = doc.tree.features.filter((f): f is Extract<Feature, { op: "component" }> => f.op === "component")
+    // 「螺钉#3/垫圈」: the component with the longest name the part's name starts with, followed by # or /.
+    const owner = (name: string) =>
+      comps
+        .map((f) => ({ f, base: componentName(f) }))
+        .filter(({ base }) => name === base || name.startsWith(`${base}#`) || name.startsWith(`${base}/`))
+        .sort((a, b) => b.base.length - a.base.length)[0]
+    const onAssembly = new Map<string, string[]>()
+    const inFiles = new Map<string, { file: string; parts: Set<string> | null; names: string[] }>()
+    for (const name of parts) {
+      const hit = owner(name)
+      if (!hit) return fail(`装配里没有叫「${name}」的零件：现在有 ${comps.map((f) => componentName(f)).join("、") || "（还没有零件）"}`)
+      const rest = name.slice(hit.base.length).replace(/^#\d+/, "")
+      const sub = rest.startsWith("/") ? rest.slice(1) : null
+      const file = hit.f.file
+      const own = !!file && !hit.f.standard && !/\.(step|stp)$/i.test(file) && !isAssembly(file)
+      if (input.where === "assembly" || !own) {
+        onAssembly.set(hit.f.id, [...(onAssembly.get(hit.f.id) ?? []), name])
+        continue
+      }
+      const abs = this.partKey(besides(doc.path, file!))
+      const entry = inFiles.get(abs) ?? { file: file!, parts: new Set<string>(), names: [] }
+      // The whole part (no sub) covers any of its parts named too.
+      if (!sub) entry.parts = null
+      else entry.parts?.add(sub)
+      entry.names.push(name)
+      inFiles.set(abs, entry)
+    }
+    if (input.where === "file" && onAssembly.size) {
+      const names = [...onAssembly.values()].flat()
+      return fail(`「${names.join("、")}」没有自己的零件文件（标准件、STEP 外购件或子装配）：颜色只能写在装配里，去掉 where 或写 where: "assembly"。`)
+    }
+
+    const summary = `「${parts.join("」「")}」：${what}`
+    const features = doc.tree.features.map((f) => {
+      if (f.op !== "component" || !onAssembly.has(f.id)) return f
+      const next = applyLook(f.appearance, change)
+      const { appearance: _a, ...rest } = f
+      void _a
+      return (next ? { ...rest, appearance: next } : rest) as Feature
+    })
+    const tree: Tree = onAssembly.size ? { ...doc.tree, features } : doc.tree
+    const files: FileEdit[] = []
+    const lines: string[] = []
+    for (const [abs, e] of inFiles) {
+      const edit = await this.rewrite(
+        abs,
+        (text) => {
+          const parsed = parseTree(text)
+          if (!parsed.ok) throw new InputError(`${e.file} 不是合法的特征树：${parsed.error}`)
+          const next = setPartLook(parsed.tree, e.parts ? [...e.parts] : undefined, change)
+          return next === parsed.tree ? null : `${JSON.stringify(next, null, 2)}\n`
+        },
+        ctx,
+        summary,
+        doc,
+      )
+      if (edit) files.push(edit)
+      lines.push(`「${e.names.join("」「")}」写进 ${e.file}${edit ? "" : "（本来就是这样）"}：用到这个零件的装配都跟着变。`)
+    }
+    for (const [id, names] of onAssembly) {
+      const f = comps.find((x) => x.id === id)!
+      const copies = names.some((n) => /#\d+/.test(n.slice(componentName(f).length))) ? "；同一个 component 放的几个一起变" : ""
+      lines.push(`「${names.join("」「")}」写在装配的 component「${componentName(f)}」上${copies}。`)
+    }
+    if (tree === doc.tree && !files.length) return { ok: true, text: `外观没变。\n${await this.looksText(doc)}` }
+    await this.adopt(doc, tree, ctx.actor, { summary, files })
+    return { ok: true, text: `已设置（不改几何，不重建）。\n${lines.join("\n")}\n${await this.looksText(doc)}` }
+  }
+
+  /** 「外观：上盖 橙、底壳 未设置（白模）」 for get_state and set_appearance. */
+  private async looksText(doc: Doc) {
+    await this.ensureKernel(doc)
+    const list = (await this.opts.kernel.looks?.()) ?? []
+    if (!list.length) return "外观：还没有实体。"
+    const one = (l: Look) => (isSet(l) ? lookText(l) : `未设置（${SOURCE_DEFAULT[l.source]}）`)
+    if (list.length === 1 && !isAssembly(doc.path)) return `外观：${one(list[0].look)}`
+    return `外观：${list.map((p) => `${p.name} ${one(p.look)}`).join("、")}`
   }
 
   // ------------------------------------------------------------------ kernel
@@ -1254,8 +1427,10 @@ export class Engine {
             }
             this.assetsKeys.delete(doc.path)
             doc.rev += 1
-            doc.changes = [{ rev: doc.rev, actor: mine ? ours.actor : ("file" as const), at: Date.now(), summary: `${p.split(/[\\/]/).pop()} 更新了，已重建`, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
-            await this.ensureKernel(doc, true)
+            // Only its colours changed: no rebuild (the shapes are cached by geometry).
+            const restyled = await this.restyle(doc, doc.tree)
+            doc.changes = [{ rev: doc.rev, actor: mine ? ours.actor : ("file" as const), at: Date.now(), summary: `${p.split(/[\\/]/).pop()} 更新了${restyled ? "（只改了外观）" : "，已重建"}`, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
+            if (!restyled) await this.ensureKernel(doc, true)
             this.emitDoc(doc)
           }),
         ),
@@ -1339,6 +1514,7 @@ export class Engine {
     if (shadow.length) lines.push(`⚠ 参数 ${shadow.join("、")} 在共享参数文件里也有，以共享的为准`)
     if (doc.context) lines.push(`在装配「${partName(doc.context)}」里编辑：其他零件 ${(report.refs ?? []).map((r) => r.name).join("、") || "（没有）"} 半透明显示，只读`)
     if (report.parts?.length) lines.push(`零件：${report.parts.map((p) => `${p.name}（${p.size.map((x) => Math.round(x * 10) / 10).join("×")}）`).join("、")}`)
+    if (report.body) lines.push(await this.looksText(doc))
     lines.push(treeText(this.effective(doc, doc.tree), report))
     lines.push(open.length ? `未处理的备注 ${open.length} 条：${open.map((n) => `${n.id}「${clip(n.text)}」`).join("、")}（get_notes 看详情）` : "没有未处理的备注。")
     if (doc.changes.length) {
@@ -1419,9 +1595,11 @@ export class Engine {
     }
 
     const pins = input.notes === false ? [] : doc.notes.notes.filter((n) => n.status === "open" && n.kind !== "part").map((n) => ({ n: n.n, point: n.point }))
-    const images = await screen.look({ display, views, highlight: input.highlight as string | undefined, pins, shots, section, hide: hide.length ? hide : undefined, size })
+    const plain = input.plain === true
+    const images = await screen.look({ display, views, highlight: input.highlight as string | undefined, pins, shots, section, hide: hide.length ? hide : undefined, size, plain })
     const step = at ? `（回滚到「${displayName(doc.tree, doc.tree.features[index])}」这一步）` : ""
-    const legend = input.highlight ? "蓝色 = 高亮的特征，灰色 = 其余" : "蓝色 = 这一步新生成的面，橙色 = 被它修改的面"
+    const colours = plain ? "" : lookLegend(display, hide)
+    const legend = input.highlight ? `蓝色 = 高亮的特征，${colours ? "其余按零件的颜色" : "灰色 = 其余"}` : colours ? `按零件的颜色画（${colours}）` : plain ? "白模" : "蓝色 = 这一步新生成的面，橙色 = 被它修改的面"
     const lines = [`视图：${shots.map((s) => s.label).join("、")}${step}。${legend}${pins.length ? "；圆圈数字 = 备注编号" : ""}。`]
     if (section) lines.push(`剖视：在 ${section.axis} = ${round2(section.at)} 处剖开，去掉了${{ Z: "上面（+Z）", Y: "前面（-Y）", X: "右面（+X）" }[section.axis]}那一侧。`)
     if (whole) {
@@ -1496,7 +1674,7 @@ export class Engine {
     } else if (format === "json") data = `${JSON.stringify(doc.tree, null, 2)}\n`
     else if (format === "bom") {
       const report = await this.ensureKernel(doc)
-      data = bomText(doc, report)
+      data = bomText(doc, report, new Map(((await this.opts.kernel.looks?.()) ?? []).map((l) => [l.name, l.look])))
     } else {
       const report = await this.ensureKernel(doc)
       data = await this.opts.kernel.exportBody(format)
@@ -1608,7 +1786,7 @@ function pickResult(answer: PickAnswer): CommandResult {
 }
 
 /** The parts list: one row per part file (a component used twice counts 2), with volume and size. */
-function bomText(doc: Doc, report: BuildReport) {
+function bomText(doc: Doc, report: BuildReport, looks: Map<string, Look> = new Map()) {
   const asm = isAssembly(doc.path)
   // What each component (by the name its parts carry) is: a file, or a standard part by its designation.
   const what = new Map<string, { file: string; std?: string }>()
@@ -1626,7 +1804,10 @@ function bomText(doc: Doc, report: BuildReport) {
     what.set(componentName(f), { file: f.file ?? "标准件", std })
   }
   const parts = report.parts ?? (report.body ? [{ name: doc.name, volume: report.body.volume, size: report.body.size }] : [])
-  const rows = new Map<string, { name: string; file: string; count: number; volume: number; size: number[] }>()
+  // An unsplit body is listed under the file's name: its one look is the only entry.
+  const lookOf = (name: string) => looks.get(name) ?? (looks.size === 1 ? [...looks.values()][0] : undefined)
+  const colour = (l: Look | undefined) => (l && isSet(l) ? lookText(l) : "—")
+  const rows = new Map<string, { name: string; file: string; count: number; volume: number; size: number[]; look: string }>()
   for (const p of parts) {
     // 「螺钉#3/垫圈」: component 螺钉, its third copy, the part 垫圈 of it.
     const comp = p.name.split("/")[0]
@@ -1634,24 +1815,39 @@ function bomText(doc: Doc, report: BuildReport) {
     const sub = p.name.slice(comp.length)
     const w = asm ? what.get(base) : undefined
     const file = asm ? (w?.file ?? "") : doc.path.split(/[\\/]/).pop()!
-    const key = !asm ? p.name : w?.std ? `std|${w.std}` : `${file}|${sub}`
+    const look = colour(lookOf(p.name))
+    // The same part in two colours is two rows: they are bought or printed apart.
+    const key = `${!asm ? p.name : w?.std ? `std|${w.std}` : `${file}|${sub}`}|${look}`
     const name = w?.std ?? (asm ? `${base}${sub}` : p.name)
     const row = rows.get(key)
     if (row) row.count += 1
-    else rows.set(key, { name, file, count: 1, volume: p.volume, size: p.size })
+    else rows.set(key, { name, file, count: 1, volume: p.volume, size: p.size, look })
   }
   const r1 = (x: number) => Math.round(x * 10) / 10
   const lines = [
     `# 零件清单：${doc.name}`,
     "",
-    "| 序号 | 名称 | 文件 | 数量 | 单件体积 (cm³) | 外形 (mm) |",
-    "| --- | --- | --- | --- | --- | --- |",
-    ...[...rows.values()].map((r, i) => `| ${i + 1} | ${r.name} | ${r.file} | ${r.count} | ${Math.round(r.volume / 10) / 100} | ${r.size.map(r1).join(" × ")} |`),
+    "| 序号 | 名称 | 文件 | 数量 | 颜色 | 单件体积 (cm³) | 外形 (mm) |",
+    "| --- | --- | --- | --- | --- | --- | --- |",
+    ...[...rows.values()].map((r, i) => `| ${i + 1} | ${r.name} | ${r.file} | ${r.count} | ${r.look} | ${Math.round(r.volume / 10) / 100} | ${r.size.map(r1).join(" × ")} |`),
     "",
     `共 ${[...rows.values()].reduce((n, r) => n + r.count, 0)} 件。`,
     "",
   ]
   return lines.join("\n")
+}
+
+/** 「橙：上盖；黑 · 金属：螺钉#1、螺钉#2」: which colour is which part in the pictures (empty: all plain). */
+function lookLegend(d: DisplayData, hide: string[]) {
+  const entries = d.parts ? d.parts.filter((p) => !p.hidden && !hide.includes(p.name)).map((p) => ({ name: p.name, look: p.look })) : [{ name: "", look: d.look }]
+  if (entries.every((e) => !e.look || (!isSet(e.look) && e.look.source === "part"))) return ""
+  const groups = new Map<string, string[]>()
+  for (const e of entries) {
+    const key = e.look && isSet(e.look) ? lookText(e.look) : e.look?.source === "standard" ? "金属灰（标准件，没设颜色）" : e.look?.source === "step" ? "深灰（外购件，没设颜色）" : "白模（没设颜色）"
+    groups.set(key, [...(groups.get(key) ?? []), e.name])
+  }
+  const names = (list: string[]) => (list.length > 4 ? `${list.slice(0, 4).join("、")} 等 ${list.length} 个` : list.join("、"))
+  return [...groups].map(([k, list]) => (list.some(Boolean) ? `${k}：${names(list)}` : k)).join("；")
 }
 
 export function measureText(res: MeasureResult) {

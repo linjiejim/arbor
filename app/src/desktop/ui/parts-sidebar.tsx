@@ -4,7 +4,10 @@ import { cn } from "@/lib/utils"
 import { Hint } from "@/components/hint"
 import { IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
 import { matchesPart } from "@/studio/part-selection"
+import type { Look, LookChange } from "@/studio/appearance"
+import { LookPicker } from "@/studio/ui/look-picker"
 import { turnery } from "../bridge"
 import type { PartSummary, ProjectFile, Snapshot } from "../core/protocol"
 
@@ -12,13 +15,16 @@ import type { PartSummary, ProjectFile, Snapshot } from "../core/protocol"
  * The project (a folder: its assemblies and parts) or, without one, the open
  * parts. Clicking a file opens it (and makes it the agent's default).
  */
-type Instance = { name: string; id: string; file: string; index: number }
-export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect, onPoint }: {
+/** A part of the open assembly: `own` when it comes from a part file of its own (its colour can go there). */
+type Instance = { name: string; id: string; file: string; index: number; look?: Look; own?: boolean }
+export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect, onPoint, onLook }: {
   snapshot: Snapshot | null
   instances?: Instance[]
   selected?: string[]
   onSelect?: (part: Instance, additive: boolean) => void
   onPoint?: (part: Instance | null) => void
+  /** Colour these parts; `here`: only in this assembly, not in their part files. */
+  onLook?: (names: string[], change: LookChange, here: boolean) => void
 }) {
   const [query, setQuery] = useState("")
   const project = snapshot?.project ?? null
@@ -89,10 +95,11 @@ export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect
           <div className="flex items-center justify-between px-3 py-1 text-caption text-muted-foreground">
             <span>装配零件</span><span>{found.length} / {instances.length}</span>
           </div>
-          <p className="px-3 pb-1 text-caption text-faint-foreground">Shift 点击可多选</p>
+          <p className="px-3 pb-1 text-caption text-faint-foreground">Shift 点击可多选；点圆点改颜色，选中几个就一起改</p>
           <ul aria-label="装配零件搜索结果" className="min-h-0 overflow-y-auto px-1.5">
             {found.map((p) => <li key={p.name} className={rowClass(selected.includes(p.name))}
               onMouseEnter={() => onPoint?.(p)} onMouseLeave={() => onPoint?.(null)}>
+              {onLook && <InstanceLook part={p} group={selected.includes(p.name) && selected.length > 1 ? instances.filter((x) => selected.includes(x.name)) : [p]} onLook={onLook} />}
               <button type="button" aria-label={`选择零件：${p.name}`} aria-pressed={selected.includes(p.name)}
                 className={buttonClass} title={[p.name, p.file, p.id].filter(Boolean).join("\n")}
                 onFocus={() => onPoint?.(p)} onBlur={() => onPoint?.(null)}
@@ -106,6 +113,37 @@ export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect
       )}
 
     </aside>
+  )
+}
+
+/**
+ * The colour dot of an assembly's part: the legend of the view, and the way to change it. With several
+ * parts selected and this one among them, it changes all of them.
+ */
+function InstanceLook({ part, group, onLook }: { part: Instance; group: Instance[]; onLook: (names: string[], change: LookChange, here: boolean) => void }) {
+  const [here, setHere] = useState(false)
+  const own = group.some((p) => p.own)
+  const id = `look-here-${part.index}`
+  return (
+    <LookPicker
+      look={part.look}
+      label={group.length > 1 ? `${group.length} 个零件的颜色` : `「${part.name}」的颜色`}
+      className="ml-1.5"
+      onChange={(change) => onLook(group.map((p) => p.name), change, here)}
+      extra={
+        own ? (
+          <div className="space-y-1">
+            <label htmlFor={id} className="flex items-center gap-2 text-small">
+              <Checkbox id={id} checked={here} onCheckedChange={(v) => setHere(v === true)} />
+              只改这个装配里的
+            </label>
+            <p className="pl-6 text-caption text-faint-foreground">{here ? "写在装配上，零件文件不变" : "写进零件文件，用到它的地方都跟着变"}</p>
+          </div>
+        ) : (
+          <p className="text-caption text-faint-foreground">标准件和外购件的颜色写在这个装配里。</p>
+        )
+      }
+    />
   )
 }
 

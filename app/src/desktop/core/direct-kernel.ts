@@ -49,6 +49,12 @@ export class DirectKernel implements KernelHost {
   async rebuild(tree: Tree, options: { background?: boolean; interferences?: BuildReport["interferences"]; deferChecks?: boolean } = {}) {
     return this.k.rebuild(tree, { ...this.hooks, ...options })
   }
+  async restyle(tree: Tree) {
+    return this.k.restyle(tree)
+  }
+  async looks() {
+    return this.k.looks()
+  }
   async inspect(what: "body" | "faces" | "edges", selector?: unknown) {
     return this.k.inspect(what, undefined, selector)
   }

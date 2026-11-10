@@ -7,12 +7,15 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/p
 import { serialize, deserialize } from "node:v8"
 import { Worker } from "node:worker_threads"
 import type { ComponentSource, CompiledComponent } from "../../../app/src/studio/kernel/build"
+import { withoutLooks } from "../../../app/src/studio/appearance"
 import type { KernelReply, KernelRequest } from "./kernel-thread"
 import { contentKey } from "./content-key"
 import { HOME } from "./home"
 
 const hash = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex")
-export const sourceKey = (s: ComponentSource) => contentKey(s)
+/** What a worker builds from a source: its colours and finishes never change the shapes. */
+const geometryOf = (s: ComponentSource): ComponentSource => ({ ...s, ...(s.tree ? { tree: withoutLooks(s.tree) } : {}), ...(s.components ? { components: s.components.map(geometryOf) } : {}) })
+export const sourceKey = (s: ComponentSource) => contentKey(geometryOf(s))
 
 /** A disposable cache: corrupt, stale or unwritable entries behave as misses. */
 export class ComponentCache {
