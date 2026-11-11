@@ -246,6 +246,23 @@ export function edgeHighlight(d: DisplayData, hashes: number[], kit: MaterialKit
   return lines
 }
 
+/** Strokes drawn for a note (P), shown again when it is located: thick, highlighted, never hidden. */
+export function regionStrokes(strokes: [number, number, number][][], kit: MaterialKit): THREE.Object3D | null {
+  const pts: number[] = []
+  for (const s of strokes) for (let i = 1; i < s.length; i++) pts.push(...s[i - 1], ...s[i])
+  if (!pts.length) return null
+  const geo = new LineSegmentsGeometry()
+  geo.setPositions(pts)
+  const mat = kit.sketch.clone()
+  mat.color.copy(kit.edgeHighlight.color)
+  mat.linewidth = 3
+  mat.depthTest = false
+  mat.resolution.copy(kit.sketch.resolution)
+  const lines = new LineSegments2(geo, mat)
+  lines.renderOrder = 5
+  return lines
+}
+
 /** The face group a raycast hit landed on. */
 export function groupAt(hit: THREE.Intersection): DisplayData["groups"][number] | null {
   const groups = (hit.object as THREE.Mesh).userData.groups as DisplayData["groups"] | undefined
@@ -258,4 +275,28 @@ export function groupAt(hit: THREE.Intersection): DisplayData["groups"][number] 
 export function faceTarget(hit: THREE.Intersection) {
   const group = groupAt(hit)
   return group ? { hash: group.hash, point: hit.point.clone().sub(hit.object.position).toArray() as [number, number, number] } : null
+}
+
+/**
+ * The box round some faces as shown (each moved with its part when pulled apart): what 「对准选中的」
+ * frames, and where a note about a part or a step puts its pin. `faces` picks the face groups.
+ */
+export function facesBox(d: DisplayData, view: PartsView, faces: (g: DisplayData["groups"][number]) => boolean): [[number, number, number], [number, number, number]] | null {
+  const m = d.mesh
+  if (!m) return null
+  const lo = [Infinity, Infinity, Infinity]
+  const hi = [-Infinity, -Infinity, -Infinity]
+  for (const g of d.groups) {
+    if (!faces(g)) continue
+    const off = partOffset(d, view, g.part)
+    for (let i = g.start; i < g.start + g.count; i++) {
+      const v = m.triangles[i] * 3
+      for (let k = 0; k < 3; k++) {
+        const x = m.vertices[v + k] + off[k]
+        if (x < lo[k]) lo[k] = x
+        if (x > hi[k]) hi[k] = x
+      }
+    }
+  }
+  return lo[0] <= hi[0] ? [lo as [number, number, number], hi as [number, number, number]] : null
 }

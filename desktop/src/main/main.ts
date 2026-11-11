@@ -614,6 +614,14 @@ function refreshMenu() {
         { label: "缩小", accelerator: "CmdOrCtrl+-", click: () => zoom(-1) },
         { label: "缩小", accelerator: "CmdOrCtrl+numsub", visible: false, acceleratorWorksWhenHidden: true, click: () => zoom(-1) },
         { type: "separator" },
+        // The 3D view's one-letter keys (V C R P M X D E A F H I, ? for all) live in the window, not here:
+        // a menu shortcut without ⌘ would eat the letter when typing in a field.
+        { label: "左栏", accelerator: "CmdOrCtrl+B", click: () => send("toggle-left") },
+        { label: "右栏", accelerator: "Alt+CmdOrCtrl+B", click: () => send("toggle-right") },
+        { type: "separator" },
+        { label: "后退", accelerator: "CmdOrCtrl+[", click: () => send("back") },
+        { label: "前进", accelerator: "CmdOrCtrl+]", click: () => send("forward") },
+        { type: "separator" },
         { role: "togglefullscreen" },
       ],
     },

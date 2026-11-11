@@ -1,6 +1,6 @@
 import * as React from "react"
 import { OP_NAMES, type FeatureOp } from "@/studio/dsl"
-import type { Actor } from "../core/protocol"
+import type { Actor, PartNote } from "../core/protocol"
 
 /** Re-render every few seconds, for 「12 秒前」. */
 export function useNow(ms = 5000) {
@@ -50,4 +50,25 @@ export function ago(at: number, now: number) {
   if (s < 3600) return `${Math.floor(s / 60)} 分钟前`
   if (s < 86400) return `${Math.floor(s / 3600)} 小时前`
   return new Date(at).toLocaleDateString("zh-CN")
+}
+
+/** The name a file shows as: its base name without the ending (「底壳」 for parts/底壳.turnery.json). */
+export const fileStem = (path: string) => (path.split(/[\\/]/).pop() ?? path).replace(/\.(turnery|arbor)(-asm)?\.json$/i, "").replace(/\.(step|stp|json)$/i, "")
+
+/** What a note is about, in a few words (its card, the notes list). `whole`: 零件 or 装配. */
+export function noteAbout(n: PartNote, whole = "零件") {
+  const quote = (names: string[] = []) => names.map((x) => `「${x}」`).join("")
+  switch (n.kind) {
+    case "face":
+    case "edge":
+      return `${n.kind === "face" ? "面" : "边"} · ${n.what} · ${n.where}`
+    case "part":
+      return `整个${whole}`
+    case "parts":
+      return `零件${quote(n.parts)}`
+    case "feature":
+      return `步骤「${n.what}」`
+    case "region":
+      return `${n.region?.shape === "pen" ? "画笔圈出" : "框选"}的区域${n.parts?.length ? ` · ${quote(n.parts)}` : ""}`
+  }
 }

@@ -6,6 +6,16 @@ import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promi
 import path from "node:path"
 import type { Files } from "../../../app/src/desktop/core/engine"
 
+/** Two paths name one file or folder on disk. */
+async function sameEntry(a: string, b: string) {
+  try {
+    const [x, y] = await Promise.all([stat(a), stat(b)])
+    return x.dev === y.dev && x.ino === y.ino
+  } catch {
+    return false
+  }
+}
+
 export const nodeFiles: Files = {
   async read(p) {
     try {
@@ -48,6 +58,20 @@ export const nodeFiles: Files = {
     await writeFile(tmp, data)
     await rename(tmp, p)
   },
+  async rename(from, to) {
+    // Never over another file: only a change of case may land on "itself" (most Mac disks ignore case;
+    // on one that doesn't, the two names can be two files).
+    const there = await stat(to).then(
+      () => true,
+      (e: NodeJS.ErrnoException) => {
+        if (e.code === "ENOENT") return false
+        throw e
+      },
+    )
+    if (there && !(from.toLowerCase() === to.toLowerCase() && (await sameEntry(from, to)))) throw new Error(`${path.basename(to)} 已经存在`)
+    await rename(from, to)
+  },
+  same: sameEntry,
   watch(p, onChange) {
     const dir = path.dirname(p)
     const name = path.basename(p)

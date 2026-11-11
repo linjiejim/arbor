@@ -19,28 +19,63 @@ export type Change = { rev: number; actor: Actor; at: number; summary: string; n
 
 /** A note the person pinned on a face or edge, for the agent to pick up. */
 export type PartNote = {
+  /** The part the pin sits on (it moves with it when the parts are pulled apart). */
   part?: string
   /** Stable id the agent uses: "n3". */
   id: string
   /** The number on the pin: 3. Never reused within a part. */
   n: number
-  /** part: about the part or a feature, not a spot on it (no pin, no selector). */
-  kind: "face" | "edge" | "part"
+  /**
+   * face / edge: a clicked spot. part: the whole file (no pin). parts: parts selected as a whole.
+   * feature: one step (from its panel). region: an area framed (R) or drawn on (P).
+   */
+  kind: "face" | "edge" | "part" | "parts" | "feature" | "region"
   text: string
   what: string
   where: string
   facts: string
+  /** Feature ids: what the clicked face or edge came from, or what shows in the region. */
   origins: string[]
   point: V3
   /** Verified to pick exactly that face / edge when the note was written. */
   selector: Record<string, unknown> | null
   sketch: PickInfo["sketch"]
   smooth?: boolean
+  /** parts: the parts it is about. region: the parts in it. */
+  parts?: string[]
+  /** feature: the step's id (`what` is its name then). */
+  feature?: string
+  region?: NoteRegion
+  /** No place on the model to pin it (a step without faces). */
+  pin?: false
   status: "open" | "resolved"
   /** What the agent said when it handled the note. */
   reply?: string
   createdAt: number
   resolvedAt?: number
+}
+
+/** An area framed or drawn on, as kept with its note (see studio/region.ts for what the view gathers). */
+export type NoteRegion = {
+  shape: "box" | "pen"
+  camera: { position: V3; target: V3; up: V3 }
+  rect?: [number, number, number, number]
+  strokes?: V3[][]
+  faces: number
+  bbox: [V3, V3] | null
+  /** The view with the marks on it: a PNG beside the notes, relative to the part's folder. */
+  image?: string
+}
+
+/** What a note is about besides a clicked spot (add_note): parts, a step, or an area. */
+export type NoteAbout = {
+  parts?: string[]
+  feature?: string
+  /** The step's name, for the agent and the list. */
+  name?: string
+  point?: V3
+  part?: string
+  region?: Omit<NoteRegion, "image"> & { origins: string[]; parts: string[]; image?: string }
 }
 
 export type KernelPhase = { phase: "loading" } | { phase: "ready" } | { phase: "error"; message: string }
@@ -217,7 +252,7 @@ export type UpdateStatus =
 
 export type Notice = { tone: "info" | "success" | "error"; text: string }
 
-export type MenuAction = "undo" | "redo" | "agent-setup" | "focus"
+export type MenuAction = "undo" | "redo" | "agent-setup" | "focus" | "toggle-left" | "toggle-right" | "back" | "forward"
 
 export type ExportFormat = "step" | "stl" | "3mf" | "py" | "json"
 

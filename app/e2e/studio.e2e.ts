@@ -17,11 +17,11 @@ test.describe("工作台", () => {
     await expect(page.getByText(/^做好了/), "the scripted turn finishes").toBeVisible({ timeout: 90_000 })
     await expect(page.getByRole("img", { name: "助教看到的视图" }).first(), "look renders views for the model").toBeVisible()
     await expectRendered(page.locator("canvas").first(), "/studio model")
-    // The feature tree sits over the 3D view; hovering a row opens its details.
+    // The feature tree sits over the 3D view; pointing at a step shows a small card of what it is.
     const tree = page.getByRole("navigation", { name: "特征树" })
     await expect(tree.getByText("5 个特征")).toBeVisible()
     await tree.getByRole("button").nth(2).hover()
-    await expect(page.getByRole("tooltip").getByText("单击这一步：在这一步查看，改尺寸和选择"), "hovering a feature shows its details").toBeVisible()
+    await expect(page.getByRole("tooltip"), "pointing at a step says which it is").toContainText(/第 \d 步/)
     await expect(page.getByRole("status"), "the turn's status line is gone once it's done").toHaveCount(0)
     await page.getByRole("button", { name: "更多" }).click()
     await page.getByRole("menuitem", { name: "代码" }).click()
@@ -216,12 +216,14 @@ test.describe("工作台", () => {
     await expect(viewer.getByText("螺栓孔所在圆的直径（节圆）")).toBeVisible()
     await viewer.getByLabel("n", { exact: true }).fill("4")
     await viewer.getByLabel("n", { exact: true }).press("Enter")
-    await tree.getByRole("button", { name: /孔阵列/ }).hover()
-    await expect(viewer.getByRole("tooltip").getByText(/^×4/), "the tried parameter rebuilt the pattern").toBeVisible()
+    // A step's details open on a click (look only here).
+    await tree.getByRole("button", { name: /孔阵列/ }).click()
+    await expect(viewer.getByRole("dialog", { name: /孔阵列/ }).getByText(/^×4/), "the tried parameter rebuilt the pattern").toBeVisible()
     await viewer.reload()
     await expect(tree.getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
-    await tree.getByRole("button", { name: /孔阵列/ }).hover()
-    await expect(viewer.getByRole("tooltip").getByText(/^×6/), "nothing was saved").toBeVisible()
+    await tree.getByRole("button", { name: /孔阵列/ }).click()
+    await expect(viewer.getByRole("dialog", { name: /孔阵列/ }).getByText(/^×6/), "nothing was saved").toBeVisible()
+    await viewer.keyboard.press("Escape")
 
     // Copy: replaces this browser's (empty) model, undoably.
     await viewer.getByRole("button", { name: "复制到我的工作台" }).first().click()
@@ -319,11 +321,15 @@ test.describe("工作台", () => {
 
   test("/studio 的说明：指向 ⓘ 就全部显示，不用点", async ({ page }) => {
     await page.goto("/studio?start=flange")
-    await expect(page.getByRole("navigation", { name: "特征树" }).getByText("5 个特征")).toBeVisible({ timeout: 90_000 })
+    const count = page.getByRole("navigation", { name: "特征树" }).getByText("5 个特征")
+    await expect(count).toBeVisible({ timeout: 90_000 })
     // Nothing opens on its own.
     await page.waitForTimeout(1200)
     await expect(page.getByRole("dialog")).toHaveCount(0)
+    // The timeline is faint at rest; its ⓘ shows once it is pointed at.
     const info = page.getByRole("button", { name: "特征树怎么用" })
+    await expect(info).toBeHidden()
+    await count.hover()
     await info.hover()
     const card = page.getByRole("dialog")
     await expect(card).toContainText("点一步：模型回到这一步")
@@ -332,11 +338,13 @@ test.describe("工作台", () => {
     // Moving away closes it; a click keeps it open until a click elsewhere.
     await page.mouse.move(5, 5)
     await expect(card).toHaveCount(0)
+    await count.hover()
     await info.click()
     await expect(card).toContainText("点一步：模型回到这一步")
     await page.mouse.move(5, 5)
     await page.waitForTimeout(400)
     await expect(card).toBeVisible()
+    await expect(info, "the timeline stays lit while its card is open").toBeVisible()
     await page.keyboard.press("Escape")
     await expect(card).toHaveCount(0)
   })

@@ -6,12 +6,16 @@ import type { DocState, PickRequest, Snapshot } from "../core/protocol"
 import { AgentStatus } from "./title-bar"
 import { ACTOR_LABEL, ago, useNow } from "./words"
 
+/** Where a status item leads: a panel, the first step that didn't build, or how to plug an agent in. */
+export type StatusTarget = "activity" | "failed" | "params" | "notes" | "setup"
+
 /**
  * The strip along the bottom: how things stand, never what to do. Who is working on the model, whether
  * it built, how many of the stated requirements hold, notes waiting, and the version with who made it.
- * Each item says itself in a few words; the panels hold the detail.
+ * Each item says itself in a few words; the panels hold the detail, and an item with one clear place to
+ * go (the activity, the failed step, the checks, the notes) goes there when clicked.
  */
-export function StatusBar({ snapshot, doc, pick, onNotes }: { snapshot: Snapshot | null; doc: DocState | null; pick: PickRequest | null; onNotes: () => void }) {
+export function StatusBar({ snapshot, doc, pick, onGo, agentSeen = true }: { snapshot: Snapshot | null; doc: DocState | null; pick: PickRequest | null; onGo: (to: StatusTarget) => void; agentSeen?: boolean }) {
   const now = useNow()
   const kernel = snapshot?.kernel
   const loading = snapshot?.loading
@@ -23,7 +27,9 @@ export function StatusBar({ snapshot, doc, pick, onNotes }: { snapshot: Snapshot
   const last = doc?.changes[0]
   return (
     <footer className="flex h-7 shrink-0 items-center gap-4 border-t px-3 text-caption text-muted-foreground select-none" aria-label="状态">
-      <AgentStatus snapshot={snapshot} pick={pick} className="text-caption" />
+      <Go label={agentSeen ? "看动态" : "接入 Agent"} onClick={() => onGo(agentSeen ? "activity" : "setup")}>
+        <AgentStatus snapshot={snapshot} pick={pick} className="text-caption" />
+      </Go>
       {kernel?.phase === "loading" && <Item><Spinner className="size-3" />内核加载中</Item>}
       {kernel?.phase === "error" && <StatusDot className="text-caption" tone="danger">内核出错</StatusDot>}
       {doc && (
@@ -36,28 +42,43 @@ export function StatusBar({ snapshot, doc, pick, onNotes }: { snapshot: Snapshot
           ) : doc.error ? (
             <StatusDot className="text-caption" tone="danger">文件读不了，显示的是上一版</StatusDot>
           ) : failed ? (
-            <StatusDot className="text-caption" tone="danger">{failed} 步没建成</StatusDot>
+            <Go label="到没建成的那一步" onClick={() => onGo("failed")}>
+              <StatusDot className="text-caption" tone="danger">{failed} 步没建成</StatusDot>
+            </Go>
           ) : report ? (
             <StatusDot className="text-caption" tone="success">已重建{report.ms ? ` · ${report.ms < 1000 ? `${Math.round(report.ms)} ms` : `${(report.ms / 1000).toFixed(1)} s`}` : ""}</StatusDot>
           ) : null}
           {checks.length > 0 && !loading && (
-            <StatusDot className="text-caption" tone={passed === checks.length ? "success" : "warning"}>
-              核对 {passed}/{checks.length}
-            </StatusDot>
+            <Go label="看核对" onClick={() => onGo("params")}>
+              <StatusDot className="text-caption" tone={passed === checks.length ? "success" : "warning"}>
+                核对 {passed}/{checks.length}
+              </StatusDot>
+            </Go>
           )}
           {report?.checksPending && <Item><Spinner className="size-3" />后台核对中</Item>}
           {openNotes > 0 && (
-            <button type="button" className="rounded px-1 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={onNotes}>
+            <Go label="看备注" onClick={() => onGo("notes")}>
               {openNotes} 条备注待处理
-            </button>
+            </Go>
           )}
           <span className="flex-1" />
-          <span className="tabular">
-            第 {doc.rev} 版{last ? ` · ${ACTOR_LABEL[last.actor]} ${ago(last.at, now)}` : ""}
-          </span>
+          <Go label="看动态" onClick={() => onGo("activity")}>
+            <span className="tabular">
+              第 {doc.rev} 版{last ? ` · ${ACTOR_LABEL[last.actor]} ${ago(last.at, now)}` : ""}
+            </span>
+          </Go>
         </>
       )}
     </footer>
+  )
+}
+
+/** A status item that leads somewhere: looks like the others until pointed at. */
+function Go({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" title={label} className="-mx-1 flex items-center rounded px-1 outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" onClick={onClick}>
+      {children}
+    </button>
   )
 }
 

@@ -1,78 +1,15 @@
 import * as React from "react"
-import { Eye, EyeOff, Plus } from "lucide-react"
-import { Button, IconButton } from "@/components/ui/button"
+import { Plus } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Dialog, DialogBody, DialogContent, DialogFooter, DialogHeader } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { notify } from "@/components/ui/toast"
-import { cn } from "@/lib/utils"
-import { componentName, type Feature } from "@/studio/dsl"
-import type { PartsView } from "@/studio/scene"
-import type { Studio } from "@/studio/use-studio"
 import { turnery } from "../bridge"
 import type { DocState } from "../core/protocol"
-import { besides } from "../core/sources"
 import { PaletteChoice } from "@/studio/ui/look-picker"
 
-const isStep = (file: string) => /\.(step|stp)$/i.test(file)
-
-/** The parts a component shows as: its own name, `name/sub` for each part of a split part, `name#2` for each copy. */
-function partsOf(studio: Studio, name: string) {
-  return (studio.display?.parts ?? []).flatMap((p, k) => (p.name === name || p.name.startsWith(`${name}/`) || p.name.startsWith(`${name}#`) ? [k] : []))
-}
-
-/**
- * A component's row in the assembly's tree: an eye for its parts and 「改」 to
- * edit the part in place (the rest of the assembly stays around it).
- */
-export function ComponentActions({ f, doc, studio, view, onView }: { f: Feature; doc: DocState; studio: Studio; view: PartsView; onView: (v: PartsView) => void }) {
-  {
-    if (f.op !== "component") return null
-    const name = componentName(f)
-    const parts = partsOf(studio, name)
-    const hidden = parts.length > 0 && parts.every((k) => view.hidden.has(k))
-    const reveal = "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100"
-    return (
-      <>
-        {parts.length > 0 && (
-          <IconButton
-            label={hidden ? `显示「${name}」` : `隐藏「${name}」`}
-            size="icon-sm"
-            className={cn("size-6 text-muted-foreground", !hidden && reveal)}
-            onClick={() => {
-              const next = new Set(view.hidden)
-              for (const k of parts) {
-                if (hidden) next.delete(k)
-                else next.add(k)
-              }
-              onView({ ...view, hidden: next })
-            }}
-          >
-            {hidden ? <EyeOff /> : <Eye />}
-          </IconButton>
-        )}
-        {f.file && !isStep(f.file) && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className={cn("h-6 px-1.5 text-caption text-muted-foreground", reveal)}
-            onClick={async () => {
-              // A sub-assembly opens as itself; a part opens inside this assembly.
-              const file = f.file!
-              const nested = /\.(turnery|arbor)-asm\.json$/i.test(file)
-              const r = await turnery.call("open_part", nested ? { path: besides(doc.path, file) } : { path: besides(doc.path, file), context: doc.path })
-              if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
-            }}
-          >
-            改
-          </Button>
-        )}
-      </>
-    )
-  }
-}
-
-/** 「+ 零件」 under an assembly's tree: a new part, an existing file, or a STEP. */
+/** 「+ 零件」 over an assembly's parts: a new part, an existing file, or a STEP. */
 export function AddPartMenu({ doc }: { doc: DocState }) {
   const [naming, setNaming] = React.useState(false)
   const add = async (input: { name?: string; file?: string; color?: string }) => {

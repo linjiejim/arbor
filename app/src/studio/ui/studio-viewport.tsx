@@ -14,16 +14,22 @@ import { circled, type PickInfo } from "../annotations"
 import type { DisplayData } from "../kernel/build"
 import type { MeasureResult, MeasureTarget } from "../kernel/measure"
 import type { Pin } from "../look"
-import { edgeHighlight, groupAt, faceTarget, hasLooks, partOffset, partVisible, modelObject, NO_PARTS_VIEW, repaint, type Hover, type Paint, type PartsView } from "../scene"
-import type { Annotations } from "../use-annotations"
+import { edgeHighlight, regionStrokes, facesBox, groupAt, faceTarget, hasLooks, partOffset, partVisible, modelObject, NO_PARTS_VIEW, repaint, type Hover, type Paint, type PartsView } from "../scene"
+import type { Annotations, FocusRegion } from "../use-annotations"
 import type { Studio } from "../use-studio"
 import type { Reselect } from "../use-reselect"
 import { displayName } from "../dsl"
-import { sectionPlane, type Section } from "../section"
+import { newSection, sectionPlane, type Section } from "../section"
+import type { SketchHost } from "../region"
+import type { PinNotes } from "../pin-notes"
+import { PinNoteCard } from "./pin-card"
+import { SketchLayer } from "./sketch-layer"
+import { gatherRegion } from "../region-pick"
 import { declutter, dimensionLayer, dimParam } from "../dimension-layer"
 import type { Dim } from "../kernel/dims"
 import { DimEditor } from "./dim-editor"
 import { MeasurePanel, ViewTools } from "./viewport-tools"
+import { VIEW_KEYS, type KeyRow, type ViewTool } from "../view-keys"
 import { useWords } from "./host-words"
 
 type V3 = [number, number, number]
@@ -52,6 +58,9 @@ function useLooksSwitch(): [boolean, (on: boolean) => void] {
 }
 
 /** Wording and numbering for hosts other than the web studio (the desktop app's notes). */
+/** Where the camera was left in a file. */
+export type ViewCamera = { position: THREE.Vector3; target: THREE.Vector3; size: number }
+
 export type ViewportCopy = {
   /** The hint over an unmarked model; null hides it. */
   hint?: string | null
@@ -84,6 +93,15 @@ export function StudioViewport({
   selectedParts = [],
   onLocateStep,
   copy,
+  selectionActions,
+  onNoteSelection,
+  onOpenPart,
+  sketch,
+  keys = [],
+  active = true,
+  viewKey,
+  cameras: cameraMemory,
+  pinNotes,
 }: {
   studio: Studio
   hover: Hover | null
@@ -104,10 +122,32 @@ export function StudioViewport({
   onLocateStep?: () => void
   readOnly?: boolean
   copy?: ViewportCopy
+  /** More buttons on the selected parts' toolbar, after their name (the desktop's 打开零件, 备注). */
+  selectionActions?: React.ReactNode
+  /** C with parts selected: a note about them, not a click on a face. */
+  onNoteSelection?: () => void
+  /** A part double-clicked (or ↵ with one selected): open its own file. */
+  onOpenPart?: (part: number) => void
+  /** Framing (R) and drawing (P) a note: how the host keeps it. Without it, neither tool is offered. */
+  sketch?: SketchHost
+  /** The host's keys, listed after the view's own in the 「快捷键」 card. */
+  keys?: KeyRow[]
+  /** Off while something covers the view (the drawing sheet): its keys do nothing. */
+  active?: boolean
+  /** Which file is shown: going back to one puts the camera where it was left. */
+  viewKey?: string
+  /** Where the camera was left in each file (`viewKey`), kept by the host: the view may be closed in between (a file loading). */
+  cameras?: Map<string, ViewCamera>
+  /** Notes already on the model: a click on a pin opens its card (none on the site). */
+  pinNotes?: PinNotes
 }) {
   const [viewer, setViewer] = React.useState<Viewer | null>(null)
   const current = React.useRef<THREE.Group | null>(null)
   const fittedSize = React.useRef(0)
+  /** Where the camera was in each file shown before (`viewKey`), and which one is shown now (none yet: the first one may be gone back to). */
+  const [ownCameras] = React.useState(() => new Map<string, ViewCamera>())
+  const cameras = cameraMemory ?? ownCameras
+  const shownKey = React.useRef<string | undefined>(undefined)
   // While re-picking a feature's faces or edges, the view shows the body that feature starts from.
   const rs = reselect?.state ?? null
   const display = rs?.display ?? studio.display
@@ -117,6 +157,10 @@ export function StudioViewport({
 
   // Measure mode: up to two picked faces / edges and what the kernel says about them.
   const [measuring, setMeasuring] = React.useState(false)
+  /** Framing or drawing a note: one go, then back to the tool before. */
+  const [sketching, setSketching] = React.useState<"box" | "pen" | null>(null)
+  const [exploding, setExploding] = React.useState(false)
+  const [keysOpen, setKeysOpen] = React.useState(false)
   const [picked, setPicked] = React.useState<MeasureTarget[]>([])
   const [measured, setMeasured] = React.useState<{ key: string; result: MeasureResult | null } | null>(null)
   const [section, setSection] = React.useState<Section | null>(null)
@@ -202,6 +246,28 @@ export function StudioViewport({
   }, [])
 
   const [showChanges, setShowChanges] = React.useState(false)
+  const tool: ViewTool = sketching ?? (measuring ? "measure" : onAnnotation && annotation ? "note" : "select")
+  /** The tool before framing or drawing: one note, then back to it. */
+  const sketchFrom = React.useRef<ViewTool>("select")
+  const chooseTool = React.useCallback(
+    (t: ViewTool) => {
+      if ((t === "box" || t === "pen") && tool !== "box" && tool !== "pen") sketchFrom.current = tool
+      if (t !== "measure") {
+        setMeasuring(false)
+        setPicked([])
+      }
+      if (t !== "box" && t !== "pen") setSketching(null)
+      if (t === "select" || t === "measure" || t === "box" || t === "pen") {
+        if (onAnnotation && annotation) onAnnotation(false)
+        annotations.cancel()
+        onPointFeature?.(null)
+      }
+      if (t === "note") onAnnotation?.(true)
+      if (t === "measure") setMeasuring(true)
+      if (t === "box" || t === "pen") setSketching(t)
+    },
+    [annotation, onAnnotation, annotations, onPointFeature, tool],
+  )
   const paint = React.useMemo<Paint>(() => {
     if (rs) return { status: false, faces: rs.kind === "face" ? rs.hashes : [] }
     if (measuring && picked.length) return { status: false, faces: picked.filter((t) => t.kind === "face").map((t) => t.hash) }
@@ -246,6 +312,13 @@ export function StudioViewport({
     const g = modelObject(display, viewer.kit, paintRef.current, view, looks)
     viewer.setContent(g)
     current.current = g
+    if (viewKey !== shownKey.current) {
+      if (shownKey.current && fittedSize.current) cameras.set(shownKey.current, { position: viewer.camera.position.clone(), target: viewer.controls.target.clone(), size: fittedSize.current })
+      shownKey.current = viewKey
+      const back = viewKey ? cameras.get(viewKey) : undefined
+      if (back) void viewer.flyTo(back.position, back.target, 0)
+      fittedSize.current = back?.size ?? 0
+    }
     const stop = viewer.onRendered(() => { stop(); onPresented?.(display) })
     if (display.bbox) {
       const box = new THREE.Box3(new THREE.Vector3(...display.bbox[0]), new THREE.Vector3(...display.bbox[1]))
@@ -257,7 +330,14 @@ export function StudioViewport({
       }
     } else fittedSize.current = 0
     return stop
-  }, [viewer, display, view, onPresented, looks])
+  }, [viewer, display, view, onPresented, looks, viewKey, cameras])
+  // Closed (another file loading): where the camera is now is kept for coming back.
+  React.useEffect(() => {
+    if (!viewer) return
+    return () => {
+      if (shownKey.current && fittedSize.current) cameras.set(shownKey.current, { position: viewer.camera.position.clone(), target: viewer.controls.target.clone(), size: fittedSize.current })
+    }
+  }, [viewer, cameras])
 
   // Frame the pulled-apart parts once the learner lets go of the explode slider.
   const frameExploded = React.useCallback(() => {
@@ -358,16 +438,6 @@ export function StudioViewport({
     return () => window.removeEventListener("keydown", onKey)
   }, [rs, cancelReselect])
 
-  // Esc leaves measure mode.
-  React.useEffect(() => {
-    if (!measuring) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !(e.target as HTMLElement)?.closest?.("input, textarea, [role=dialog]")) stopMeasuring()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [measuring, stopMeasuring])
-
   // Numbered pins: annotations in the composer and of the message being answered, the draft, a located one.
   const pins = React.useMemo(() => {
     const out: (Pin & { tone: "solid" | "draft" | "ghost" })[] = annotations.pins.map((p) => ({ ...p, tone: "solid" }))
@@ -381,6 +451,15 @@ export function StudioViewport({
     })
   }, [annotations.pins, nextPin, draft, focus, display, view])
 
+  // The note card a pin opened (by its number).
+  const [openPin, setOpenPin] = React.useState<number | null>(null)
+  const openPinAt = openPin === null ? null : (pins.find((p) => p.n === openPin && p.tone === "solid") ?? null)
+  const openNote = openPinAt && pinNotes ? pinNotes.get(openPinAt.n) : null
+  if (openPin !== null && !openNote) setOpenPin(null)
+  const pinNotesRef = React.useRef(pinNotes)
+  React.useEffect(() => {
+    pinNotesRef.current = pinNotes
+  }, [pinNotes])
   React.useEffect(() => {
     if (!viewer) return
     const group = new THREE.Group()
@@ -392,6 +471,19 @@ export function StudioViewport({
           : "grid size-6 place-items-center rounded-full border-2 border-background bg-primary text-caption font-semibold text-primary-foreground shadow-popover"
       if (p.tone === "draft") el.classList.add("opacity-80")
       el.textContent = String(p.n)
+      // Saved notes' pins open their card; hovering shows the words.
+      const note = p.tone === "solid" ? pinNotesRef.current?.get(p.n) : null
+      if (note) {
+        el.classList.add("interactive", "cursor-pointer")
+        el.title = note.text || note.about
+        el.setAttribute("role", "button")
+        el.setAttribute("aria-label", `备注 ${p.n}：${note.text || note.about}`)
+        el.addEventListener("pointerdown", (e) => e.stopPropagation())
+        el.addEventListener("click", (e) => {
+          e.stopPropagation()
+          setOpenPin(p.n)
+        })
+      }
       const o = new CSS2DObject(el)
       o.position.set(...p.point)
       group.add(o)
@@ -403,7 +495,38 @@ export function StudioViewport({
       disposeObject(group)
       viewer.invalidate()
     }
-  }, [viewer, pins])
+  }, [viewer, pins, pinNotes])
+
+  // Locating a note on an area: back to the view it was marked from, its strokes on the model, its box
+  // over the view until the camera moves again.
+  const focusRegion = focus?.region
+  const [regionBox, setRegionBox] = React.useState<FocusRegion | null>(null)
+  const [seenRegion, setSeenRegion] = React.useState(focusRegion)
+  if (focusRegion !== seenRegion) {
+    setSeenRegion(focusRegion)
+    setRegionBox(focusRegion?.rect ? focusRegion : null)
+  }
+  React.useEffect(() => {
+    if (!viewer || !focusRegion) return
+    void viewer.flyTo(new THREE.Vector3(...focusRegion.camera.position), new THREE.Vector3(...focusRegion.camera.target))
+    const lines = focusRegion.strokes ? regionStrokes(focusRegion.strokes, viewer.kit) : null
+    if (lines) viewer.scene.add(lines)
+    // Turning the view away puts the box out of place: it goes.
+    let flying = true
+    const t = window.setTimeout(() => (flying = false), 900)
+    const moved = () => !flying && setRegionBox(null)
+    viewer.controls.addEventListener("start", moved)
+    viewer.invalidate()
+    return () => {
+      window.clearTimeout(t)
+      viewer.controls.removeEventListener("start", moved)
+      if (lines) {
+        viewer.scene.remove(lines)
+        disposeObject(lines)
+      }
+      viewer.invalidate()
+    }
+  }, [viewer, focusRegion])
 
   // The screenshot sent with annotations is taken from where the learner is looking.
   React.useEffect(() => {
@@ -417,12 +540,12 @@ export function StudioViewport({
 
   const words = useWords()
   const busyText = copy?.busy ?? `${words.helper}正在改模型，这一轮结束后再标注`
-  const latest = React.useRef({ studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature, view })
+  const latest = React.useRef({ studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature, view, onOpenPart, sketching })
   const pickRevision = React.useRef(0)
   React.useEffect(() => { pickRevision.current++ }, [annotation, measuring, display, view, busy])
   React.useEffect(() => {
-    latest.current = { studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature, view }
-  }, [studio, busy, busyText, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature, view])
+    latest.current = { studio, busy, busyText, display, open: annotations.open, cancel: annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature, view, onOpenPart, sketching }
+  }, [studio, busy, busyText, display, annotations.open, annotations.cancel, measuring, plane, reselect, readOnly, annotation, onPointFeature, onSelectFeature, view, onOpenPart, sketching])
 
   React.useEffect(() => {
     if (!viewer) return
@@ -488,6 +611,16 @@ export function StudioViewport({
       })
     }
     const onLeave = () => { cancelAnimationFrame(hoverFrame.current); latest.current.onPointFeature?.(null) }
+    // A double-click on a part (selecting, not noting or measuring) opens its own file.
+    const onDouble = (e: MouseEvent) => {
+      const l = latest.current
+      if (!l.onOpenPart || l.annotation || l.measuring || l.sketching || l.reselect?.state) return
+      const meshes = current.current?.children.filter((c) => (c as THREE.Mesh).isMesh && !c.userData.reference) ?? []
+      const hit = pickVisible(viewer, e, meshes, l.plane)
+      const part = hit ? groupAt(hit)?.part : undefined
+      if (part !== undefined) l.onOpenPart(part)
+    }
+    canvas.addEventListener("dblclick", onDouble)
     canvas.addEventListener("pointermove", onMove)
     canvas.addEventListener("pointerleave", onLeave)
     canvas.addEventListener("pointerdown", onDown)
@@ -495,6 +628,7 @@ export function StudioViewport({
     return () => {
       revisions.current++
       cancelAnimationFrame(hoverFrame.current)
+      canvas.removeEventListener("dblclick", onDouble)
       canvas.removeEventListener("pointermove", onMove)
       canvas.removeEventListener("pointerleave", onLeave)
       canvas.removeEventListener("pointerdown", onDown)
@@ -510,37 +644,111 @@ export function StudioViewport({
     onSelectFeature?.(null)
   }
   const showAll = () => onParts?.({ ...view, hidden: new Set() })
-  const hideKeys = React.useRef({ hideSelected, showAll })
-  React.useEffect(() => {
-    hideKeys.current = { hideSelected, showAll }
-  })
-  const canHide = Boolean(onParts && display?.parts)
-  React.useEffect(() => {
-    if (!canHide) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code !== "KeyH" || e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return
-      if ((e.target as HTMLElement | null)?.closest?.("input, textarea, select, [contenteditable=true], [role=dialog], [role=menu]")) return
-      e.preventDefault()
-      if (e.shiftKey) hideKeys.current.showAll()
-      else hideKeys.current.hideSelected()
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [canHide])
   const focusMatches = !!view.focus && selectionNames.length === view.focus.parts.length && selectionNames.every((n) => view.focus!.parts.includes(n))
+  const isolateSelected = () => {
+    if (!onParts) return
+    if (view.focus && (focusMatches || !selectionNames.length)) return onParts({ ...view, focus: undefined })
+    if (selectionNames.length) onParts({ ...view, focus: { parts: selectionNames, mode: "isolate" } })
+  }
+  /** F: the selected parts, or everything (pulled apart as shown). */
+  const frame = () => {
+    if (!viewer || !display?.bbox) return
+    const box = selectedParts.length ? facesBox(display, view, (g) => g.part !== undefined && selectedParts.includes(g.part)) : null
+    if (box) return void viewer.fit(new THREE.Box3(new THREE.Vector3(...box[0]), new THREE.Vector3(...box[1])), { animate: true })
+    if (display.parts && parts.explode > 0) return frameExploded()
+    void viewer.fit(new THREE.Box3(new THREE.Vector3(...display.bbox[0]), new THREE.Vector3(...display.bbox[1])), { animate: true })
+  }
+
+  // The view's one-letter keys (the card behind ? lists them). Not while typing, in a dialog or a menu,
+  // with ⌘ / Ctrl / ⌥ held, or while the drawing sheet covers the view. By key position, so they work
+  // with a Chinese input method on too. Esc goes back one level at a time: the open card or panel
+  // handles its own, then the tool, then (the timeline's own handler) the selection and the step.
+  const keyActions = { tool, chooseTool, sketch, onAnnotation, onNoteSelection, selectedParts, section, bbox: display?.bbox ?? null, showDims, dimsTotal: shownDims.total, explodable: Boolean(display?.parts && display.parts.length > 1), exploding, looks, hasLooks: hasLooks(display), canHide: Boolean(onParts && display?.parts), hideSelected, showAll, isolateSelected, frame, onOpenPart, busyCard: Boolean(draft || keysOpen || editingDim || openNote), stopMeasuring, onParts, parts }
+  const keyRef = React.useRef(keyActions)
+  React.useEffect(() => {
+    keyRef.current = keyActions
+  })
+  React.useEffect(() => {
+    if (!active) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return
+      const target = e.target as HTMLElement | null
+      if (target?.closest?.("input, textarea, select, [contenteditable=true], [role=dialog], [role=alertdialog], [role=menu], [role=listbox]")) return
+      const k = keyRef.current
+      const handled = () => {
+        e.preventDefault()
+        e.stopImmediatePropagation()
+      }
+      if (e.key === "Escape") {
+        if (k.busyCard) return
+        if (k.tool === "box" || k.tool === "pen") return handled(), k.chooseTool("select")
+        if (k.tool === "measure") return handled(), k.stopMeasuring()
+        if (k.tool === "note") return handled(), k.chooseTool("select")
+        return
+      }
+      if (e.repeat) return
+      if (e.key === "?") return handled(), setKeysOpen(true)
+      if (e.key === "Enter") {
+        if (target?.closest?.("button, a, [role=button], [role=tab], [role=separator]")) return
+        if (k.onOpenPart && k.selectedParts.length === 1) return handled(), k.onOpenPart(k.selectedParts[0])
+        return
+      }
+      if (e.shiftKey && e.code !== "KeyH") return
+      switch (e.code) {
+        case "KeyV":
+          if (k.onAnnotation) return handled(), k.chooseTool("select")
+          return
+        case "KeyC":
+          if (k.onNoteSelection && k.selectedParts.length) return handled(), k.onNoteSelection()
+          if (k.onAnnotation) return handled(), k.chooseTool(k.tool === "note" ? "select" : "note")
+          return
+        case "KeyR":
+          if (k.sketch) return handled(), k.chooseTool("box")
+          return
+        case "KeyP":
+          if (k.sketch) return handled(), k.chooseTool("pen")
+          return
+        case "KeyM":
+          return handled(), k.chooseTool(k.tool === "measure" ? "select" : "measure")
+        case "KeyX":
+          if (k.bbox) return handled(), setSection(k.section ? null : newSection(k.bbox))
+          return
+        case "KeyD":
+          if (k.dimsTotal) return handled(), setShowDims(!k.showDims)
+          return
+        case "KeyE":
+          if (!k.explodable) return
+          handled()
+          if (k.exploding) k.onParts?.({ ...k.parts, explode: 0 })
+          return setExploding(!k.exploding)
+        case "KeyA":
+          if (k.hasLooks) return handled(), setLooks(!k.looks)
+          return
+        case "KeyF":
+          return handled(), k.frame()
+        case "KeyH":
+          if (!k.canHide) return
+          handled()
+          return e.shiftKey ? k.showAll() : k.hideSelected()
+        case "KeyI":
+          if (k.canHide) return handled(), k.isolateSelected()
+          return
+      }
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [active, setLooks])
   return (
     <Viewport className="absolute inset-0" onReady={onReady} triadBesideCube>
-      <div className="absolute top-3 right-44 z-20 flex items-center gap-2 rounded-md border bg-background/95 p-1 text-caption">
-        <Button size="sm" variant={showChanges ? "secondary" : "ghost"} aria-pressed={showChanges} onClick={() => setShowChanges((v) => !v)}>查看变更</Button>
-        {showChanges && <span className="pr-2">新增：绿色 · 修改：橙色</span>}
-      </div>
       {onParts && display?.parts && (selectedParts.length > 0 || view.focus || view.hidden.size > 0) && (
-        <div role="toolbar" aria-label="选中零件" className="absolute bottom-24 left-3 z-20 flex max-w-[calc(100%_-_1.5rem)] flex-wrap items-center gap-1 rounded-md border bg-background/95 p-1 shadow-popover">
+        <div role="toolbar" aria-label="选中零件" className="absolute left-3 z-20 flex max-w-[calc(100%_-_1.5rem)] flex-wrap items-center gap-1 rounded-md border bg-background/95 p-1 shadow-popover" style={{ bottom: "calc(var(--timeline-h, 0px) + 1.25rem)" }}>
           <span className="max-w-40 truncate px-2 text-caption" title={selectionNames.join("、")}>
             {selectionNames.length > 1 ? `已选 ${selectionNames.length} 个零件` : selectionNames[0] ?? (view.focus ? `${view.focus.mode === "ghost" ? "保留实体" : "已隔离"} ${view.focus.parts.length} 个零件` : `已隐藏 ${view.hidden.size} 个零件`)}
           </span>
+          {selectionNames.length > 0 && selectionActions}
+          {selectionNames.length > 0 && selectionActions && <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />}
           <Button size="sm" variant="ghost" disabled={!selectionNames.length} title="H" onClick={hideSelected}>隐藏</Button>
-          <Button size="sm" variant={focusMatches && view.focus?.mode === "isolate" ? "secondary" : "ghost"} aria-pressed={focusMatches && view.focus?.mode === "isolate"} disabled={!selectionNames.length} onClick={() => onParts({ ...view, focus: focusMatches && view.focus?.mode === "isolate" ? undefined : { parts: selectionNames, mode: "isolate" } })}>隔离零件</Button>
+          <Button size="sm" variant={focusMatches && view.focus?.mode === "isolate" ? "secondary" : "ghost"} aria-pressed={focusMatches && view.focus?.mode === "isolate"} disabled={!selectionNames.length} title="I" onClick={isolateSelected}>隔离</Button>
           <Button size="sm" variant={focusMatches && view.focus?.mode === "ghost" ? "secondary" : "ghost"} aria-pressed={focusMatches && view.focus?.mode === "ghost"} disabled={!selectionNames.length} onClick={() => onParts({ ...view, focus: focusMatches && view.focus?.mode === "ghost" ? undefined : { parts: selectionNames, mode: "ghost" } })}>其余透明</Button>
           <Button size="sm" variant="ghost" disabled={!onLocateStep} onClick={onLocateStep}>定位步骤</Button>
           {selectionNames.length > 0 && <Button size="sm" variant="ghost" onClick={() => onSelectFeature?.(null)}>清除选择</Button>}
@@ -571,28 +779,33 @@ export function StudioViewport({
       {measuring && <MeasurePanel result={result} count={picked.length} onClose={stopMeasuring} />}
       {display?.mesh && kernel.phase === "ready" && !rs && (
         <ViewTools
-          annotation={annotation}
-          onAnnotation={onAnnotation ? (on) => { onAnnotation(on); annotations.cancel(); onPointFeature?.(null) } : undefined}
-          measuring={measuring}
-          onMeasuring={(on) => {
-            if (on) annotations.cancel()
-            setMeasuring(on)
-            setPicked([])
-          }}
+          tool={tool}
+          onTool={chooseTool}
+          notes={Boolean(onAnnotation)}
+          sketch={Boolean(sketch) && !readOnly}
           section={section}
           onSection={setSection}
           bbox={display.bbox}
           dims={{ on: showDims, shown: Math.min(DIMS_SHOWN, shownDims.total), total: shownDims.total }}
           onDims={setShowDims}
           explode={display.parts && display.parts.length > 1 ? parts.explode : null}
+          exploding={exploding}
+          onExploding={(on) => {
+            if (!on) onParts?.({ ...parts, explode: 0 })
+            setExploding(on)
+          }}
           onExplode={(explode) => onParts?.({ ...parts, explode })}
           onExplodeEnd={frameExploded}
           looks={{ on: looks, available: hasLooks(display) }}
           onLooks={setLooks}
+          changes={showChanges}
+          onChanges={setShowChanges}
+          keysOpen={keysOpen}
+          onKeysOpen={setKeysOpen}
+          keys={[...VIEW_KEYS.filter((k) => (onAnnotation || !"VCRP".includes(k.keys)) && (sketch || !"RP".includes(k.keys)) && (onParts || !["H / ⇧H", "I"].includes(k.keys))), ...keys]}
           tips={[
             ...(readOnly || copy?.hint === null ? [] : [`${copy?.hint ?? "单击模型上的面或边，标注要改的地方"}。`]),
-            "拖动右上角的方块转动视角；点它的面、棱或角，转到对应的视图。",
-            "这一列工具可以测量、剖开看、标尺寸、把零件分开看，颜色按钮在零件的颜色和白模之间切换。",
+            "拖动转视角，滚轮缩放；拖右上角的方块也能转，点它的面、棱或角转到对应的视图。",
           ]}
         />
       )}
@@ -604,6 +817,44 @@ export function StudioViewport({
       )}
       {editingDim && !busy && (
         <DimEditor key={editingDim.dim.id} dim={studio.dims.find((d) => d.id === editingDim.dim.id) ?? editingDim.dim} anchor={editingDim.el} studio={studio} onClose={() => setEditingDim(null)} />
+      )}
+      {regionBox?.rect && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute z-[5] rounded-sm border-2 border-primary bg-primary/5"
+          style={{ left: `${regionBox.rect[0] * 100}%`, top: `${regionBox.rect[1] * 100}%`, width: `${(regionBox.rect[2] - regionBox.rect[0]) * 100}%`, height: `${(regionBox.rect[3] - regionBox.rect[1]) * 100}%` }}
+        />
+      )}
+      {viewer && display && sketch && sketching && (
+        <SketchLayer
+          key={sketching}
+          viewer={viewer}
+          shape={sketching}
+          gather={(marks) => {
+            const meshes = current.current?.children.filter((c) => (c as THREE.Mesh).isMesh && !c.userData.reference) ?? []
+            return gatherRegion(viewer, display, (at) => pickVisible(viewer, at, meshes, plane), marks)
+          }}
+          onSave={sketch.save}
+          onClose={() => chooseTool(sketchFrom.current)}
+        />
+      )}
+      {viewer && openPinAt && openNote && pinNotes && (
+        <PinNoteCard
+          key={openPinAt.n}
+          viewer={viewer}
+          point={openPinAt.point}
+          note={openNote}
+          onSave={(text) => pinNotes.save(openPinAt.n, text)}
+          onResolve={() => {
+            pinNotes.resolve(openPinAt.n)
+            setOpenPin(null)
+          }}
+          onRemove={() => {
+            pinNotes.remove(openPinAt.n)
+            setOpenPin(null)
+          }}
+          onClose={() => setOpenPin(null)}
+        />
       )}
       {viewer && draft && (
         <AnnotationCard
@@ -648,7 +899,7 @@ function useHeldHover(hover: Hover | null) {
 type Target = { hash: number; point: V3 }
 
 /** Prefer solid geometry behind transparent context; context remains selectable in empty space. */
-function pickVisible(viewer: Viewer, e: PointerEvent, meshes: THREE.Object3D[], cut: THREE.Plane | null) {
+function pickVisible(viewer: Viewer, e: { clientX: number; clientY: number }, meshes: THREE.Object3D[], cut: THREE.Plane | null) {
   const accept = (h: THREE.Intersection, ray: THREE.Ray) => (!cut || cut.distanceToPoint(h.point) >= -1e-6) && (!cut || !h.face || h.face.normal.dot(ray.direction) < 0)
   return viewer.pick(e, meshes.filter((m) => !m.userData.contextGhost), false, accept) ?? viewer.pick(e, meshes, false, accept)
 }

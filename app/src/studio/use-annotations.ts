@@ -9,7 +9,9 @@ import type { Studio } from "./use-studio"
 export type Note = Annotation & { hash: number }
 
 /** Faces or edges lit up in the viewport (a draft, a chip, a ① in a reply). */
-export type Focus = { kind: "face" | "edge"; hashes: number[]; pin?: Pin }
+/** `region`: a note on an area framed or drawn: the view it was marked from, and the marks. */
+export type Focus = { kind: "face" | "edge"; hashes: number[]; pin?: Pin; region?: FocusRegion }
+export type FocusRegion = { camera: { position: [number, number, number]; target: [number, number, number] }; rect?: [number, number, number, number]; strokes?: [number, number, number][][] }
 
 /**
  * The learner's marks on the model for the next message: the card being
@@ -94,7 +96,11 @@ export function useAnnotations(studio: Studio) {
 
   /** Text to start the next message with (「让助教改这一步」); the composer takes it and focuses. */
   const [prefill, setPrefill] = React.useState<{ text: string; n: number } | null>(null)
-  const startMessage = React.useCallback((text: string) => setPrefill((p) => ({ text, n: (p?.n ?? 0) + 1 })), [])
+  // `about`: what the message is about (a step), for hosts that keep it as a note; the site writes it in the text.
+  const startMessage = React.useCallback((text: string, about?: { feature?: string; name?: string }) => {
+    void about
+    setPrefill((p) => ({ text, n: (p?.n ?? 0) + 1 }))
+  }, [])
 
   return { draft, pending, sent, pins, focus, viewDir, open, cancel, add, remove, show, setFocus, snapshot, markSent, clearSent, reset, prefill, startMessage }
 }

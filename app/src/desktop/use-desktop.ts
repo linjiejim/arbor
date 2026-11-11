@@ -16,7 +16,11 @@ import type { Pin } from "@/studio/look"
 import type { Annotations, Focus, Note } from "@/studio/use-annotations"
 import type { KernelState, Studio } from "@/studio/use-studio"
 import { turnery } from "./bridge"
-import type { DocState, PartNote, PickRequest, ShowRequest, Snapshot } from "./core/protocol"
+import type { DocState, NoteAbout, PartNote, PickRequest, ShowRequest, Snapshot } from "./core/protocol"
+import { pinned } from "./core/notes"
+import { facesBox, NO_PARTS_VIEW } from "@/studio/scene"
+import type { PinNotes } from "@/studio/pin-notes"
+import { noteAbout } from "./ui/words"
 
 /** Engine snapshot, the active part, and what the agent is asking of the window. */
 export function useEngine() {
@@ -218,6 +222,12 @@ export function useDesktopStudio(doc: DocState | null, snapshot: Snapshot | null
 const noop = () => {}
 
 /** A note on a face or an edge, as the viewport's annotations. */
+/** A note on a clicked face or edge (the others are about parts, a step, an area or the whole file). */
+export const onSpot = (n: PartNote): n is PartNote & { kind: "face" | "edge" } => n.kind === "face" || n.kind === "edge"
+
+/** A note being written in the dialog: its text so far, and what it is about besides the whole file. */
+export type Compose = { text: string; about?: NoteAbout }
+
 export const asNote = (n: PartNote & { kind: "face" | "edge" }): Note => ({
   n: n.n,
   note: n.text,
@@ -243,10 +253,17 @@ export function useDesktopNotes(
   studio: Studio,
   doc: DocState | null,
   pick: PickRequest | null,
-): Annotations & { nextPin: number; compose: string | null; setCompose: (text: string | null) => void; addPartNote: (text: string) => Promise<boolean> } {
+): Annotations & {
+  nextPin: number
+  compose: Compose | null
+  setCompose: (c: Compose | null) => void
+  addPartNote: (text: string, about?: NoteAbout) => Promise<boolean>
+  pinNotes: PinNotes
+  locateNote: (n: PartNote) => void
+} {
   const [draft, setDraft] = React.useState<PickInfo | null>(null)
-  /** A note about the part or a feature being written (the site's 「让助教改」 becomes one). */
-  const [compose, setCompose] = React.useState<string | null>(null)
+  /** A note about the part, some parts or a step being written (the site's 「让助教改」 becomes one). */
+  const [compose, setCompose] = React.useState<Compose | null>(null)
   const [focus, setFocus] = React.useState<Focus | null>(null)
   const viewDir = React.useRef(new THREE.Vector3(1, -1.1, 0.85).normalize())
   const path = doc?.path
@@ -259,10 +276,10 @@ export function useDesktopNotes(
   }
   const request = pick && pick.path === path ? pick : null
   const notes = doc?.notes
-  // Only notes on a face or an edge have a pin on the model.
-  const open = React.useMemo(() => (notes ?? []).filter((n): n is PartNote & { kind: "face" | "edge" } => n.status === "open" && n.kind !== "part"), [notes])
+  // Every open note with a place on the model has a pin; the ones on a face or an edge are also annotations.
+  const open = React.useMemo(() => (notes ?? []).filter((n) => n.status === "open" && pinned(n)), [notes])
   const pins: Pin[] = React.useMemo(() => open.map((n) => ({ n: n.n, point: n.point, part: n.part })), [open])
-  const pending = React.useMemo(() => open.map(asNote), [open])
+  const pending = React.useMemo(() => open.filter(onSpot).map(asNote), [open])
   const { setPins, locate } = studio
   React.useEffect(() => setPins(pins), [setPins, pins])
 
@@ -321,10 +338,10 @@ export function useDesktopNotes(
     [locate],
   )
 
-  /** Save a note about the whole part; false (and the reason shown) when it wasn't saved, so the draft stays. */
+  /** Save a note about the whole part, some parts or a step; false (and the reason shown) when it wasn't saved, so the draft stays. */
   const addPartNote = React.useCallback(
-    async (text: string) => {
-      const r = await turnery.call("add_note", { text }, path)
+    async (text: string, about?: NoteAbout) => {
+      const r = await turnery.call("add_note", { text, ...about }, path)
       if (!r.ok) {
         notify.error(r.text.replace(/^✗ /, ""))
         return false
@@ -335,10 +352,71 @@ export function useDesktopNotes(
     [path],
   )
 
+  const display = studio.display
+  /** A step's note: pinned at the middle of its faces (on its part when they're all on one). */
+  const startMessage = React.useCallback(
+    (text: string, about?: { feature?: string; name?: string }) => {
+      if (!about?.feature || !display) return setCompose({ text })
+      const id = about.feature
+      const box = facesBox(display, NO_PARTS_VIEW, (g) => g.origin === id)
+      const onParts = new Set(display.groups.filter((g) => g.origin === id).map((g) => g.part))
+      const only = onParts.size === 1 ? [...onParts][0] : undefined
+      const part = only !== undefined ? display.parts?.[only]?.name : undefined
+      const point = box ? (box[0].map((v, k) => (v + box[1][k]) / 2) as [number, number, number]) : undefined
+      setCompose({ text, about: { feature: id, name: about.name, ...(point ? { point } : {}), ...(point && part ? { part } : {}) } })
+    },
+    [display],
+  )
+
+  const whole = doc?.kind === "assembly" ? "装配" : "零件"
+  const update = React.useCallback(
+    async (n: number, input: Record<string, unknown>) => {
+      const note = notes?.find((x) => x.n === n)
+      if (!note) return false
+      const r = await turnery.call("update_note", { id: note.id, ...input }, path)
+      if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
+      return r.ok
+    },
+    [notes, path],
+  )
+  const pinNotes: PinNotes = React.useMemo(
+    () => ({
+      get: (n) => {
+        const note = notes?.find((x) => x.n === n)
+        return note ? { n, text: note.text, about: noteAbout(note, whole), reply: note.reply } : null
+      },
+      save: (n, text) => update(n, { text }),
+      resolve: (n) => void update(n, { status: "resolved" }),
+      remove: (n) => void update(n, { remove: true }),
+    }),
+    [notes, whole, update],
+  )
+
+  /** Show where a note is: its face or edge as it is now, or the faces of its parts or step. */
+  const locateNote = React.useCallback(
+    (n: PartNote) => {
+      if (onSpot(n)) return void show(asNote(n))
+      const pin = n.pin === false ? undefined : { n: n.n, point: n.point, part: n.part }
+      const d = display
+      if (!d) return
+      const parts = new Set((n.parts ?? []).map((name) => d.parts?.findIndex((p) => p.name === name) ?? -1).filter((i) => i >= 0))
+      const origins = new Set(n.kind === "parts" ? [] : n.origins)
+      // An area is shown by its box or strokes: lighting up every face of its steps would cover far more.
+      const hashes = n.kind === "region" ? [] : d.groups.filter((g) => (n.kind === "parts" ? g.part !== undefined && parts.has(g.part) : origins.has(g.origin))).map((g) => g.hash)
+      // An area: back to the view it was marked from, with its box or strokes.
+      const region = n.kind === "region" && n.region ? { camera: n.region.camera, ...(n.region.rect ? { rect: n.region.rect } : {}), ...(n.region.strokes ? { strokes: n.region.strokes } : {}) } : undefined
+      if (!hashes.length && !pin && !region) return notify("在现在的模型上找不到它了")
+      setFocus({ kind: "face", hashes, ...(pin ? { pin } : {}), ...(region ? { region } : {}) })
+    },
+    [display, show],
+  )
+
   const none = React.useCallback(() => {}, [])
   return {
     prefill: null,
-    startMessage: setCompose,
+    startMessage,
+    pinNotes,
+    locateNote,
     compose,
     setCompose,
     addPartNote,

@@ -46,6 +46,8 @@ export function StepPanel({
   reselect,
   annotations,
   busy = false,
+  rename = false,
+  onRenameStart,
   onClose,
   onPointDim,
 }: {
@@ -58,6 +60,10 @@ export function StepPanel({
   reselect?: Reselect
   annotations?: Annotations
   busy?: boolean
+  /** The step was double-clicked in the timeline: edit its name (also when the panel opens with it). */
+  rename?: boolean
+  /** The name is being edited: the request is done. */
+  onRenameStart?: () => void
   onClose: () => void
   onPointDim: (id: string | null) => void
 }) {
@@ -83,7 +89,7 @@ export function StepPanel({
     notify.undo(`已删除「${name}」`, studio.undo)
   }
   const askAssistant = () => {
-    live?.annotations.startMessage(failed && r?.message ? `「${name}」（${f.id}）报错了：${r.message}。帮我改好。` : `改「${name}」（${f.id}）：`)
+    live?.annotations.startMessage(failed && r?.message ? `「${name}」（${f.id}）报错了：${r.message}。帮我改好。` : `改「${name}」（${f.id}）：`, { feature: f.id, name })
     // The message is written where the panel sits: make way for it.
     onClose()
   }
@@ -110,7 +116,12 @@ export function StepPanel({
         </div>
         <h2 className="mt-1 flex items-center gap-2 text-title font-medium">
           <OpIcon op={iconOf(f)} className="size-5 shrink-0 text-muted-foreground" />
-          <span className={cn("min-w-0 truncate", f.suppressed && "line-through")}>{name}</span>
+          {/* A part of an assembly is renamed in the parts list, where its notes and colours follow it. */}
+          {pinned && !readOnly && f.op !== "component" ? (
+            <StepName key={f.id} studio={studio} feature={f} name={name} rename={rename} onStart={onRenameStart} />
+          ) : (
+            <span className={cn("min-w-0 truncate", f.suppressed && "line-through")}>{name}</span>
+          )}
         </h2>
         {r?.state === "ok" && (
           <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-caption text-faint-foreground tabular">
@@ -412,4 +423,67 @@ async function askToPick(studio: Studio, reselect: Reselect, annotations: Annota
   const lines = each.map((x, i) => `${i + 1}. ${x ? `${selectorWords(x.selector, kind, studio.tree)}（${JSON.stringify(x.selector)}）` : "（描述不出来）"}`)
   reselect.cancel()
   annotations.startMessage(`「${name}」（${f.id}）改成选这几${kind === "edge" ? "条边" : "个面"}：\n${lines.join("\n")}`)
+}
+
+/** A step's name: double-click (here or on the timeline) to edit; Enter keeps it, Esc leaves it. Empty = the default name. */
+function StepName({ studio, feature: f, name, rename, onStart }: { studio: Studio; feature: Feature; name: string; rename: boolean; onStart?: () => void }) {
+  // Asked to rename before this was on screen (a quick double-click): start editing straight away.
+  const [editing, setEditing] = React.useState(rename)
+  const [draft, setDraft] = React.useState(f.name ?? name)
+  const done = React.useRef(false)
+  const start = () => {
+    done.current = false
+    setDraft(f.name ?? name)
+    setEditing(true)
+  }
+  const [seen, setSeen] = React.useState(rename)
+  if (rename !== seen) {
+    setSeen(rename)
+    if (rename) {
+      setDraft(f.name ?? name)
+      setEditing(true)
+    }
+  }
+  React.useEffect(() => {
+    if (rename) onStart?.()
+  }, [rename, onStart])
+  const commit = async () => {
+    if (done.current) return
+    done.current = true
+    setEditing(false)
+    const next = draft.trim()
+    if (next === (f.name ?? "") || (!f.name && next === name)) return
+    const err = await studio.editTree((t) => ({ ...t, features: t.features.map((x) => (x.id === f.id ? ({ ...x, name: next || undefined } as Feature) : x)) }))
+    if (err) notify.error(err)
+  }
+  if (!editing)
+    return (
+      <button type="button" title="双击改名" className={cn("min-w-0 truncate rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring", f.suppressed && "line-through")} onDoubleClick={start} onKeyDown={(e) => { if (e.key === "F2") { e.preventDefault(); start() } }}>
+        {name}
+      </button>
+    )
+  return (
+    <Input
+      autoFocus
+      ref={(el) => { if (el) done.current = false }}
+      aria-label="步骤名"
+      value={draft}
+      maxLength={40}
+      className="h-8 min-w-0 flex-1 text-title font-medium"
+      onFocus={(e) => e.currentTarget.select()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => void commit()}
+      onKeyDown={(e) => {
+        if (e.nativeEvent.isComposing) return
+        if (e.key === "Enter") {
+          e.preventDefault()
+          void commit()
+        } else if (e.key === "Escape") {
+          e.preventDefault()
+          done.current = true
+          setEditing(false)
+        }
+      }}
+    />
+  )
 }

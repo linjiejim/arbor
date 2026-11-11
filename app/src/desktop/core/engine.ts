@@ -38,7 +38,8 @@ import { ASM_EXT, asmExtOf, besides, effectiveTree, gather, isAssembly, loadShar
 import { baseName, canBeRoot, dirName, inside, isAssemblyFile, partFileName, projectSkeleton, relativePath, rootFor, scanProject, stripEnding, type Scan, type ScanCache } from "./project"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "../../studio/tools"
 import { AGENT_GUIDE, COMMAND } from "./catalog"
-import { newNote, notesText, parseNotes, pickLines, type NotesFile } from "./notes"
+import { newNote, notesText, parseNotes, pickLines, pinned, type NotesFile } from "./notes"
+import { badFileName, badPartName, componentById, renameInAssembly, renameInNotes } from "./rename"
 import {
   NOTES_EXT,
   PART_EXT,
@@ -54,6 +55,7 @@ import {
   type KernelPhase,
   type LookRequest,
   type LoadState,
+  type NoteAbout,
   type PartSummary,
   type PickRequest,
   type ProjectFile,
@@ -112,6 +114,10 @@ export interface Files {
   stat?(path: string): Promise<{ size: number; mtimeMs: number } | null>
   /** A folder's entries (null: no such folder). Without it there are no projects, only open files. */
   list?(dir: string): Promise<{ name: string; dir: boolean }[] | null>
+  /** Move a file (or folder) to a path that doesn't exist yet. Without it, files can't be renamed. */
+  rename?(from: string, to: string): Promise<void>
+  /** Two paths are one file or folder on disk (a change of case, on a disk that ignores case). */
+  same?(a: string, b: string): Promise<boolean>
 }
 
 /** The window, when there is one: renders views for `look`. */
@@ -183,6 +189,19 @@ export function partName(path: string) {
   const ext = asmExtOf(base) ?? partExtOf(base)
   return ext ? base.slice(0, -ext.length) : base.replace(/\.json$/i, "")
 }
+
+/** The folder beside the notes where pictures of framed or drawn areas go: 「盒子.notes」. */
+export const notesDir = (path: string) => notesPath(path).replace(/\.json$/i, "")
+
+/** At most this many pictures with get_notes (the newest). */
+const MAX_NOTE_IMAGES = 4
+
+const toBase64 = (bytes: Uint8Array) => {
+  let s = ""
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  return btoa(s)
+}
+const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
 
 export function notesPath(path: string) {
   // An assembly's notes don't share a name with a part of the same name next to it.
@@ -451,6 +470,7 @@ export class Engine {
       if (name === "add_part") return await this.addPart(input as Parameters<Engine["addPart"]>[0], ctx)
       if (name === "close_part") return this.closePart(this.partKey(String(input.path)))
       if (name === "close_project") return this.closeProject()
+      if (name === "rename_file") return await this.renameFile(input as { path: string; name: string }, ctx)
       const doc = await this.resolveDoc(ctx)
       if (!doc) return fail("还没有打开零件：先用 open_part（path 写零件文件，新零件加 create: true）。")
       // Catch up with the file first: an editor may have saved it a moment ago (the watcher is debounced).
@@ -525,7 +545,14 @@ export class Engine {
       case "get_notes": {
         const who = readerOf(ctx.actor)
         if (who) doc.seen[who].note = Math.max(doc.seen[who].note, ...doc.notes.notes.map((n) => n.n))
-        return { ok: true, text: notesText(doc.notes.notes, input.status === "all") }
+        const all = input.status === "all"
+        const list = doc.notes.notes.map((n) => (n.region?.image ? { ...n, region: { ...n.region, image: this.noteImagePath(doc, n.region.image) } } : n))
+        // The pictures of areas framed or drawn on (open ones), so the agent sees what was marked.
+        const shown = list.filter((n) => n.region?.image && (all || n.status === "open")).slice(-MAX_NOTE_IMAGES)
+        const images = (await Promise.all(shown.map((n) => this.dataUrl(n.region!.image!)))).filter((x): x is string => !!x)
+        const own = notesText(list, all, isAssembly(doc.path) ? "装配" : "零件")
+        const text = [own, await this.contextNotes(doc, all), images.length ? `附了 ${images.length} 张框选或画笔标注时的画面（按备注顺序）。` : ""].filter(Boolean).join("\n\n")
+        return { ok: true, text, ...(images.length ? { images } : {}) }
       }
       case "resolve_note": {
         const note = doc.notes.notes.find((n) => n.id === input.id)
@@ -546,8 +573,12 @@ export class Engine {
       }
       case "show":
         return this.show(doc, input)
+      case "rename_part":
+        return this.renamePart(doc, input as { id: string; name: string }, ctx)
       case "add_note": {
-        const note = newNote(doc.notes, (input.pick as unknown as PickInfo | undefined) ?? null, String(input.text ?? ""))
+        const about = { parts: input.parts, feature: input.feature, name: input.name, point: input.point, part: input.part, region: input.region } as NoteAbout
+        const image = about.region?.image ? await this.saveNoteImage(doc, doc.notes.next, about.region.image) : undefined
+        const note = newNote(doc.notes, (input.pick as unknown as PickInfo | undefined) ?? null, String(input.text ?? ""), about, image)
         doc.notes = { next: note.n + 1, notes: [...doc.notes.notes, note] }
         this.logNote(doc, ctx.actor, `记下备注 ${note.id}「${clip(note.text) || "只点了位置"}」`, "added")
         await this.saveNotes(doc)
@@ -561,7 +592,10 @@ export class Engine {
           doc.notes = { ...doc.notes, notes: doc.notes.notes.filter((n) => n !== note) }
           this.logNote(doc, ctx.actor, `删除备注 ${note.id}`)
         } else {
-          if (typeof input.text === "string") note.text = input.text.trim()
+          if (typeof input.text === "string" && input.text.trim() !== note.text) {
+            note.text = input.text.trim()
+            this.logNote(doc, ctx.actor, `改了备注 ${note.id}：「${clip(note.text) || "（没写字）"}」`)
+          }
           if (input.status && input.status !== note.status) {
             note.status = input.status as "open" | "resolved"
             note.resolvedAt = note.status === "resolved" ? Date.now() : undefined
@@ -809,6 +843,210 @@ export class Engine {
       return `${d.path === this.active ? "▸" : "-"} ${d.path}（${isAssembly(d.path) ? "装配" : "零件"}）：${d.tree.features.length} 个${isAssembly(d.path) ? "零件" : "特征"}${open ? `，${open} 条未处理备注` : ""}${d.error ? `，文件有错：${d.error}` : ""}`
     })
     return { ok: true, text: `打开的零件（▸ = 窗口里正在看的）：\n${lines.join("\n")}` }
+  }
+
+  // ---------------------------------------------------------------- renaming
+
+  /**
+   * A component's name in this assembly (not its file's): its parts, and the mates, checks and notes
+   * that name them, follow. Undoable like any change to the assembly (the notes stay renamed).
+   */
+  private async renamePart(doc: Doc, input: { id: string; name: string }, ctx: CallContext): Promise<CommandResult> {
+    if (!isAssembly(doc.path)) return fail("只有装配里的零件能这样改名；零件文件改的是文件名（rename_file）。")
+    const hit = componentById(doc.tree, input.id)
+    if (!hit) return fail(`装配里没有 id 为 ${input.id} 的零件`)
+    const to = input.name.trim()
+    const bad = badPartName(to)
+    if (bad) return fail(bad)
+    if (to === hit.name) return { ok: true, text: "名字没变。" }
+    const taken = doc.tree.features.some((f) => f.op === "component" && f.id !== input.id && componentName(f) === to)
+    if (taken) return fail(`装配里已经有叫「${to}」的零件了`)
+    const tree = renameInAssembly(doc.tree, hit.name, to, (f) => (f.id === input.id ? { ...f, name: to } : null))
+    const notes = renameInNotes(doc.notes.notes, hit.name, to)
+    if (notes !== doc.notes.notes) {
+      doc.notes = { ...doc.notes, notes }
+      await this.saveNotes(doc)
+    }
+    await this.adopt(doc, tree, ctx.actor, { summary: `零件「${hit.name}」改名为「${to}」` })
+    return { ok: true, text: `已把「${hit.name}」改名为「${to}」（只在这个装配里，零件文件不变）。` }
+  }
+
+  /**
+   * A part or assembly file renamed on disk, its notes with it. Every assembly in the project (and every
+   * open one) that uses it is rewritten to the new name; where a component went by the file's name, the
+   * mates, checks and notes naming its parts follow. An open file stays open under its new name, with its
+   * history.
+   */
+  private async renameFile(input: { path: string; name: string }, ctx: CallContext): Promise<CommandResult> {
+    const files = this.opts.files
+    const move = files.rename
+    if (!move) return fail("这里不能改文件名。")
+    const from = this.partKey(input.path, ctx.cwd)
+    const base = baseName(from)
+    const ext = asmExtOf(base) ?? partExtOf(base)
+    if (!ext) return fail("只能改零件和装配文件的名字。")
+    const name = input.name.trim()
+    const bad = badFileName(name)
+    if (bad) return fail(bad)
+    const oldName = base.slice(0, -ext.length)
+    if (name === oldName) return { ok: true, text: "名字没变。" }
+    const to = this.partKey(`${dirName(from)}/${name}${ext}`)
+    if ((await files.read(from)) === null) return fail(`没有这个文件：${from}`)
+
+    // Everything is checked before anything moves. Something already at a new path is in the way,
+    // unless it is this very file under another case (most Mac disks ignore case).
+    const inWay = async (a: string, b: string, there: boolean) => there && !(a.toLowerCase() === b.toLowerCase() && (await files.same?.(a, b)))
+    if (this.docs.has(to) || (await inWay(from, to, (await files.read(to)) !== null))) return fail(`这个文件夹里已经有 ${name}${ext} 了`)
+    if (await inWay(notesPath(from), notesPath(to), (await files.read(notesPath(to))) !== null)) return fail(`这个文件夹里已经有 ${name}${ext} 的备注文件，先把它移走`)
+    if (await inWay(notesDir(from), notesDir(to), files.list ? (await files.list(notesDir(to))) !== null : false))
+      return fail(`这个文件夹里已经有 ${baseName(notesDir(to))} 文件夹（备注的截图放在这里），先把它移走`)
+
+    // Assemblies that use it: the project's, and any open one (a file opened on its own may be outside it).
+    const asms = new Set([...(this.project?.entries ?? []).filter((e) => e.kind === "assembly").map((e) => e.path), ...[...this.docs.keys()].filter(isAssembly)])
+    asms.delete(from)
+    asms.delete(to)
+    /** An assembly pointed at the new file; the parts named after the file (no `name` of their own) and the references to them renamed too. */
+    const retarget = (asm: string, raw: Tree) => {
+      let hit = false
+      let renamedParts = false
+      let tree = renameInAssembly(raw, "\u0000", "\u0000", (f) => {
+        if (!f.file || this.partKey(besides(asm, f.file)) !== from) return null
+        hit = true
+        if (!f.name) renamedParts = true
+        return { ...f, file: f.file.slice(0, f.file.length - base.length) + name + ext }
+      })
+      if (!hit) return null
+      if (renamedParts) tree = renameInAssembly(tree, oldName, name, () => null)
+      return { tree, renamedParts }
+    }
+    const treeOf = async (asm: string) => {
+      const open = this.docs.get(asm)
+      if (open) return open.tree
+      try {
+        const raw = JSON.parse((await files.read(asm)) ?? "null") as Tree
+        return Array.isArray(raw?.features) ? raw : null
+      } catch {
+        return null
+      }
+    }
+    // A part taking the new name must not meet another part already called that.
+    for (const asm of asms) {
+      const tree = await treeOf(asm)
+      if (!tree) continue
+      const takes = (f: Feature) => f.op === "component" && !f.name && !!f.file && this.partKey(besides(asm, f.file)) === from
+      if (!tree.features.some(takes)) continue
+      if (tree.features.some((f) => f.op === "component" && !takes(f) && componentName(f) === name))
+        return fail(`装配「${partName(asm)}」里已经有叫「${name}」的零件，换个名字，或者先给那个零件改名`)
+    }
+
+    // The open file goes with what it remembers (undo, activity, what the agents have seen).
+    const open = this.docs.get(from)
+    const kept = open ? { undo: open.undo, redo: open.redo, changes: open.changes, seq: open.seq, seen: open.seen, context: open.context } : null
+    const wasActive = this.active === from
+    const sessions = [...this.sessions].filter(([, p]) => p === from).map(([s]) => s)
+    if (open) this.closePart(from, false)
+    /** The file opened again where it now is, as it was. */
+    const reopen = async (at: string, summary?: string) => {
+      if (!kept) return
+      const doc = await this.load(at, {})
+      Object.assign(doc, { undo: kept.undo, redo: kept.redo, changes: kept.changes, seq: kept.seq, seen: kept.seen })
+      if (summary) doc.changes = [{ rev: doc.rev, actor: ctx.actor, at: Date.now(), summary, seq: ++doc.seq }, ...doc.changes].slice(0, MAX_CHANGES)
+      if (kept.context) {
+        doc.context = kept.context === from ? to : kept.context
+        await this.ensureKernel(doc, true)
+      }
+      for (const s of sessions) this.sessions.set(s, at)
+      if (wasActive) this.active = at
+    }
+
+    /** The window told what it shows now (the file reopened, or what was active before). */
+    const publish = () => {
+      const now = this.active ? this.docs.get(this.active) : null
+      if (now) this.emitDoc(now)
+      else this.emitSnapshot()
+    }
+
+    const moves: [string, string][] = [[from, to]]
+    if ((await files.read(notesPath(from))) !== null) moves.push([notesPath(from), notesPath(to)])
+    if (files.list && (await files.list(notesDir(from))) !== null) moves.push([notesDir(from), notesDir(to)])
+    const done: [string, string][] = []
+    try {
+      for (const [a, b] of moves) {
+        await move(a, b)
+        done.push([a, b])
+      }
+    } catch (e) {
+      // Halfway is worse than not at all: what moved goes back.
+      for (const [a, b] of done.reverse()) await move(b, a).catch(() => {})
+      await reopen(from)
+      publish()
+      return fail(`没能改名：${(e as Error).message}`)
+    }
+    this.recent = this.recent.map((p) => (p === from ? to : p))
+    this.opts.onRecent?.(this.recent)
+
+    const summary = `文件改名：${oldName} → ${name}`
+    const updated: string[] = []
+    for (const asm of asms) {
+      let renamedParts = false
+      const edit = await this.rewrite(
+        asm,
+        (text) => {
+          let raw: Tree
+          try {
+            raw = JSON.parse(text) as Tree
+          } catch {
+            return null
+          }
+          if (!Array.isArray(raw?.features)) return null
+          const next = retarget(asm, raw)
+          if (!next) return null
+          renamedParts = next.renamedParts
+          return `${JSON.stringify(next.tree, null, 2)}\n`
+        },
+        ctx,
+        summary,
+        undefined,
+        // Undoing it there can't move the file back: the old name would be gone from disk.
+        { undoable: false },
+      )
+      // Its earlier versions, one undo away, use the new name too: also when it no longer uses the file
+      // but an undo would bring it back, and the version an outside save just made (caught up in rewrite).
+      const doc = this.docs.get(asm)
+      if (doc) {
+        const entry = (x: Entry): Entry => ({ ...x, tree: retarget(asm, x.tree)?.tree ?? x.tree, ...(x.files ? { files: x.files.map((f) => (f.path === from ? { ...f, path: to } : f)) } : {}) })
+        doc.undo = doc.undo.map(entry)
+        doc.redo = doc.redo.map(entry)
+      }
+      if (!edit) continue
+      updated.push(partName(asm))
+      if (renamedParts) await this.renameNotesOf(asm, oldName, name)
+    }
+
+    // A part being edited inside the renamed assembly stays in it.
+    for (const d of this.docs.values()) {
+      if (d.context !== from) continue
+      d.context = to
+      await this.ensureKernel(d)
+    }
+
+    await reopen(to, summary)
+    if (this.project) this.project = await scanProject(files, this.project.root, this.scanCache)
+    publish()
+    const asmText = updated.length ? `用到它的 ${updated.join("、")} 已经改成新名字。` : ""
+    return { ok: true, text: `已把 ${base} 改名为 ${name}${ext}。${asmText}` }
+  }
+
+  /** An assembly's notes on parts that were renamed (open or not). */
+  private async renameNotesOf(asm: string, from: string, to: string) {
+    const open = this.docs.get(asm)
+    const file = open?.notes ?? parseNotes(await this.opts.files.read(notesPath(asm)))
+    const notes = renameInNotes(file.notes, from, to)
+    if (notes === file.notes) return
+    if (open) {
+      open.notes = { ...open.notes, notes }
+      await this.saveNotes(open)
+    } else await this.opts.files.write(notesPath(asm), `${JSON.stringify({ ...file, notes }, null, 2)}\n`)
   }
 
   // ---------------------------------------------------------------- project
@@ -1116,6 +1354,43 @@ export class Engine {
     await this.opts.files.write(notesPath(doc.path), `${JSON.stringify(doc.notes, null, 2)}\n`)
   }
 
+  /** A framed or drawn area's picture (a PNG data URL), saved beside the notes as n<number>.png. */
+  private async saveNoteImage(doc: Doc, n: number, url: string) {
+    const m = /^data:image\/png;base64,([A-Za-z0-9+/=]+)$/.exec(url)
+    if (!m) return undefined
+    const name = `n${n}.png`
+    await this.opts.files.write(`${notesDir(doc.path)}/${name}`, fromBase64(m[1]))
+    return name
+  }
+
+  /**
+   * Editing a part inside its assembly: the assembly's notes on this part (by the names its components
+   * give it there), which the person may have written while looking at the whole.
+   */
+  private async contextNotes(doc: Doc, all: boolean) {
+    const asm = doc.context
+    if (!asm) return ""
+    const parsed = parseTree((await this.opts.files.read(asm)) ?? "")
+    if (!parsed.ok) return ""
+    const names = parsed.tree.features.flatMap((f) => (f.op === "component" && f.file && this.partKey(besides(asm, f.file)) === doc.path ? [componentName(f)] : []))
+    if (!names.length) return ""
+    const mine = (n: string) => names.some((b) => n === b || n.startsWith(`${b}#`) || n.startsWith(`${b}/`))
+    const file = this.docs.get(asm)?.notes ?? parseNotes(await this.opts.files.read(notesPath(asm)))
+    const list = file.notes.filter((n) => (all || n.status === "open") && ((n.part && mine(n.part)) || n.parts?.some(mine)))
+    if (!list.length) return ""
+    return `装配「${partName(asm)}」里关于这个零件的 ${list.length} 条备注（记在装配上：处理完用 open_part 打开装配再 resolve_note；位置是装配里的坐标）：\n\n${notesText(list, true, "装配")}`
+  }
+
+  /** Where a note's picture is, as the agent can open it. */
+  private noteImagePath(doc: Doc, name: string) {
+    return `${notesDir(doc.path)}/${name}`
+  }
+
+  private async dataUrl(path: string) {
+    const bytes = await this.opts.files.readBytes?.(path)
+    return bytes ? `data:image/png;base64,${toBase64(bytes)}` : null
+  }
+
   // ------------------------------------------------------------------ looks
 
   /**
@@ -1141,7 +1416,7 @@ export class Engine {
    * read it (assemblies) restyle; `origin` is left to the caller, who adopts it. Returns the edit, or
    * null when nothing was written.
    */
-  private async rewrite(path: string, change: (text: string) => string | null, ctx: CallContext, summary: string, origin?: Doc): Promise<FileEdit | null> {
+  private async rewrite(path: string, change: (text: string) => string | null, ctx: CallContext, summary: string, origin?: Doc, opts: { undoable?: boolean } = {}): Promise<FileEdit | null> {
     const open = this.docs.get(path)
     if (open) await this.fileChanged(open)
     const before = await this.opts.files.read(path)
@@ -1151,7 +1426,7 @@ export class Engine {
     if (open) {
       const parsed = parseTree(after)
       if (!parsed.ok) throw new InputError(`${path} 不是合法的特征树：${parsed.error}`)
-      await this.adopt(open, parsed.tree, ctx.actor, { summary })
+      await this.adopt(open, parsed.tree, ctx.actor, { summary, undoable: opts.undoable })
     } else {
       this.wrote.set(path, { text: after, actor: ctx.actor })
       await this.opts.files.write(path, after)
@@ -1636,7 +1911,7 @@ export class Engine {
       if (auto) shots.push({ label: `特写：${f ? displayName(doc.tree, f) : "最后一步"}（自动）`, dir: VIEW_DIR.iso, box: auto, padding: FOCUS_PADDING })
     }
 
-    const pins = input.notes === false ? [] : doc.notes.notes.filter((n) => n.status === "open" && n.kind !== "part").map((n) => ({ n: n.n, point: n.point }))
+    const pins = input.notes === false ? [] : doc.notes.notes.filter((n) => n.status === "open" && pinned(n)).map((n) => ({ n: n.n, point: n.point }))
     const plain = input.plain === true
     const images = await screen.look({ display, views, highlight: input.highlight as string | undefined, pins, shots, section, hide: hide.length ? hide : undefined, size, plain })
     const step = at ? `（回滚到「${displayName(doc.tree, doc.tree.features[index])}」这一步）` : ""
