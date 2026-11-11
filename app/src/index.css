@@ -2,6 +2,10 @@
 @import "./styles/jim-theme.css";
 @import "./styles/turnery-theme.css";
 
+/* The feature timeline: faint at rest; lit while pointed at, focused, a step is open, or one of its
+   popovers (the ⓘ, the colour) is open, so what opened it doesn't vanish under it. */
+@custom-variant timeline-lit (&:where([data-timeline-bar]:is(:hover, :focus-within, [data-open=true], :has([aria-expanded=true])), [data-timeline-bar]:is(:hover, :focus-within, [data-open=true], :has([aria-expanded=true])) *));
+
 @layer base {
   html, body, #root { height: 100%; }
   /* CSS2D labels sit above the canvas but only labels that opt in take the pointer. */

@@ -2,7 +2,7 @@ import * as React from "react"
 import { Minus, PanelRight, PictureInPicture2 } from "lucide-react"
 import { IconButton } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { clampLayout, dockRoom, MIN_H, MIN_W, type AssistantLayoutState } from "../assistant-layout"
+import { MIN_H, MIN_W, type AssistantLayoutState } from "../assistant-layout"
 import { AssistantPanel } from "./assistant-panel"
 
 type Edge = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw"
@@ -42,8 +42,7 @@ function drag(e: React.PointerEvent, move: (dx: number, dy: number) => void) {
 
 /** The floating panel. The conversation and the draft live in AssistantProvider, so it can come and go. */
 export function AssistantFloat({ state }: { state: AssistantLayoutState }) {
-  const { layout, setLayout } = state
-  const fit = (l: AssistantLayoutState["layout"]) => clampLayout(l, window.innerWidth, window.innerHeight)
+  const { layout, setLayout, fit } = state
 
   const moveBy = (e: React.PointerEvent) => {
     // Buttons and the title field in the header are for clicking, not for dragging.
@@ -90,7 +89,7 @@ export function AssistantDock({ state }: { state: AssistantLayoutState }) {
   const { layout, setLayout } = state
   const resize = (e: React.PointerEvent) => {
     const start = layout
-    drag(e, (dx) => setLayout(clampLayout({ ...start, dockW: start.dockW - dx }, window.innerWidth, window.innerHeight)))
+    drag(e, (dx) => setLayout(state.fit({ ...start, dockW: start.dockW - dx })))
   }
   return (
     <aside aria-label="对话" className="relative flex shrink-0 flex-col border-l" style={{ width: layout.dockW }}>
@@ -105,9 +104,9 @@ function Actions({ state }: { state: AssistantLayoutState }) {
   return (
     <>
       <IconButton
-        label={docked ? "浮动显示" : dockRoom(window.innerWidth) < MIN_W ? "窗口太窄，放不下固定的对话栏" : "固定在右侧"}
+        label={docked ? "浮动显示" : state.room() < MIN_W ? "窗口太窄，放不下固定的对话栏" : "固定在右侧"}
         size="icon-sm"
-        disabled={!docked && dockRoom(window.innerWidth) < MIN_W}
+        disabled={!docked && state.room() < MIN_W}
         onClick={() => state.show(docked ? "float" : "dock")}
       >
         {docked ? <PictureInPicture2 /> : <PanelRight />}

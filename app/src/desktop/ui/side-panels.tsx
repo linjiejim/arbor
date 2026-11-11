@@ -7,16 +7,20 @@ import { Segmented } from "@/components/ui/segmented"
 import { StateView } from "@/components/ui/state"
 import { Hint } from "@/components/hint"
 import { turnery } from "../bridge"
-import type { Actor, DocState, PartNote, Snapshot } from "../core/protocol"
-import { AgentStatus } from "./title-bar"
-import { ACTOR_LABEL, ago, useNow } from "./words"
+import type { Actor, DocState, PartNote } from "../core/protocol"
+import { Textarea } from "@/components/ui/input"
+import { pinned } from "../core/notes"
+import { ACTOR_LABEL, ago, noteAbout, useNow } from "./words"
 
 /** The person's notes on the part: what the agent reads with get_notes, and what it answered. */
 export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate: (n: PartNote) => void; onWrite: () => void }) {
   const [filter, setFilter] = React.useState<"open" | "all">("open")
   const open = doc.notes.filter((n) => n.status === "open")
   const list = (filter === "open" ? open : [...doc.notes].sort((a, b) => Number(a.status === "resolved") - Number(b.status === "resolved") || b.n - a.n)).slice()
-  const update = (n: PartNote, input: Record<string, unknown>) => void turnery.call("update_note", { id: n.id, ...input }, doc.path)
+  const update = (n: PartNote, input: Record<string, unknown>) => turnery.call("update_note", { id: n.id, ...input }, doc.path)
+  const whole = doc.kind === "assembly" ? "装配" : "零件"
+  /** The note whose words are being changed here. */
+  const [editing, setEditing] = React.useState<string | null>(null)
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-2">
@@ -34,7 +38,12 @@ export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate
           <Hint
             label="备注怎么用"
             align="end"
-            tips={["在模型上单击一个面或一条边，写下要改什么。", "关于整个零件的，点「写一条」。", "agent 用 get_notes 读备注，改完会写一句回复。"]}
+            tips={[
+              "备注模式（C）下单击一个面或一条边，写下要改什么；选中零件时按 C，写的是关于这些零件的。",
+              "R 框出一片、P 用画笔圈出一处，再写备注。",
+              `关于整个${whole}的，点「写一条」。点模型上的编号或这里的文字可以改。`,
+              "agent 用 get_notes 读备注，改完会写一句回复。",
+            ]}
           />
           <Button size="sm" variant="ghost" onClick={onWrite}>
             <PenLine />
@@ -64,11 +73,22 @@ export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
-                      <p className={cn("text-body", !n.text && "text-muted-foreground")}>{n.text || "（只点了位置）"}</p>
+                      {editing === n.id ? (
+                        <NoteText note={n} onDone={() => setEditing(null)} onSave={async (text) => (await update(n, { text })).ok} />
+                      ) : (
+                        <button
+                          type="button"
+                          title="点一下改文字"
+                          className={cn("min-w-0 cursor-text rounded-sm text-left text-body break-words outline-none focus-visible:ring-2 focus-visible:ring-ring", !n.text && "text-muted-foreground")}
+                          onClick={() => setEditing(n.id)}
+                        >
+                          {n.text || "（只标了位置）"}
+                        </button>
+                      )}
                       <Badge tone={n.status === "open" ? "warning" : "success"}>{n.status === "open" ? "未处理" : "已处理"}</Badge>
                     </div>
                     <p className="mt-0.5 text-caption text-muted-foreground">
-                      {n.kind === "part" ? `整个零件 · ${n.id}` : `${n.kind === "face" ? "面" : "边"} · ${n.what} · ${n.where} · ${n.id}`}
+                      {noteAbout(n, whole)} · {n.id}
                     </p>
                     {n.reply && (
                       <p className="mt-2 rounded-md bg-muted px-2.5 py-1.5 text-small">
@@ -77,24 +97,24 @@ export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate
                       </p>
                     )}
                     <div className="mt-1.5 -ml-2 flex flex-wrap gap-0.5">
-                      {n.kind !== "part" && (
+                      {pinned(n) && (
                         <Button size="sm" variant="ghost" onClick={() => onLocate(n)}>
                           <Crosshair />
                           定位
                         </Button>
                       )}
                       {n.status === "open" ? (
-                        <Button size="sm" variant="ghost" onClick={() => update(n, { status: "resolved" })}>
+                        <Button size="sm" variant="ghost" onClick={() => void update(n, { status: "resolved" })}>
                           <Check />
                           标为已处理
                         </Button>
                       ) : (
-                        <Button size="sm" variant="ghost" onClick={() => update(n, { status: "open" })}>
+                        <Button size="sm" variant="ghost" onClick={() => void update(n, { status: "open" })}>
                           <RotateCcw />
                           重新打开
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => update(n, { remove: true })}>
+                      <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => void update(n, { remove: true })}>
                         <Trash2 />
                         删除
                       </Button>
@@ -110,15 +130,53 @@ export function NotesPanel({ doc, onLocate, onWrite }: { doc: DocState; onLocate
   )
 }
 
+/** A note's words, changed in place: ↵ saves, Esc or leaving the field without a change puts them back. */
+function NoteText({ note, onSave, onDone }: { note: PartNote; onSave: (text: string) => Promise<boolean>; onDone: () => void }) {
+  const [text, setText] = React.useState(note.text)
+  const done = React.useRef(false)
+  const finish = async (keep: boolean) => {
+    if (done.current) return
+    done.current = true
+    if (keep && text.trim() !== note.text.trim() && !(await onSave(text))) {
+      done.current = false
+      return
+    }
+    onDone()
+  }
+  return (
+    <Textarea
+      autoFocus
+      rows={2}
+      maxLength={600}
+      className="min-w-0 flex-1 resize-none"
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onFocus={(e) => e.currentTarget.select()}
+      onBlur={() => void finish(true)}
+      onKeyDown={(e) => {
+        if (e.key === "Escape") {
+          e.preventDefault()
+          e.stopPropagation()
+          void finish(false)
+        } else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+          e.preventDefault()
+          void finish(true)
+        }
+      }}
+      aria-label={`备注 ${note.n} 的文字`}
+    />
+  )
+}
+
 const ACTOR_TONE: Record<Actor, "info" | "neutral" | "outline"> = { agent: "info", assistant: "info", user: "neutral", file: "outline" }
 
-/** Who changed the part and how, newest first. */
-export function ActivityPanel({ doc, snapshot }: { doc: DocState; snapshot: Snapshot | null }) {
+/** Who changed the part and how, newest first. What the agent is doing now is in the status bar. */
+export function ActivityPanel({ doc }: { doc: DocState }) {
   const now = useNow()
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-11 shrink-0 items-center gap-1 border-b px-4">
-        <AgentStatus snapshot={snapshot} pick={null} />
+        <span className="text-caption text-muted-foreground">谁改了什么，最新的在上面</span>
         <Hint className="ml-auto" align="end" label="动态是什么" tips={["agent、你在窗口里，或者直接改文件：每一次改动都记在这里。", "每一条都能撤销（⌘Z）。"]} />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">

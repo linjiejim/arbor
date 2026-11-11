@@ -1,7 +1,6 @@
 import * as React from "react"
 import { Boxes, CircleAlert, MousePointerClick, Sparkles, X } from "lucide-react"
 import { Button, IconButton } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { notify } from "@/components/ui/toast"
 import { renderShots, renderViews } from "@/studio/look"
 import { selectParts } from "@/studio/part-selection"
@@ -9,27 +8,34 @@ import { NO_PARTS_VIEW, type Hover, type PartsView } from "@/studio/scene"
 import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
 import { DrawingSheet } from "@/studio/ui/drawing-sheet"
 import { DESKTOP_WORDS, WordsContext } from "@/studio/ui/host-words"
-import { StudioViewport } from "@/studio/ui/studio-viewport"
+import { StudioViewport, type ViewCamera } from "@/studio/ui/studio-viewport"
 import { TreeOverlay } from "@/studio/ui/tree-overlay"
 import { useReselect } from "@/studio/use-reselect"
 import { turnery } from "./bridge"
-import type { DocState, PartNote, PickRequest, ShowRequest } from "./core/protocol"
-import { asNote, useDesktopNotes, useDesktopStudio, useEngine } from "./use-desktop"
+import type { DocState, PickRequest, ShowRequest, Snapshot } from "./core/protocol"
+import { useDesktopNotes, useDesktopStudio, useEngine, type Compose } from "./use-desktop"
 import { AssistantProvider } from "./use-assistant"
 import { useAssistantLayout } from "./assistant-layout"
 import { AssistantDock, AssistantFloat } from "./ui/assistant-window"
-import { StatusBar } from "./ui/status-bar"
+import { StatusBar, type StatusTarget } from "./ui/status-bar"
 import { AgentSetupDialog } from "./ui/agent-setup"
-import { AddPartMenu, ComponentActions } from "./ui/assembly"
+import { AddPartMenu } from "./ui/assembly"
+import { openTarget } from "./open-target"
+import { renamedPart } from "./core/rename"
+import { arrive, renameVisits, type Renaming, type Visit, type Visits } from "./visits"
+import { fileStem } from "./ui/words"
 import { NoteComposer } from "./ui/note-composer"
-import { PartsSidebar } from "./ui/parts-sidebar"
+import { PartsSidebar, type Instance, type Structure } from "./ui/parts-sidebar"
+import { RightPanel, type PanelTab } from "./ui/right-panel"
+import { usePanels } from "./panels"
+import { setPartLook } from "@/studio/appearance"
+import type { SketchHost } from "@/studio/region"
 import { ActivityPanel, NotesPanel } from "./ui/side-panels"
 import { TitleBar } from "./ui/title-bar"
 import { ProjectStart, Welcome } from "./ui/welcome"
 import { ModelLoading } from "./ui/model-loading"
 
 /** A note pinned on a face or an edge (not one about the whole part). */
-const onSpot = (n: PartNote): n is PartNote & { kind: "face" | "edge" } => n.kind !== "part"
 
 const editing = () => {
   const el = document.activeElement as HTMLElement | null
@@ -41,14 +47,18 @@ export function DesktopApp() {
   const studio = useDesktopStudio(doc, snapshot)
   const notes = useDesktopNotes(studio, doc, pick)
   const reselect = useReselect(studio)
-  const [partsPath, setPartsPath] = React.useState(doc?.path)
   const [partsView, setPartsView] = React.useState<PartsView>(NO_PARTS_VIEW)
-  if (partsPath !== doc?.path) { setPartsPath(doc?.path); setPartsView(NO_PARTS_VIEW) }
   const [treeHover, setTreeHover] = React.useState<Hover | null>(null)
   const [stepSlot, setStepSlot] = React.useState<HTMLDivElement | null>(null)
   const [setupOpen, setSetupOpen] = React.useState(false)
-  const [tab, setTab] = React.useState("notes")
-  const chatLayout = useAssistantLayout()
+  /** The tab chosen last (never 「详情」, which comes and goes with the selection). */
+  const [tab, setTab] = React.useState<Exclude<PanelTab, "details">>("notes")
+  const panels = usePanels()
+  const history = useHistory(doc)
+  /** Where the camera was left in each file, for coming back to it (the view closes while a file loads). */
+  const [cameras] = React.useState(() => new Map<string, ViewCamera>())
+  const chatLayout = useAssistantLayout(panels.widths.left + (doc ? panels.widths.right : 0))
+  const agentSeen = useAgentSeen(snapshot)
   /** 「工程图」 over the 3D view; parameters stay editable beside it. */
   const [sheet, setSheet] = React.useState(false)
 
@@ -65,10 +75,18 @@ export function DesktopApp() {
 
   // Menu items and shortcuts: ⌘Z undoes typing in a field, otherwise the last change to the part.
   const path = doc?.path
+  const menuRef = React.useRef({ toggleLeft: panels.toggleLeft, toggleRight: () => panels.toggleRight(), back: history.back, forward: history.forward })
+  React.useEffect(() => {
+    menuRef.current = { toggleLeft: panels.toggleLeft, toggleRight: () => panels.toggleRight(), back: history.back, forward: history.forward }
+  })
   React.useEffect(
     () =>
       turnery.onMenu((action) => {
         if (action === "agent-setup") return setSetupOpen(true)
+        if (action === "toggle-left") return menuRef.current.toggleLeft()
+        if (action === "toggle-right") return menuRef.current.toggleRight()
+        if (action === "back") return menuRef.current.back?.()
+        if (action === "forward") return menuRef.current.forward?.()
         if (editing()) return void document.execCommand(action)
         if (path) void turnery.call(action, {}, path).then((r) => !r.ok && notify(r.text.replace(/^✗ /, "")))
       }),
@@ -96,12 +114,33 @@ export function DesktopApp() {
   const [annotation, setAnnotation] = React.useState(false)
   const [pointed, setPointed] = React.useState<{ path?: string; id: string | null; part?: string } | null>(null)
   const [selected, setSelected] = React.useState<{ path?: string; id: string | null; parts: string[] } | null>(null)
+  // Each file keeps what was hidden, isolated, pulled apart and selected while another one is open.
+  const [kept, setKept] = React.useState<Record<string, { view: PartsView; selected: { id: string | null; parts: string[] } | null }>>({})
+  const [partsPath, setPartsPath] = React.useState(doc?.path)
+  if (partsPath !== doc?.path) {
+    if (partsPath) setKept((k) => ({ ...k, [partsPath]: { view: partsView, selected: selected?.path === partsPath ? { id: selected.id, parts: selected.parts } : null } }))
+    setPartsPath(doc?.path)
+    const back = doc?.path ? kept[doc.path] : undefined
+    setPartsView(back?.view ?? NO_PARTS_VIEW)
+    if (back?.selected && doc) setSelected({ path: doc.path, ...back.selected })
+  }
   const pointedFeature = pointed?.path === path ? pointed?.id : null
   const selectedNames = selected && selected.path === path ? selected.parts : []
   const selectedParts = selectedNames.map((name) => studio.display?.parts?.findIndex((p) => p.name === name) ?? -1).filter((i) => i >= 0)
   const selectedFeature = selected && selected.path === path ? (selectedParts.length ? studio.display?.groups.find((g) => g.part === selectedParts.at(-1))?.origin ?? null : selected.parts.length ? null : selected.id) : null
   const pointedPart = pointed?.part && pointed.path === path ? studio.display?.parts?.findIndex((p) => p.name === pointed.part) : undefined
   const [locateStep, setLocateStep] = React.useState<{ id: string; request: number } | null>(null)
+  // A step or part selected: its details are a tab, brought to the front; closing them goes back to `tab`.
+  const [details, setDetails] = React.useState<string | null>(null)
+  const [detailsFront, setDetailsFront] = React.useState(false)
+  const onDetails = React.useCallback((id: string | null) => {
+    setDetails(id)
+    setDetailsFront(Boolean(id))
+  }, [])
+  const chooseTab = (t: PanelTab) => {
+    setDetailsFront(t === "details")
+    if (t !== "details") setTab(t)
+  }
   const pointFeature = React.useCallback((id: string | null, part?: number) => {
     const name = part === undefined ? undefined : studio.display?.parts?.[part]?.name
     setPointed((p) => p?.id === id && p.path === path && p.part === name ? p : { path, id, part: name })
@@ -130,21 +169,153 @@ export function DesktopApp() {
   }) ?? []
   const [presented, setPresented] = React.useState<unknown>(null)
   const assembly = doc?.kind === "assembly" && !doc.context
+  const display = studio.display
+  const indexOf = (name: string) => display?.parts?.findIndex((p) => p.name === name) ?? -1
+  const isolated = new Set(partsView.focus?.mode === "isolate" ? partsView.focus.parts.map(indexOf).filter((i) => i >= 0) : [])
+  const bodies: Instance[] = !assembly && display?.parts && display.parts.length > 1 ? display.parts.map((p, index) => ({ name: p.name, index, id: display.groups.find((g) => g.part === index)?.origin ?? "", file: "", look: p.look, body: true })) : []
+  const structure: Structure | null = !doc
+    ? null
+    : {
+        kind: assembly ? "assembly" : "part",
+        items: assembly ? assemblyParts : bodies,
+        hidden: partsView.hidden,
+        isolated,
+        onToggleHidden: (p) => {
+          const hidden = new Set(partsView.hidden)
+          if (hidden.has(p.index)) hidden.delete(p.index)
+          else hidden.add(p.index)
+          setPartsView({ ...partsView, hidden })
+        },
+        onNote: (p) => noteOnParts([p.name]),
+        onIsolate: (p) => {
+          const alone = partsView.focus?.mode === "isolate" && partsView.focus.parts.length === 1 && partsView.focus.parts[0] === p.name
+          setPartsView({ ...partsView, focus: alone ? undefined : { parts: [p.name], mode: "isolate" } })
+        },
+        ...(assembly
+          ? {
+              canOpen: (p: Instance) => openTarget(doc, p.file).reason ?? true,
+              onOpen: (p: Instance) => void openPart(doc, p.file, false),
+              onEditInPlace: (p: Instance) => void openPart(doc, p.file, true),
+              onRename: async (p: Instance, name: string) => {
+                const before = componentOf(p.name, assemblyParts.map((x) => x.name))
+                const r = await turnery.call("rename_part", { id: p.id, name }, doc.path)
+                if (!r.ok) {
+                  notify.error(r.text.replace(/^✗ /, ""))
+                  return false
+                }
+                // What is isolated and selected here goes by the parts' names: they follow.
+                const to = (n: string) => renamedPart(n, before, name.trim())
+                setPartsView((v) => (v.focus ? { ...v, focus: { ...v.focus, parts: v.focus.parts.map(to) } } : v))
+                setSelected((s) => (s && s.path === doc.path ? { ...s, parts: s.parts.map(to) } : s))
+                return true
+              },
+              add: <AddPartMenu doc={doc} />,
+            }
+          : {}),
+      }
+  // Open the part under the pointer (double-click) or the one selected (↵): its own file, as from the files list.
+  const openPartAt = (index: number) => {
+    const p = assemblyParts.find((x) => x.index === index)
+    if (assembly && doc && p) void openPart(doc, p.file, false)
+  }
+  /** Framing (R) and drawing (P) a note: kept like any other, with the area and its picture. */
+  const sketchHost: SketchHost = {
+    save: async (pick, text) => {
+      const { point, part, parts, origins, image, ...rest } = pick
+      const ok = await notes.addPartNote(text, { point, ...(part ? { part } : {}), region: { ...rest, parts, origins, ...(image ? { image } : {}) } })
+      if (ok) chooseTab("notes")
+      return ok
+    },
+  }
+  /** A note about whole parts (by name): pinned at their middle, on the part when there's one. */
+  const noteOnParts = (names: string[]) => {
+    const ps = names.map((name) => display?.parts?.find((p) => p.name === name)).filter((p) => !!p)
+    if (!ps.length) return
+    const point = [0, 1, 2].map((k) => ps.reduce((a, p) => a + p.center[k], 0) / ps.length) as [number, number, number]
+    notes.setCompose({ text: "", about: { parts: ps.map((p) => p.name), point, ...(ps.length === 1 ? { part: ps[0].name } : {}) } })
+  }
+  const one = assembly && selectedParts.length === 1 ? assemblyParts.find((x) => x.index === selectedParts[0]) : undefined
+  const why = !assembly ? null : selectedParts.length > 1 ? "一次打开一个零件" : one ? (openTarget(doc!, one.file).reason ?? null) : null
+  const noteButton = (
+    <Button size="sm" variant="ghost" title="给选中的零件写一条备注（C）" onClick={() => noteOnParts(selectedNames)}>
+      备注
+    </Button>
+  )
+  const selectionActions = !doc ? null : !assembly ? noteButton : (
+    <>
+      {noteButton}
+      <Button size="sm" variant="ghost" title={why ?? "单独打开它的零件文件（↵，或双击零件）"} disabled={Boolean(why) || !one} onClick={() => one && void openPart(doc, one.file, false)}>
+        打开零件
+      </Button>
+      <Button size="sm" variant="ghost" title={why ?? "在装配里改它，其余零件留在周围"} disabled={Boolean(why) || !one} onClick={() => one && void openPart(doc, one.file, true)}>
+        在装配里改
+      </Button>
+    </>
+  )
+  const goStatus = (to: StatusTarget) => {
+    if (to === "setup") return setSetupOpen(true)
+    panels.toggleRight(true)
+    if (to === "failed") {
+      const i = doc?.report?.features.findIndex((f) => f.state === "error") ?? -1
+      const id = i >= 0 ? doc?.tree.features[i]?.id : undefined
+      if (id) selectFeature(id)
+      return
+    }
+    chooseTab(to)
+  }
+  const hasSidebar = Boolean(doc || snapshot?.project || snapshot?.parts.length || snapshot?.loading)
   const loading = snapshot?.loading ?? (doc && !doc.error && snapshot?.kernel.phase !== "error" && (!studio.display || studio.display.provisional || presented !== studio.display) ? { path: doc.path, name: doc.name, startedAt: 0, progress: { stage: "mesh" as const, completed: 0, total: 1 } } : null)
   return (
     <WordsContext.Provider value={DESKTOP_WORDS}>
     <AssistantProvider project={snapshot?.project?.root ?? null} part={doc?.path ?? null}>
     <div className="flex h-dvh flex-col bg-background">
-      <TitleBar snapshot={snapshot} doc={doc} onSetup={() => setSetupOpen(true)} sheet={sheet && Boolean(doc)} onSheet={setSheet} chat={{ open: chatLayout.layout.mode !== "hidden", onToggle: chatLayout.toggle }} />
+      <TitleBar
+        snapshot={snapshot}
+        doc={doc}
+        onSetup={() => setSetupOpen(true)}
+        setup={!agentSeen}
+        sheet={sheet && Boolean(doc)}
+        onSheet={setSheet}
+        chat={{ open: chatLayout.layout.mode !== "hidden", onToggle: chatLayout.toggle }}
+        panels={{ left: hasSidebar ? panels.panels.left.open : null, right: doc ? panels.panels.right.open : null, onLeft: panels.toggleLeft, onRight: () => panels.toggleRight() }}
+        nav={{ back: history.back, forward: history.forward }}
+      />
       <div className="flex min-h-0 flex-1">
         {/* The start page is just the start page: the sidebar comes with a project or an open file. */}
-        {(doc || snapshot?.project || snapshot?.parts.length || loading) && <PartsSidebar snapshot={snapshot} instances={assembly ? assemblyParts : []} selected={selectedNames}
-          onSelect={(p, additive) => selectFeature(p.id, p.index, additive)}
-          onPoint={(p) => pointFeature(p?.id ?? null, p?.index)}
-          onLook={async (parts, change, here) => {
-            const r = await turnery.call("set_appearance", { parts, ...change, ...(here ? { where: "assembly" } : {}) }, path ?? undefined)
-            if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
-          }} />}
+        {hasSidebar && panels.panels.left.open && (
+          <PartsSidebar
+            snapshot={snapshot}
+            width={panels.widths.left}
+            panels={panels.panels}
+            onPanels={panels.update}
+            structure={structure}
+            selected={selectedNames}
+            onSelect={(p, additive) => selectFeature(p.id || null, p.index, additive)}
+            onPoint={(p) => pointFeature(p?.id || null, p?.index)}
+            onLook={async (parts, change, here) => {
+              if (!assembly) {
+                const err = await studio.editTree((t) => setPartLook(t, parts, change))
+                if (err) notify.error(err)
+                return
+              }
+              const r = await turnery.call("set_appearance", { parts, ...change, ...(here ? { where: "assembly" } : {}) }, path ?? undefined)
+              if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
+            }}
+            onRenameFile={async (file, name) => {
+              const base = baseOf(file)
+              const was = fileStem(file)
+              const now = `${file.slice(0, file.length - base.length)}${name.trim()}${base.slice(was.length)}`
+              const rename = (path: string, to: string) => async () => {
+                const r = await turnery.call("rename_file", { path, name: to })
+                if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
+                return r.ok
+              }
+              const ok = await history.renaming(file, now, rename(file, name))
+              if (ok) notify.undo(`已改名为「${name.trim()}」`, () => void history.renaming(now, file, rename(now, was)))
+              return ok
+            }}
+          />
+        )}
         <main className="relative min-h-0 min-w-0 flex-1" data-testid="model-viewport" data-document={path} data-pointed-part={pointed?.path === path ? pointed?.part ?? "" : ""} data-presented={Boolean(studio.display && presented === studio.display)} data-geometry-state={!studio.display ? "loading" : studio.display.provisional ? "preview" : "ready"}>
           {doc ? (
             <>
@@ -164,12 +335,20 @@ export function DesktopApp() {
                 reselect={reselect}
                 parts={partsView}
                 onParts={setPartsView}
+                selectionActions={selectionActions}
+                sketch={sketchHost}
+                onNoteSelection={() => noteOnParts(selectedNames)}
+                pinNotes={notes.pinNotes}
+                onOpenPart={assembly ? openPartAt : undefined}
+                keys={DESKTOP_KEYS}
+                active={!sheet}
+                viewKey={doc.path}
+                cameras={cameras}
               />
               <TreeOverlay
                 studio={studio}
                 busy={Boolean(loading)}
                 onHover={setTreeHover}
-                pointedFeature={pointedFeature}
                 selectedFeature={selectedFeature}
                 locateStep={locateStep}
                 onSelectFeature={selectFeature}
@@ -177,10 +356,10 @@ export function DesktopApp() {
                 annotations={notes}
                 parts={partsView}
                 onParts={setPartsView}
-                partsList={!assembly}
+                partsList={false}
                 looks={!assembly}
-                rowActions={assembly ? (f) => <ComponentActions f={f} doc={doc} studio={studio} view={partsView} onView={setPartsView} /> : undefined}
-                footer={assembly ? <AddPartMenu doc={doc} /> : undefined}
+                timeline={!assembly}
+                onDetails={onDetails}
                 detailsIn={stepSlot}
               />
               {sheet && (
@@ -206,49 +385,44 @@ export function DesktopApp() {
                     {doc.error}
                   </Banner>
                 )}
-                {!pick && doc.context && <ContextBanner doc={doc} />}
               </>
             )}
           </div>
         </main>
         {doc && (
-          <Tabs value={tab} onValueChange={setTab} className="relative flex w-[380px] shrink-0 flex-col border-l max-xl:w-[340px]">
-            <TabsList className="shrink-0 px-3">
-              <TabsTrigger value="notes">
-                备注{doc.notes.some((n) => n.status === "open") ? ` ${doc.notes.filter((n) => n.status === "open").length}` : ""}
-              </TabsTrigger>
-              <TabsTrigger value="activity">动态</TabsTrigger>
-              <TabsTrigger value="params">参数</TabsTrigger>
-              <TabsTrigger value="code">代码</TabsTrigger>
-            </TabsList>
-            <TabsContent value="notes" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-              <NotesPanel doc={doc} onLocate={(n) => onSpot(n) && void notes.show(asNote(n))} onWrite={() => notes.setCompose("")} />
-            </TabsContent>
-            <TabsContent value="activity" className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">
-              <ActivityPanel doc={doc} snapshot={snapshot} />
-            </TabsContent>
-            <TabsContent value="params" className="min-h-0 flex-1 overflow-y-auto">
-              <ParamsPanel studio={studio} onHover={setTreeHover} annotations={notes} />
-            </TabsContent>
-            <TabsContent value="code" className="min-h-0 flex-1 overflow-y-auto">
-              <CodePanel studio={studio} />
-            </TabsContent>
-            {/* A step's details from the timeline cover this panel while shown. */}
-            <div ref={setStepSlot} className="pointer-events-none absolute inset-0 z-20" />
-          </Tabs>
+          <RightPanel
+            open={panels.panels.right.open}
+            width={panels.widths.right}
+            onWidth={(w) => panels.update((p) => ({ ...p, right: { ...p.right, w } }))}
+            onOpen={panels.toggleRight}
+            tab={details && detailsFront ? "details" : tab}
+            onTab={chooseTab}
+            details={Boolean(details)}
+            openNotes={doc.notes.filter((n) => n.status === "open").length}
+            checksFailing={doc.report?.checks?.filter((c) => !c.invalid && !c.pass).length ?? 0}
+            slot={setStepSlot}
+          >
+            {{
+              notes: <NotesPanel doc={doc} onLocate={notes.locateNote} onWrite={() => notes.setCompose({ text: "" })} />,
+              activity: <ActivityPanel doc={doc} />,
+              params: <ParamsPanel studio={studio} onHover={setTreeHover} annotations={notes} />,
+              code: <CodePanel studio={studio} />,
+            }}
+          </RightPanel>
         )}
         {chatLayout.layout.mode === "dock" && <AssistantDock state={chatLayout} />}
       </div>
-      <StatusBar snapshot={snapshot} doc={doc} pick={pick} onNotes={() => setTab("notes")} />
+      <StatusBar snapshot={snapshot} doc={doc} pick={pick} onGo={goStatus} agentSeen={agentSeen} />
       {chatLayout.layout.mode === "float" && <AssistantFloat state={chatLayout} />}
       <AgentSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
       <NoteComposer
-        text={notes.compose}
+        text={notes.compose?.text ?? null}
+        about={notes.compose ? composeAbout(notes.compose, doc?.kind === "assembly" ? "装配" : "零件") : ""}
         onClose={() => notes.setCompose(null)}
         onSave={async (text) => {
-          if (!(await notes.addPartNote(text))) return false
+          if (!(await notes.addPartNote(text, notes.compose?.about))) return false
           notes.setCompose(null)
-          setTab("notes")
+          chooseTab("notes")
           return true
         }}
       />
@@ -268,25 +442,6 @@ function Banner({ tone, icon, children, action, keep }: { tone: "info" | "warnin
       <span className={`${keep ? "shrink-0" : "min-w-0 flex-1"} text-body`}>{children}</span>
       {action}
     </div>
-  )
-}
-
-/** Editing a part inside an assembly: say so, and the way back. */
-function ContextBanner({ doc }: { doc: DocState }) {
-  if (!doc.context) return null
-  return (
-    <Banner
-      tone="info"
-      icon={<Boxes />}
-      keep
-      action={
-        <Button size="sm" variant="secondary" onClick={() => void turnery.call("open_part", { path: doc.context!.assembly })}>
-          回到装配
-        </Button>
-      }
-    >
-      在「{doc.context.name}」里编辑「{doc.name}」
-    </Banner>
   )
 }
 
@@ -332,4 +487,105 @@ function ShowBanner({ request, onClose }: { request: ShowRequest; onClose: () =>
       {request.label ?? (request.hashes ? `${request.hashes.length} ${request.kind === "face" ? "个面" : "条边"}` : "")}
     </Banner>
   )
+}
+
+/** The window's own keys, after the view's in the 「快捷键」 card. */
+const DESKTOP_KEYS = [
+  { keys: "↵", what: "单独打开选中的零件（也可以双击零件）" },
+  { keys: "⌘B / ⌥⌘B", what: "收起或展开左栏 / 右栏" },
+  { keys: "⌘[ / ⌘]", what: "后退 / 前进" },
+]
+
+/**
+ * The files opened in this window, in order, for 后退 / 前进 (⌘[ / ⌘]). A file in an assembly is
+ * opened again in it. Going back and then opening another file drops what was ahead, as in a browser.
+ */
+function useHistory(doc: DocState | null) {
+  const [history, setHistory] = React.useState<Visits>({ list: [], at: -1 })
+  /** Where back / forward is going, until the file opens (or fails to). */
+  const [travel, setTravel] = React.useState<number | null>(null)
+  /** A file being renamed: shown again under its new name, it is the same visit. */
+  const [renaming, setRenaming] = React.useState<Renaming | null>(null)
+  const visit: Visit | null = doc ? { path: doc.path, ...(doc.context ? { context: doc.context.assembly } : {}) } : null
+  const key = visit ? `${visit.path}\n${visit.context ?? ""}` : ""
+  const [seen, setSeen] = React.useState("")
+  if (key !== seen) {
+    setSeen(key)
+    // No file while the next one loads: where back / forward is going holds until it arrives.
+    if (visit) {
+      setHistory(arrive(history, visit, travel, renaming))
+      setTravel(null)
+    }
+  }
+  const go = (at: number) => {
+    const v = history.list[at]
+    if (!v) return
+    setTravel(at)
+    void turnery.call("open_part", v.context ? { path: v.path, context: v.context } : { path: v.path }).then((r) => {
+      if (r.ok) return
+      setTravel(null)
+      notify.error(r.text.replace(/^✗ /, ""))
+    })
+  }
+  return {
+    back: history.at > 0 ? () => go(history.at - 1) : null,
+    forward: history.at >= 0 && history.at < history.list.length - 1 ? () => go(history.at + 1) : null,
+    /**
+     * Rename a file (`run`): the file reopening under its new name is no new visit (which would drop
+     * what is ahead), and once it's done the visits to it go to the new name. Nothing changes if it fails.
+     */
+    renaming: async (from: string, to: string, run: () => Promise<boolean>) => {
+      setRenaming({ from, to })
+      const ok = await run().finally(() => setRenaming(null))
+      if (ok) setHistory((h) => renameVisits(h, from, to))
+      return ok
+    },
+  }
+}
+
+/** The component a part belongs to: 「螺钉#2/垫圈」→「螺钉」 (the longest name among the parts that fits). */
+function componentOf(part: string, all: string[]) {
+  const bases = [...new Set(all.map((n) => n.replace(/[#/].*$/, "")))].filter((b) => part === b || part.startsWith(`${b}#`) || part.startsWith(`${b}/`))
+  return bases.sort((a, b) => b.length - a.length)[0] ?? part.replace(/[#/].*$/, "")
+}
+const baseOf = (p: string) => p.split(/[\\/]/).pop() ?? p
+
+/** The dialog's line on what the note is about. */
+function composeAbout(c: Compose, whole: string) {
+  const a = c.about
+  if (a?.feature) return `关于步骤「${a.name ?? a.feature}」。`
+  if (a?.parts?.length) return `关于零件${a.parts.map((p) => `「${p}」`).join("")}（整个零件，不用点在面或边上）。`
+  return `关于整个${whole}。`
+}
+
+const AGENT_SEEN = "turnery:agent-seen"
+
+/** Whether an outside agent has worked in Turnery on this machine (then 「接入 Agent」 leaves the top bar). */
+function useAgentSeen(snapshot: Snapshot | null) {
+  const [seen, setSeen] = React.useState(() => {
+    try {
+      return localStorage.getItem(AGENT_SEEN) === "1"
+    } catch {
+      return false
+    }
+  })
+  const now = snapshot?.agent.who === "agent" && snapshot.agent.at !== null
+  if (now && !seen) setSeen(true)
+  React.useEffect(() => {
+    if (!seen) return
+    try {
+      localStorage.setItem(AGENT_SEEN, "1")
+    } catch {
+      /* private mode: this window only */
+    }
+  }, [seen])
+  return seen
+}
+
+/** Open a component's own file: alone (as from the files list), or inside this assembly. */
+async function openPart(doc: DocState, file: string, inPlace: boolean) {
+  const t = openTarget(doc, file)
+  if (t.reason) return notify(t.reason)
+  const r = await turnery.call("open_part", inPlace && !t.nested ? { path: t.path, context: doc.path } : { path: t.path })
+  if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
 }

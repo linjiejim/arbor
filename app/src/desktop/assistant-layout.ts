@@ -31,21 +31,24 @@ export function defaultLayout(vw: number, vh: number): AssistantLayout {
 /** The model needs at least this much width beside the docked column. */
 const VIEWPORT_MIN = 360
 
+/** The side panels' default widths: the parts list (shown from 1024 px) and the side panel (380, or 340 below 1280). */
+const defaultReserved = (vw: number) => (vw >= 1024 ? 224 : 0) + (vw >= 1280 ? 380 : 340)
+
 /**
- * How wide the docked column may get: what is left after the parts list (shown from 1024 px), the
- * side panel (380, or 340 below 1280) and a usable model view. Below MIN_W there is no room to dock.
+ * How wide the docked column may get: what is left after the side panels (`reserved`: their widths as
+ * laid out now) and a usable model view. Below MIN_W there is no room to dock.
  */
-export function dockRoom(vw: number) {
-  return vw - (vw >= 1024 ? 224 : 0) - (vw >= 1280 ? 380 : 340) - VIEWPORT_MIN
+export function dockRoom(vw: number, reserved = defaultReserved(vw)) {
+  return vw - reserved - VIEWPORT_MIN
 }
 
 /** Kept inside the window: at least the header stays reachable after the window shrinks; no dock without room. */
-export function clampLayout(l: AssistantLayout, vw: number, vh: number): AssistantLayout {
+export function clampLayout(l: AssistantLayout, vw: number, vh: number, reserved?: number): AssistantLayout {
   const w = Math.max(MIN_W, Math.min(l.w, vw - 2 * MARGIN))
   const h = Math.max(MIN_H, Math.min(l.h, vh - TOP - 2 * MARGIN))
   const x = Math.max(MARGIN, Math.min(l.x, vw - w - MARGIN))
   const y = Math.max(TOP + MARGIN, Math.min(l.y, vh - h - MARGIN))
-  const room = dockRoom(vw)
+  const room = dockRoom(vw, reserved)
   const dockW = Math.max(MIN_W, Math.min(l.dockW, room))
   if (room < MIN_W && l.mode === "dock") return { ...l, mode: "float", x, y, w, h, dockW }
   return { ...l, x, y, w, h, dockW }
@@ -64,21 +67,25 @@ function readLayout(): AssistantLayout {
   }
 }
 
-export function useAssistantLayout() {
+/** `reserved`: how wide the side panels are right now, so the docked column leaves the model its room. */
+export function useAssistantLayout(reserved?: number) {
   const [layout, setLayout] = React.useState(readLayout)
+  const room = React.useRef(reserved)
   React.useEffect(() => {
     localStorage.setItem(STORE, JSON.stringify(layout))
   }, [layout])
   React.useEffect(() => {
-    const fit = () => setLayout((l) => clampLayout(l, window.innerWidth, window.innerHeight))
+    room.current = reserved
+    const fit = () => setLayout((l) => clampLayout(l, window.innerWidth, window.innerHeight, room.current))
+    fit()
     window.addEventListener("resize", fit)
     return () => window.removeEventListener("resize", fit)
-  }, [])
-  const show = (mode?: "float" | "dock") =>
-    setLayout((l) => clampLayout({ ...l, mode: mode ?? l.last, last: mode ?? l.last }, window.innerWidth, window.innerHeight))
+  }, [reserved])
+  const fit = React.useCallback((l: AssistantLayout) => clampLayout(l, window.innerWidth, window.innerHeight, room.current), [])
+  const show = (mode?: "float" | "dock") => setLayout((l) => fit({ ...l, mode: mode ?? l.last, last: mode ?? l.last }))
   const hide = () => setLayout((l) => ({ ...l, mode: "hidden" }))
   const toggle = () => (layout.mode === "hidden" ? show() : hide())
-  return { layout, setLayout, show, hide, toggle }
+  return { layout, setLayout, show, hide, toggle, fit, room: () => dockRoom(window.innerWidth, room.current) }
 }
 
 export type AssistantLayoutState = ReturnType<typeof useAssistantLayout>

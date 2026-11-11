@@ -48,11 +48,27 @@ export function memFiles() {
       disk.set(p, d)
       written.set(p, ++clock)
     },
+    rename: async (rawFrom, rawTo) => {
+      const from = norm(rawFrom)
+      const to = norm(rawTo)
+      if (disk.has(to)) throw new Error(`${to} 已经存在`)
+      // A file, or a folder with everything in it.
+      for (const k of [...disk.keys()]) {
+        if (k !== from && !k.startsWith(`${from}/`)) continue
+        const dest = to + k.slice(from.length)
+        disk.set(dest, disk.get(k)!)
+        written.set(dest, ++clock)
+        disk.delete(k)
+        watchers.get(k)?.()
+      }
+    },
     watch: (raw, cb) => {
       const p = norm(raw)
       watchers.set(p, cb)
       return () => watchers.delete(p)
     },
+    // Paths are told apart by case here, as on a disk that doesn't ignore it.
+    same: async (a, b) => norm(a) === norm(b),
     // No symlinks in memory: `..` resolves by name, as the real file system would here.
     canonical: (p) => {
       const out: string[] = []

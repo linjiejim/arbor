@@ -21,6 +21,7 @@ const Target = z
     part: z.string().optional().describe("一个零件、参考体，或在装配里改零件时上下文里的零件（名字）"),
   })
   .describe("量哪里：一个面（face）或一条边（edge，选择器要正好选中一个），一个特征的面（feature），或一个零件（part）")
+const V3 = z.tuple([z.number(), z.number(), z.number()])
 const VIEWS = ["iso", "front", "top", "right", "back", "bottom", "left"] as const
 
 /** Modelling tools of the web studio, as they are (look is replaced below: here it renders in the window). */
@@ -212,14 +213,47 @@ const own: CommandSpec[] = [
   {
     name: "add_note",
     audience: "user",
-    description: "记一条备注：在点选的面或边上（pick），或者关于整个零件、某个特征（不带 pick）。",
-    input: z.object({ pick: z.record(z.string(), z.unknown()).optional(), text: z.string().max(600) }),
+    description: "记一条备注：在点选的面或边上（pick），关于选中的零件（parts）、一个步骤（feature），框选或画笔标出的一片区域（region），或者整个零件。",
+    input: z.object({
+      pick: z.record(z.string(), z.unknown()).optional(),
+      text: z.string().max(600),
+      parts: z.array(z.string().max(300)).max(100).optional(),
+      feature: z.string().max(100).optional(),
+      name: z.string().max(200).optional(),
+      point: V3.optional(),
+      part: z.string().max(300).optional(),
+      region: z
+        .object({
+          shape: z.enum(["box", "pen"]),
+          camera: z.object({ position: V3, target: V3, up: V3 }),
+          rect: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
+          strokes: z.array(z.array(V3).max(2000)).max(50).optional(),
+          faces: z.number().int().min(0),
+          bbox: z.tuple([V3, V3]).nullable(),
+          origins: z.array(z.string()).max(200),
+          parts: z.array(z.string()).max(200),
+          image: z.string().max(12_000_000).optional(),
+        })
+        .optional(),
+    }),
   },
   {
     name: "update_note",
     audience: "user",
     description: "改备注的文字，或删除、重开、标为已处理。",
     input: z.object({ id: z.string(), text: z.string().max(600).optional(), status: z.enum(["open", "resolved"]).optional(), remove: z.boolean().optional() }),
+  },
+  {
+    name: "rename_file",
+    audience: "user",
+    description: "给零件或装配文件改名（name 不带结尾）：文件和它的备注一起改，用到它的装配跟着改；打开着的照样开着。",
+    input: z.object({ path: z.string(), name: z.string().max(80) }),
+  },
+  {
+    name: "rename_part",
+    audience: "user",
+    description: "给装配里的一个零件改名（id 是它的 component）：只改这个装配里的叫法，贴合、核对和备注里的名字跟着改。",
+    input: z.object({ id: z.string(), name: z.string().max(40) }),
   },
   {
     name: "close_part",
