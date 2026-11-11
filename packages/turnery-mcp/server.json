@@ -3,12 +3,12 @@
   "name": "io.github.linjiejim/turnery",
   "description": "Parametric CAD for coding agents: feature tree, kernel-checked requirements. Needs Turnery.app.",
   "repository": { "url": "https://github.com/linjiejim/turnery", "source": "github", "subfolder": "packages/turnery-mcp" },
-  "version": "0.8.0",
+  "version": "0.9.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "turnery-mcp",
-      "version": "0.8.0",
+      "version": "0.9.0",
       "transport": { "type": "stdio" },
       "runtimeHint": "npx"
     }
