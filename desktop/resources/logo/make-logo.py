@@ -4,8 +4,9 @@ becomes a solid. Builds the glyph with build123d (exact circles and lines), then
 the region the face sweeps when it is extruded up and to the right, and writes
 both as SVG paths:
 
-  resources/logo/turnery-mark.svg   the mark: `depth` (accent) under `front`
-  app/src/components/turnery-mark-paths.ts   the same paths for the inline mark
+  resources/logo/turnery-mark.svg       the mark: `depth` (accent) under `front`
+  resources/logo/turnery-wordmark.svg   the name, every letter drawn and pulled the same way
+  app/src/components/turnery-mark-paths.ts   the same paths for the inline mark and name
                                            in the site and the desktop window
 
   ../.venv/bin/python -I resources/logo/make-logo.py      (from desktop/)
@@ -48,6 +49,72 @@ def glyph() -> Face:
     # One cut across the top of the stem, the way a turning tool leaves it.
     cut = make_face(Polyline(*[Vector(x, y, 0) for x, y in [(STEM_X - 12, TOP + 2), (STEM_X + S + 8, TOP + 2), (STEM_X + S + 8, TOP - CUT), (STEM_X - 12, TOP + 2)]]))
     return ((foot + run + stem + bar) - cut).clean()
+
+
+# The name: the same stroke and the same geometry as the t (circles, straight runs, ends cut square).
+X_HEIGHT = BAR[2] + S  # the crossbar's top
+GAP = 18.0  # between letters
+DESCENT = 52.0  # how far the y drops below the line
+
+
+def letter_u(x0, descender=False) -> Face:
+    """A bowl and two stems; the right stem runs on below the line and curls back for a y."""
+    w = 72.0
+    r = w / 2
+    c = (x0 + r, r)
+    bowl = (disc(c, r) - disc(c, r - S)) & rect(x0 - 1, -1, x0 + w + 1, r)
+    left = rect(x0, r, x0 + S, X_HEIGHT)
+    if not descender:
+        return (bowl + left + rect(x0 + w - S, 0, x0 + w, X_HEIGHT)).clean(), w
+    # The tail: down the right stem, round a quarter turn and out flat to the left (the t's foot, turned over).
+    tc, tr = (x0 + w - 30.0, -DESCENT + 30.0), 30.0
+    tail = (disc(tc, tr) - disc(tc, tr - S)) & rect(tc[0], -DESCENT - 1, tc[0] + tr + 1, tc[1])
+    stem = rect(x0 + w - S, tc[1], x0 + w, X_HEIGHT)
+    run = rect(x0 + 4, -DESCENT, tc[0], -DESCENT + S)
+    return (bowl + left + stem + tail + run).clean(), w
+
+
+def letter_n(x0) -> Face:
+    """A stem and an arch coming down into a second stem."""
+    w = 72.0
+    r = w / 2
+    c = (x0 + r, X_HEIGHT - r)
+    arch = (disc(c, r) - disc(c, r - S)) & rect(x0 - 1, c[1], x0 + w + 1, X_HEIGHT + 1)
+    return (arch + rect(x0, 0, x0 + S, X_HEIGHT) + rect(x0 + w - S, 0, x0 + w, c[1])).clean(), w
+
+
+def letter_r(x0) -> Face:
+    """A stem and a shoulder: a quarter turn out to the right, cut square."""
+    r = 32.0
+    c = (x0 + r, X_HEIGHT - r)
+    shoulder = (disc(c, r) - disc(c, r - S)) & rect(x0 - 1, c[1], c[0], X_HEIGHT + 1)
+    run = rect(c[0], X_HEIGHT - S, c[0] + 14.0, X_HEIGHT)
+    return (shoulder + run + rect(x0, 0, x0 + S, X_HEIGHT)).clean(), r + 14.0
+
+
+def letter_e(x0) -> Face:
+    """A ring with a bar through its middle, opened below the bar on the right."""
+    r = X_HEIGHT / 2
+    c = (x0 + r, r)
+    ring = disc(c, r) - disc(c, r - S)
+    low = c[1] - S / 2 + 2  # the bar's underside
+    bar = rect(x0 + S / 2, low, x0 + 2 * r, low + S)
+    # The opening: from the bar's underside down to a cut at 48° below it.
+    a1, far = math.radians(-48), 2 * r
+    cut = make_face(Polyline(*[Vector(*p, 0) for p in [(c[0], low), (c[0] + far, low), (c[0] + far * math.cos(a1), low + far * math.sin(a1)), (c[0], low)]]))
+    return ((ring - cut) + bar).clean(), 2 * r
+
+
+def name_faces() -> list[Face]:
+    """「turnery」 letter by letter, left to right, sharing the t's baseline."""
+    t = glyph()
+    x = FOOT_END + GAP - BAR[0]
+    faces = [t.moved(Location((-BAR[0], 0, 0)))]
+    for make in [lambda x0: letter_u(x0), letter_r, letter_n, letter_e, letter_r, lambda x0: letter_u(x0, descender=True)]:
+        f, w = make(x)
+        faces.append(f)
+        x += w + GAP
+    return faces
 
 
 def outline(face) -> list[list[tuple[float, float]]]:
@@ -156,6 +223,34 @@ def main():
         f'<path fill="#2759E0" d="{d_depth}"/><path class="f" d="{d_front}"/></svg>\n'
     )
     print(f"view box {view}; depth {len(d_depth)} chars, front {len(d_front)} chars", file=sys.stderr)
+
+    # The name: each letter pulled on its own, so no letter's depth runs into the next.
+    letters = name_faces()
+    depths = [swept(f) for f in letters]
+    lo = [min(d.bounding_box().min.X for d in depths), min(d.bounding_box().min.Y for d in depths)]
+    hi = [max(d.bounding_box().max.X for d in depths), max(d.bounding_box().max.Y for d in depths)]
+    p = 2.0
+    wbox = (lo[0] - p, lo[1] - p, 0, hi[1] + p)
+    w_depth = "".join(path(d, wbox) for d in depths)
+    w_front = "".join(path(f, wbox) for f in letters)
+    wview = f"0 0 {round(hi[0] - lo[0] + 2 * p, 2):g} {round(hi[1] - lo[1] + 2 * p, 2):g}"
+    # Where the x-height and the baseline fall, from the top: to line the name up with text beside it.
+    base = round(hi[1] + p, 2)
+    (OUT / "turnery-wordmark.svg").write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{wview}">\n'
+        f'  <path id="depth" fill="#2759E0" fill-rule="evenodd" d="{w_depth}"/>\n'
+        f'  <path id="front" fill="#141414" fill-rule="evenodd" d="{w_front}"/>\n'
+        "</svg>\n"
+    )
+    with ts.open("a") as out:
+        out.write(
+            f"export const WORD_VIEWBOX = {json.dumps(wview)}\n"
+            f"/** From the top of the view box: the baseline. */\n"
+            f"export const WORD_BASELINE = {base:g}\n"
+            f"export const WORD_DEPTH = {json.dumps(w_depth)}\n"
+            f"export const WORD_FRONT = {json.dumps(w_front)}\n"
+        )
+    print(f"name: view box {wview}", file=sys.stderr)
 
 
 if __name__ == "__main__":
