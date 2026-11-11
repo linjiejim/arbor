@@ -1,7 +1,7 @@
 {
   "name": "turnery",
   "description": "Build parametric CAD parts with the Turnery desktop app over MCP: a feature tree you can read and change, requirements the kernel re-measures, STEP/STL export. Needs Turnery.app installed.",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "author": { "name": "Jim Lin" },
   "homepage": "https://turnery.linjiejim.com/desktop",
   "repository": "https://github.com/linjiejim/turnery",
