@@ -1,7 +1,8 @@
 import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { Tooltip as TooltipPrimitive } from "radix-ui"
 import { Boxes, ChevronDown, ChevronRight, CircleAlert, Ellipsis, Eye, EyeOff, FolderOpen, PanelLeft, Plus, X } from "lucide-react"
-import { TurneryWordmark, WORDMARK_ASPECT } from "@/components/turnery-mark"
+import { TurneryWordmark } from "@/components/turnery-mark"
+import { WORD_VIEWBOX } from "@/components/turnery-mark-paths"
 import { cn } from "@/lib/utils"
 import { Hint } from "@/components/hint"
 import { Button, IconButton } from "@/components/ui/button"
@@ -537,7 +538,8 @@ function Group({ title, children }: { title?: string; children: ReactNode }) {
 }
 
 /** The wordmark's height in the room it has: 18 px, down to 12 px when the panel is narrow. */
-const wordmarkHeight = (room: number) => Math.max(12, Math.min(18, room / WORDMARK_ASPECT))
+const [, , WORD_W, WORD_H] = WORD_VIEWBOX.split(" ").map(Number)
+const wordmarkHeight = (room: number) => Math.max(12, Math.min(18, (room * WORD_H) / WORD_W))
 
 const rowClass = (active: boolean) => cn("group relative flex items-center rounded-md", active ? "bg-selected" : "hover:bg-accent")
 const buttonClass = "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"

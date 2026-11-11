@@ -16,9 +16,6 @@ export function TurneryMark({ className }: { className?: string }) {
   )
 }
 
-/** The wordmark is this many times as wide as it is tall. */
-export const WORDMARK_ASPECT = ((w, h) => w / h)(...(WORD_VIEWBOX.split(" ").slice(2).map(Number) as [number, number]))
-
 /** The name, every letter drawn and pulled like the mark. Size it by its height (`h-4`); the width follows. */
 export function TurneryWordmark({ className, style }: { className?: string; style?: CSSProperties }) {
   return (
