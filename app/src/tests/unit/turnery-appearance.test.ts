@@ -88,6 +88,40 @@ describe("appearance: the kernel", () => {
     k.dispose()
   })
 
+  it("says which part file's instance each piece belongs to, down a sub-assembly and across copies", () => {
+    const block: Tree = { params: {}, features: box(10, 10, 10) }
+    const kit: Tree = {
+      params: {},
+      features: [
+        { id: "case", op: "component", name: "壳", file: "shell.turnery.json" },
+        { id: "core", op: "component", name: "芯", file: "a.turnery.json", at: [0, 0, 40] },
+      ],
+    }
+    const parts: ComponentSource[] = [{ file: "shell.turnery.json", tree: shell }, { file: "a.turnery.json", tree: block }]
+    const tree: Tree = {
+      params: {},
+      features: [
+        { id: "s", op: "component", name: "外壳", file: "shell.turnery.json" },
+        { id: "b", op: "component", name: "块", file: "a.turnery.json", at: [60, 0, 0] },
+        { id: "k", op: "component", name: "套件", file: "kit.turnery-asm.json", at: [0, 60, 0] },
+      ],
+    }
+    const k = new Kernel()
+    k.setComponents([...parts, { file: "kit.turnery-asm.json", tree: kit, components: parts }])
+    const rep = k.rebuild(tree)
+    expect(rep.features.every((f) => f.state === "ok"), JSON.stringify(rep.features)).toBe(true)
+    // A piece of a split part belongs to that part; a part in one piece (and a part of a sub-assembly) is its own whole.
+    expect(Object.fromEntries(k.display().parts!.map((p) => [p.name, p.whole]))).toEqual({
+      "外壳/底壳": "外壳",
+      "外壳/上盖": "外壳",
+      块: undefined,
+      "套件/壳/底壳": "套件/壳",
+      "套件/壳/上盖": "套件/壳",
+      "套件/芯": undefined,
+    })
+    k.dispose()
+  })
+
   it("resolves an assembly's looks: placement over file, standard parts as metal, down a sub-assembly", () => {
     const part = (look?: Tree["appearance"]): Tree => ({ params: {}, features: box(10, 10, 10), ...(look ? { appearance: look } : {}) })
     const sub: Tree = {

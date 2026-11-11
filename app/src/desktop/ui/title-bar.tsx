@@ -1,47 +1,41 @@
 import * as React from "react"
-import { ChevronLeft, ChevronRight, Download, MessageSquare, PanelLeft, PanelRight, Plug, Redo2, RotateCw, Undo2 } from "lucide-react"
+import { Download, MessageSquare, PanelLeft, Plug, Redo2, RotateCw, Undo2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button, IconButton } from "@/components/ui/button"
 import { StatusDot } from "@/components/ui/badge"
-import { Segmented } from "@/components/ui/segmented"
 import { Spinner } from "@/components/ui/spinner"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { turnery } from "../bridge"
 import type { DocState, PickRequest, Snapshot, UpdateStatus } from "../core/protocol"
-import { TurneryMark } from "@/components/turnery-mark"
+import { TurneryWordmark } from "@/components/turnery-mark"
 import { useAssistant } from "../use-assistant"
 import { ago, commandLabel, useNow } from "./words"
 
 /**
- * The window's top bar; on macOS it is also the title bar (drag to move, traffic lights on the left).
- * Left: the mark (home), the panels and back / forward, where you are. Right: the update, the view,
- * undo, redo, export, the conversation, and the right panel.
+ * The window's top bar, beside the left panel (which has the brand, and on macOS the traffic lights, at its
+ * top). Left: where you are (project / assembly / part), or with the panel closed the button that brings it
+ * back. Right: the update, undo, redo, export, the conversation, and 「接入 Agent」 until one has worked here.
+ * The bar drags the window.
  */
 export function TitleBar({
   snapshot,
   doc,
   onSetup,
   setup,
-  sheet,
-  onSheet,
   chat,
-  panels,
-  nav,
+  sidebar,
+  onSidebar,
 }: {
   snapshot: Snapshot | null
   doc: DocState | null
   onSetup: () => void
   /** 「接入 Agent」 in the bar: until an agent has worked here (the menu and the status bar keep it after). */
   setup: boolean
-  /** 「工程图」 over the 3D view. */
-  sheet: boolean
-  onSheet: (on: boolean) => void
   /** The built-in assistant's button: shows or puts away the conversation; spins while a turn runs. */
   chat: { open: boolean; onToggle: () => void }
-  /** The side panels' switches; null where there are none (the start page). */
-  panels: { left: boolean | null; right: boolean | null; onLeft: () => void; onRight: () => void }
-  /** Back and forward through the files opened in this window. */
-  nav: { back: (() => void) | null; forward: (() => void) | null }
+  /** The left panel: open (it holds the brand and the traffic lights), closed, or none at all (the start page). */
+  sidebar: boolean | null
+  onSidebar: () => void
 }) {
   const busy = useAssistant().busy
   const mac = turnery.platform === "darwin"
@@ -49,32 +43,18 @@ export function TitleBar({
   const project = snapshot?.project
   const context = doc?.context
   const noDrag = "[-webkit-app-region:no-drag]"
+  // With the left panel open the traffic lights are over it; otherwise they are over this bar.
+  const lights = mac && !sidebar
   return (
-    <header className={cn("flex h-12 shrink-0 items-center gap-1 border-b px-3 select-none [-webkit-app-region:drag]", mac && "pl-22")}>
-      {doc || project ? (
-        <IconButton label="回到首页（⇧⌘H）" size="icon-sm" className={noDrag} onClick={() => void turnery.call("close_project", {})}>
-          <TurneryMark />
-        </IconButton>
+    <header className={cn("flex h-12 shrink-0 items-center gap-1 border-b pr-2 pl-3 select-none [-webkit-app-region:drag]", lights && "pl-22")}>
+      {sidebar === null ? (
+        <TurneryWordmark className="mr-1 h-[18px]" />
       ) : (
-        <span className="flex items-center gap-2 pr-1">
-          <TurneryMark />
-          <span className="text-body font-semibold">Turnery</span>
-        </span>
-      )}
-      {panels.left !== null && (
-        <IconButton label={panels.left ? "收起左栏（⌘B）" : "展开左栏（⌘B）"} size="icon-sm" aria-pressed={panels.left} className={noDrag} onClick={panels.onLeft}>
-          <PanelLeft />
-        </IconButton>
-      )}
-      {(doc || project) && (
-        <span className={cn("flex", noDrag)}>
-          <IconButton label="后退（⌘[）" size="icon-sm" disabled={!nav.back} onClick={() => nav.back?.()}>
-            <ChevronLeft />
+        !sidebar && (
+          <IconButton label="展开左栏（⌘B）" size="icon-sm" className={cn("-ml-1 text-muted-foreground", noDrag)} onClick={onSidebar}>
+            <PanelLeft />
           </IconButton>
-          <IconButton label="前进（⌘]）" size="icon-sm" disabled={!nav.forward} onClick={() => nav.forward?.()}>
-            <ChevronRight />
-          </IconButton>
-        </span>
+        )
       )}
       <nav aria-label="位置" className="ml-1 flex min-w-0 items-center gap-1.5">
         {project && project.name !== doc?.name && (
@@ -94,38 +74,25 @@ export function TitleBar({
           </>
         )}
         {doc && (
-          <span className="truncate text-body" title={doc.path}>
+          <span className="truncate text-body font-medium" title={doc.path}>
             {doc.name}
           </span>
         )}
         {context && <span className="shrink-0 rounded-sm bg-muted px-1.5 text-caption text-muted-foreground">在装配里</span>}
       </nav>
-      <div className={cn("ml-auto flex items-center gap-1", noDrag)}>
+      <div className={cn("ml-auto flex items-center gap-0.5", noDrag)}>
         <UpdateStatusButton />
         {doc && (
-          <Segmented
-            size="sm"
-            aria-label="视图"
-            className="mr-2"
-            value={sheet ? "drawing" : "3d"}
-            onValueChange={(v) => onSheet(v === "drawing")}
-            options={[
-              { value: "3d", label: "3D" },
-              { value: "drawing", label: "工程图" },
-            ]}
-          />
-        )}
-        {doc && (
           <>
-            <IconButton label="撤销（⌘Z）" disabled={!doc?.canUndo} onClick={() => call("undo")}>
+            <IconButton label="撤销（⌘Z）" size="icon-sm" disabled={!doc?.canUndo} onClick={() => call("undo")}>
               <Undo2 />
             </IconButton>
-            <IconButton label="重做（⇧⌘Z）" disabled={!doc?.canRedo} onClick={() => call("redo")}>
+            <IconButton label="重做（⇧⌘Z）" size="icon-sm" disabled={!doc?.canRedo} onClick={() => call("redo")}>
               <Redo2 />
             </IconButton>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <IconButton label="导出" disabled={!doc}>
+                <IconButton label="导出" size="icon-sm" disabled={!doc}>
                   <Download />
                 </IconButton>
               </DropdownMenuTrigger>
@@ -137,22 +104,17 @@ export function TitleBar({
                 <DropdownMenuItem onSelect={() => void turnery.exportPart("json")}>导出特征树 JSON…</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <span aria-hidden className="mx-1 h-4 w-px bg-border" />
           </>
         )}
-        <Button size="sm" variant={chat.open ? "secondary" : "ghost"} className="ml-1" aria-pressed={chat.open} onClick={chat.onToggle}>
+        <IconButton label={chat.open ? "收起对话" : "对话"} size="icon-sm" aria-pressed={chat.open} className={cn(chat.open && "bg-selected text-primary")} onClick={chat.onToggle}>
           {busy ? <Spinner /> : <MessageSquare />}
-          对话
-        </Button>
+        </IconButton>
         {setup && (
-          <Button size="sm" variant="secondary" onClick={onSetup}>
+          <Button size="sm" variant="secondary" className="ml-1" onClick={onSetup}>
             <Plug />
             接入 Agent
           </Button>
-        )}
-        {panels.right !== null && (
-          <IconButton label={panels.right ? "收起右栏（⌥⌘B）" : "展开右栏（⌥⌘B）"} size="icon-sm" aria-pressed={panels.right} onClick={panels.onRight}>
-            <PanelRight />
-          </IconButton>
         )}
       </div>
     </header>

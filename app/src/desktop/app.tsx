@@ -1,9 +1,10 @@
 import * as React from "react"
 import { Boxes, CircleAlert, MousePointerClick, Sparkles, X } from "lucide-react"
 import { Button, IconButton } from "@/components/ui/button"
+import { Kbd } from "@/components/ui/kbd"
 import { notify } from "@/components/ui/toast"
 import { renderShots, renderViews } from "@/studio/look"
-import { selectParts } from "@/studio/part-selection"
+import { selectGroup, wholeNames, wholeOf } from "@/studio/part-selection"
 import { NO_PARTS_VIEW, type Hover, type PartsView } from "@/studio/scene"
 import { CodePanel, ParamsPanel } from "@/studio/ui/side-panels"
 import { DrawingSheet } from "@/studio/ui/drawing-sheet"
@@ -36,6 +37,8 @@ import { ProjectStart, Welcome } from "./ui/welcome"
 import { ModelLoading } from "./ui/model-loading"
 
 /** A note pinned on a face or an edge (not one about the whole part). */
+
+const NONE: string[] = []
 
 const editing = () => {
   const el = document.activeElement as HTMLElement | null
@@ -112,7 +115,8 @@ export function DesktopApp() {
   const pickHere = pick && pick.path === path ? pick : null
 
   const [annotation, setAnnotation] = React.useState(false)
-  const [pointed, setPointed] = React.useState<{ path?: string; id: string | null; part?: string } | null>(null)
+  // `piece`: only the piece pointed at (⌥, or its row in 「结构」), not the whole part it was split from.
+  const [pointed, setPointed] = React.useState<{ path?: string; id: string | null; part?: string; piece?: boolean } | null>(null)
   const [selected, setSelected] = React.useState<{ path?: string; id: string | null; parts: string[] } | null>(null)
   // Each file keeps what was hidden, isolated, pulled apart and selected while another one is open.
   const [kept, setKept] = React.useState<Record<string, { view: PartsView; selected: { id: string | null; parts: string[] } | null }>>({})
@@ -125,8 +129,12 @@ export function DesktopApp() {
     if (back?.selected && doc) setSelected({ path: doc.path, ...back.selected })
   }
   const pointedFeature = pointed?.path === path ? pointed?.id : null
-  const selectedNames = selected && selected.path === path ? selected.parts : []
-  const selectedParts = selectedNames.map((name) => studio.display?.parts?.findIndex((p) => p.name === name) ?? -1).filter((i) => i >= 0)
+  const selectedNames = selected && selected.path === path ? selected.parts : NONE
+  // The same list while the selection and the model stay the same: the view repaints only when it changes.
+  const selectedParts = React.useMemo(() => {
+    const at = new Map(studio.display?.parts?.map((p, i) => [p.name, i]))
+    return selectedNames.flatMap((name) => (at.has(name) ? [at.get(name)!] : []))
+  }, [selectedNames, studio.display])
   const selectedFeature = selected && selected.path === path ? (selectedParts.length ? studio.display?.groups.find((g) => g.part === selectedParts.at(-1))?.origin ?? null : selected.parts.length ? null : selected.id) : null
   const pointedPart = pointed?.part && pointed.path === path ? studio.display?.parts?.findIndex((p) => p.name === pointed.part) : undefined
   const [locateStep, setLocateStep] = React.useState<{ id: string; request: number } | null>(null)
@@ -141,38 +149,58 @@ export function DesktopApp() {
     setDetailsFront(t === "details")
     if (t !== "details") setTab(t)
   }
-  const pointFeature = React.useCallback((id: string | null, part?: number) => {
+  const pointFeature = React.useCallback((id: string | null, part?: number, piece = false) => {
     const name = part === undefined ? undefined : studio.display?.parts?.[part]?.name
-    setPointed((p) => p?.id === id && p.path === path && p.part === name ? p : { path, id, part: name })
+    setPointed((p) => p?.id === id && p.path === path && p.part === name && Boolean(p.piece) === piece ? p : { path, id, part: name, piece })
   }, [path, studio.display])
-  const selectFeature = React.useCallback((id: string | null, part?: number, additive = false) => {
+  // A click in the view takes the whole part: every piece it was split into. `piece`: just that one.
+  const selectFeature = React.useCallback((id: string | null, part?: number, additive = false, piece = false) => {
     if (!id && additive) return
-    const name = part === undefined ? undefined : studio.display?.parts?.[part]?.name
+    const all = studio.display?.parts ?? []
+    const indices = part === undefined || !all[part] ? [] : piece ? [part] : wholeOf(all, part)
+    const group = indices.map((i) => all[i].name)
     setSelected((p) => {
-      const names = name ? selectParts(p && p.path === path ? p.parts : [], name, additive) : []
-      return { path, id: name ? (names.length ? id : null) : id, parts: names }
+      const names = group.length ? selectGroup(p && p.path === path ? p.parts : [], group, additive) : []
+      return { path, id: group.length ? (names.length ? id : null) : id, parts: names }
     })
-    if (part !== undefined) setPartsView((v) => {
-      if (!v.hidden.has(part)) return v
-      const hidden = new Set(v.hidden); hidden.delete(part)
+    if (indices.length) setPartsView((v) => {
+      if (!indices.some((i) => v.hidden.has(i))) return v
+      const hidden = new Set(v.hidden)
+      for (const i of indices) hidden.delete(i)
       return { ...v, hidden }
     })
   }, [path, studio.display])
   const selectionHover = pointedFeature
-  const hoverParts = pointedFeature ? (pointedPart === undefined ? [] : [pointedPart]) : selectedParts
-  const modelHover: Hover | null = selectionHover ? { ids: [selectionHover], feature: selectionHover, label: "零件或步骤", faces: hoverParts.length ? studio.display?.groups.filter((g) => g.part !== undefined && hoverParts.includes(g.part)).map((g) => g.hash) : undefined } : agentHover
-  const assemblyParts = studio.display?.parts?.map((p, index) => {
-    const id = p.component ?? studio.display?.groups.find((g) => g.part === index)?.origin ?? ""
-    const feature = studio.tree.features.find((f) => f.id === id)
-    const file = feature?.op === "component" ? feature.file ?? "" : ""
-    return { name: p.name, index, id, file, look: p.look, here: p.here, under: p.under, own: !!file && !/\.(step|stp)$/i.test(file) && !/-asm\.json$/i.test(file), layered: !!file && !/\.(step|stp)$/i.test(file) }
-  }) ?? []
+  const pointedPiece = pointed?.piece
+  const display = studio.display
+  // What lights up under the pointer is what a click would select.
+  const pieces = display?.parts
+  const faces = display?.groups
+  const hoverFaces = React.useMemo(() => {
+    if (pointedPart === undefined || pointedPart < 0 || !pieces || !faces) return undefined
+    const lit = new Set(pointedPiece ? [pointedPart] : wholeOf(pieces, pointedPart))
+    return faces.filter((g) => g.part !== undefined && lit.has(g.part)).map((g) => g.hash)
+  }, [pointedPart, pointedPiece, pieces, faces])
+  const ownHover = React.useMemo<Hover | null>(() => (selectionHover ? { ids: [selectionHover], feature: selectionHover, label: "零件或步骤", faces: hoverFaces } : null), [selectionHover, hoverFaces])
+  const modelHover = ownHover ?? agentHover
+  const tree = studio.tree
+  const assemblyParts = React.useMemo(() => {
+    // The step each part's first face comes from, found in one pass over the faces.
+    const origin = new Map<number, string>()
+    for (const g of display?.groups ?? []) if (g.part !== undefined && !origin.has(g.part)) origin.set(g.part, g.origin)
+    const features = new Map(tree.features.map((f) => [f.id, f]))
+    return (display?.parts ?? []).map((p, index) => {
+      const id = p.component ?? origin.get(index) ?? ""
+      const feature = features.get(id)
+      const file = feature?.op === "component" ? feature.file ?? "" : ""
+      return { name: p.name, index, id, file, look: p.look, here: p.here, under: p.under, whole: p.whole, own: !!file && !/\.(step|stp)$/i.test(file) && !/-asm\.json$/i.test(file), layered: !!file && !/\.(step|stp)$/i.test(file) }
+    })
+  }, [display, tree])
   const [presented, setPresented] = React.useState<unknown>(null)
   const assembly = doc?.kind === "assembly" && !doc.context
-  const display = studio.display
   const indexOf = (name: string) => display?.parts?.findIndex((p) => p.name === name) ?? -1
   const isolated = new Set(partsView.focus?.mode === "isolate" ? partsView.focus.parts.map(indexOf).filter((i) => i >= 0) : [])
-  const bodies: Instance[] = !assembly && display?.parts && display.parts.length > 1 ? display.parts.map((p, index) => ({ name: p.name, index, id: display.groups.find((g) => g.part === index)?.origin ?? "", file: "", look: p.look, body: true })) : []
+  const bodies = React.useMemo<Instance[]>(() => (!assembly && display?.parts && display.parts.length > 1 ? display.parts.map((p, index) => ({ name: p.name, index, id: display.groups.find((g) => g.part === index)?.origin ?? "", file: "", look: p.look, body: true })) : []), [assembly, display])
   const structure: Structure | null = !doc
     ? null
     : {
@@ -214,9 +242,9 @@ export function DesktopApp() {
           : {}),
       }
   // Open the part under the pointer (double-click) or the one selected (↵): its own file, as from the files list.
-  const openPartAt = (index: number) => {
+  const openPartAt = (index: number, inPlace = false) => {
     const p = assemblyParts.find((x) => x.index === index)
-    if (assembly && doc && p) void openPart(doc, p.file, false)
+    if (assembly && doc && p) void openPart(doc, p.file, inPlace)
   }
   /** Framing (R) and drawing (P) a note: kept like any other, with the area and its picture. */
   const sketchHost: SketchHost = {
@@ -234,21 +262,23 @@ export function DesktopApp() {
     const point = [0, 1, 2].map((k) => ps.reduce((a, p) => a + p.center[k], 0) / ps.length) as [number, number, number]
     notes.setCompose({ text: "", about: { parts: ps.map((p) => p.name), point, ...(ps.length === 1 ? { part: ps[0].name } : {}) } })
   }
-  const one = assembly && selectedParts.length === 1 ? assemblyParts.find((x) => x.index === selectedParts[0]) : undefined
-  const why = !assembly ? null : selectedParts.length > 1 ? "一次打开一个零件" : one ? (openTarget(doc!, one.file).reason ?? null) : null
+  // One component of the assembly selected (all of it, or some of its pieces): it can be opened.
+  const picked = assembly ? assemblyParts.filter((x) => selectedParts.includes(x.index)) : []
+  const one = picked.length && picked.every((x) => x.id === picked[0].id) ? picked[0] : undefined
+  const why = !assembly ? null : picked.length && !one ? "一次打开一个零件" : one ? (openTarget(doc!, one.file).reason ?? null) : null
   const noteButton = (
-    <Button size="sm" variant="ghost" title="给选中的零件写一条备注（C）" onClick={() => noteOnParts(selectedNames)}>
-      备注
+    <Button size="sm" variant="ghost" title="给选中的零件写一条备注" onClick={() => noteOnParts(selectedNames)}>
+      备注<Kbd>C</Kbd>
     </Button>
   )
   const selectionActions = !doc ? null : !assembly ? noteButton : (
     <>
       {noteButton}
-      <Button size="sm" variant="ghost" title={why ?? "单独打开它的零件文件（↵，或双击零件）"} disabled={Boolean(why) || !one} onClick={() => one && void openPart(doc, one.file, false)}>
-        打开零件
+      <Button size="sm" variant="ghost" title={why ?? "单独打开它的零件文件（也可以双击零件）"} disabled={Boolean(why) || !one} onClick={() => one && void openPart(doc, one.file, false)}>
+        打开零件<Kbd>↵</Kbd>
       </Button>
       <Button size="sm" variant="ghost" title={why ?? "在装配里改它，其余零件留在周围"} disabled={Boolean(why) || !one} onClick={() => one && void openPart(doc, one.file, true)}>
-        在装配里改
+        在装配里改<Kbd>⇧↵</Kbd>
       </Button>
     </>
   )
@@ -268,30 +298,20 @@ export function DesktopApp() {
   return (
     <WordsContext.Provider value={DESKTOP_WORDS}>
     <AssistantProvider project={snapshot?.project?.root ?? null} part={doc?.path ?? null}>
-    <div className="flex h-dvh flex-col bg-background">
-      <TitleBar
-        snapshot={snapshot}
-        doc={doc}
-        onSetup={() => setSetupOpen(true)}
-        setup={!agentSeen}
-        sheet={sheet && Boolean(doc)}
-        onSheet={setSheet}
-        chat={{ open: chatLayout.layout.mode !== "hidden", onToggle: chatLayout.toggle }}
-        panels={{ left: hasSidebar ? panels.panels.left.open : null, right: doc ? panels.panels.right.open : null, onLeft: panels.toggleLeft, onRight: () => panels.toggleRight() }}
-        nav={{ back: history.back, forward: history.forward }}
-      />
-      <div className="flex min-h-0 flex-1">
-        {/* The start page is just the start page: the sidebar comes with a project or an open file. */}
-        {hasSidebar && panels.panels.left.open && (
+    <div className="flex h-dvh bg-background">
+      {/* The start page is just the start page: the sidebar comes with a project or an open file. It runs the
+          window's full height, the brand and the traffic lights at its top; the bars sit beside it. */}
+      {hasSidebar && panels.panels.left.open && (
           <PartsSidebar
             snapshot={snapshot}
             width={panels.widths.left}
             panels={panels.panels}
             onPanels={panels.update}
+            onCollapse={panels.toggleLeft}
             structure={structure}
             selected={selectedNames}
-            onSelect={(p, additive) => selectFeature(p.id || null, p.index, additive)}
-            onPoint={(p) => pointFeature(p?.id || null, p?.index)}
+            onSelect={(p, additive) => selectFeature(p.id || null, p.index, additive, true)}
+            onPoint={(p) => pointFeature(p?.id || null, p?.index, true)}
             onLook={async (parts, change, here) => {
               if (!assembly) {
                 const err = await studio.editTree((t) => setPartLook(t, parts, change))
@@ -315,7 +335,18 @@ export function DesktopApp() {
               return ok
             }}
           />
-        )}
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+      <TitleBar
+        snapshot={snapshot}
+        doc={doc}
+        onSetup={() => setSetupOpen(true)}
+        setup={!agentSeen}
+        chat={{ open: chatLayout.layout.mode !== "hidden", onToggle: chatLayout.toggle }}
+        sidebar={hasSidebar ? panels.panels.left.open : null}
+        onSidebar={panels.toggleLeft}
+      />
+      <div className="flex min-h-0 flex-1">
         <main className="relative min-h-0 min-w-0 flex-1" data-testid="model-viewport" data-document={path} data-pointed-part={pointed?.path === path ? pointed?.part ?? "" : ""} data-presented={Boolean(studio.display && presented === studio.display)} data-geometry-state={!studio.display ? "loading" : studio.display.provisional ? "preview" : "ready"}>
           {doc ? (
             <>
@@ -327,7 +358,8 @@ export function DesktopApp() {
                 onSelectFeature={selectFeature}
                 onPresented={setPresented}
                 selectedParts={selectedParts}
-                onLocateStep={selectedFeature ? () => setLocateStep((r) => ({ id: selectedFeature, request: (r?.request ?? 0) + 1 })) : undefined}
+                // An assembly has no timeline to find the step in: its parts are in 「结构」.
+                onLocateStep={selectedFeature && !assembly ? () => setLocateStep((r) => ({ id: selectedFeature, request: (r?.request ?? 0) + 1 })) : undefined}
                 hover={treeHover ?? modelHover}
                 annotations={notes}
                 busy={Boolean(loading)}
@@ -379,7 +411,6 @@ export function DesktopApp() {
                 {pick && <PickBanner request={pick} elsewhere={pick.path !== path} />}
                 {show && show.path === path && !pick && <ShowBanner request={show} onClose={clearShow} />}
                 {doc.report?.checksError && <Banner tone="info" icon={<Boxes />}>后台检查失败：{doc.report.checksError}。可继续查看，精确结果暂不可用。</Banner>}
-                {doc.report?.checksPending && !loading && <Banner tone="info" icon={<Boxes />}>正在后台检查装配，可继续查看和编辑</Banner>}
                 {doc.error && (
                   <Banner tone="danger" icon={<CircleAlert />}>
                     {doc.error}
@@ -412,12 +443,13 @@ export function DesktopApp() {
         )}
         {chatLayout.layout.mode === "dock" && <AssistantDock state={chatLayout} />}
       </div>
-      <StatusBar snapshot={snapshot} doc={doc} pick={pick} onGo={goStatus} agentSeen={agentSeen} />
+      <StatusBar snapshot={snapshot} doc={doc} pick={pick} onGo={goStatus} agentSeen={agentSeen} sheet={sheet && Boolean(doc)} onSheet={setSheet} />
+      </div>
       {chatLayout.layout.mode === "float" && <AssistantFloat state={chatLayout} />}
       <AgentSetupDialog open={setupOpen} onOpenChange={setSetupOpen} />
       <NoteComposer
         text={notes.compose?.text ?? null}
-        about={notes.compose ? composeAbout(notes.compose, doc?.kind === "assembly" ? "装配" : "零件") : ""}
+        about={notes.compose ? composeAbout(notes.compose, doc?.kind === "assembly" ? "装配" : "零件", display?.parts ?? []) : ""}
         onClose={() => notes.setCompose(null)}
         onSave={async (text) => {
           if (!(await notes.addPartNote(text, notes.compose?.about))) return false
@@ -491,7 +523,7 @@ function ShowBanner({ request, onClose }: { request: ShowRequest; onClose: () =>
 
 /** The window's own keys, after the view's in the 「快捷键」 card. */
 const DESKTOP_KEYS = [
-  { keys: "↵", what: "单独打开选中的零件（也可以双击零件）" },
+  { keys: "↵ / ⇧↵", what: "单独打开选中的零件（也可以双击零件）/ 在装配里改它" },
   { keys: "⌘B / ⌥⌘B", what: "收起或展开左栏 / 右栏" },
   { keys: "⌘[ / ⌘]", what: "后退 / 前进" },
 ]
@@ -551,10 +583,10 @@ function componentOf(part: string, all: string[]) {
 const baseOf = (p: string) => p.split(/[\\/]/).pop() ?? p
 
 /** The dialog's line on what the note is about. */
-function composeAbout(c: Compose, whole: string) {
+function composeAbout(c: Compose, whole: string, parts: { name: string; whole?: string }[]) {
   const a = c.about
   if (a?.feature) return `关于步骤「${a.name ?? a.feature}」。`
-  if (a?.parts?.length) return `关于零件${a.parts.map((p) => `「${p}」`).join("")}（整个零件，不用点在面或边上）。`
+  if (a?.parts?.length) return `关于零件${wholeNames(parts, a.parts).map((p) => `「${p}」`).join("")}（整个零件，不用点在面或边上）。`
   return `关于整个${whole}。`
 }
 

@@ -5,6 +5,7 @@ export type ViewTool = "select" | "note" | "box" | "pen" | "measure"
 export type KeyRow = { keys: string; what: string }
 
 export const VIEW_KEYS: KeyRow[] = [
+  { keys: "单击 / ⌥单击", what: "选中整个零件 / 只选拆出来的那一块（Shift 多选）" },
   { keys: "V", what: "查看与选择（Esc 也回到这里）" },
   { keys: "C", what: "标注：点面或边；选中了零件时，给选中的写备注" },
   { keys: "R", what: "框选标注：拖出一个框" },
@@ -17,6 +18,7 @@ export const VIEW_KEYS: KeyRow[] = [
   { keys: "F", what: "适应窗口；选中了零件时对准选中的" },
   { keys: "H / ⇧H", what: "隐藏选中的 / 全部显示" },
   { keys: "I", what: "隔离选中的，再按一次恢复" },
+  { keys: "T", what: "选中的保持实体，其余透明，再按一次恢复" },
   { keys: "Esc", what: "一级一级退出：卡片、工具、选中、回到的步骤" },
   { keys: "?", what: "这张表" },
 ]

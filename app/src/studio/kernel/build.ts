@@ -180,8 +180,10 @@ export type DisplayData = {
    * After a split: the parts, with where each moves at full explode, their colour and finish, and in an
    * assembly which component placed each (`sub`: its name inside that component's file). `here`: what
    * this assembly sets for the part (over its file); `under`: how it would look without that.
+   * `whole`: the part file's instance this piece belongs to (「外壳/上盖」→「外壳」, 「风扇组/风筒/前半」→
+   * 「风扇组/风筒」), when the part was split into several: what a click in the view selects.
    */
-  parts?: { name: string; explode: V3; center: V3; hidden?: boolean; look?: Look; component?: string; sub?: string; here?: Appearance; under?: Look }[]
+  parts?: { name: string; explode: V3; center: V3; hidden?: boolean; look?: Look; component?: string; sub?: string; whole?: string; here?: Appearance; under?: Look }[]
   /** The whole body's look when it isn't split into parts. */
   look?: Look
   /** Reference bodies (`import`, desktop app): drawn see-through, not part of the model. */
@@ -636,13 +638,16 @@ export class Kernel {
           es.forEach((e) => e.delete())
           const [a, b] = boundsOf(p.body)
           const where = p.trail?.[0]
+          // The innermost file is the part itself: what it names inside (a split piece) comes off the end.
+          const piece = p.trail?.at(-1)?.sub
+          const whole = piece && p.name.endsWith(`/${piece}`) ? p.name.slice(0, -piece.length - 1) : undefined
           return {
             name: p.name,
             explode: p.auto ? add(p.explode, auto[k]) : p.explode,
             center: mul(add(a, b), 0.5),
             hidden: p.hidden,
             look: this.lookOf(p),
-            ...(where ? { component: where.component, ...(where.sub ? { sub: where.sub } : {}), ...this.layersOf(p) } : {}),
+            ...(where ? { component: where.component, ...(where.sub ? { sub: where.sub } : {}), ...(whole ? { whole } : {}), ...this.layersOf(p) } : {}),
           }
         })
         out.groups = out.groups.map((g) => ({ ...g, part: faceToPart.get(g.hash), ...(faceColor.has(g.hash) ? { color: faceColor.get(g.hash) } : {}) }))

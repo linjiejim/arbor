@@ -37,11 +37,117 @@ export function hasLooks(d: DisplayData | null | undefined) {
   return list.some((l) => !!l && (isSet(l) || l.source !== "part" || !!l.fileColor))
 }
 
+type Group = DisplayData["groups"][number]
+
 /**
- * The live model as three.js objects: one mesh with a group per B-rep face
- * (painted by this step's new / modified status, or by provenance when a
- * feature is highlighted), its edges, and the sketch outline if any. At rest
- * each part shows its own colour and finish (`looks`; off: a white model).
+ * A display's faces and edges sorted out by part, once per display: every redraw of the view reads
+ * them (a part's triangles and edge points as one run each), and every mesh shares the two vertex
+ * buffers, so they reach the graphics card once and not once per part.
+ */
+type Sorted = {
+  position: THREE.BufferAttribute
+  normal: THREE.BufferAttribute
+  /**
+   * Per part: its face groups (starting at 0 in `index`), its triangles, its edge points, and the box
+   * round it. The box is the part's own (the vertex buffer is everyone's): a ray or a view that misses
+   * it skips the part's triangles altogether.
+   */
+  parts: { groups: Group[]; index: Uint32Array; edges: Float32Array; box: THREE.Box3 }[] | null
+  /** Faces no part claims (there shouldn't be any): drawn in place, never moved or hidden. */
+  loose: { groups: Group[]; index: Uint32Array } | null
+}
+const SORTED = new WeakMap<DisplayData, Sorted>()
+
+function sortedOf(d: DisplayData): Sorted | null {
+  const m = d.mesh
+  if (!m) return null
+  const known = SORTED.get(d)
+  if (known) return known
+  const out: Sorted = { position: new THREE.BufferAttribute(m.vertices, 3), normal: new THREE.BufferAttribute(m.normals, 3), parts: null, loose: null }
+  if (d.parts) {
+    const n = d.parts.length
+    const pack = (list: Group[]) => {
+      const index = new Uint32Array(list.reduce((a, g) => a + g.count, 0))
+      let at = 0
+      const groups = list.map((g) => {
+        index.set(m.triangles.subarray(g.start, g.start + g.count), at)
+        at += g.count
+        return { ...g, start: at - g.count }
+      })
+      return { groups, index }
+    }
+    const faces: Group[][] = Array.from({ length: n }, () => [])
+    const loose: Group[] = []
+    for (const g of d.groups) (g.part !== undefined && faces[g.part] ? faces[g.part] : loose).push(g)
+    const sizes = new Array<number>(n).fill(0)
+    for (const g of d.edgeGroups) if (g.part !== undefined && g.part < n) sizes[g.part] += g.count * 3
+    const edges = sizes.map((size) => new Float32Array(size))
+    const filled = new Array<number>(n).fill(0)
+    if (d.edges)
+      for (const g of d.edgeGroups) {
+        if (g.part === undefined || g.part >= n) continue
+        edges[g.part].set(d.edges.subarray(g.start * 3, (g.start + g.count) * 3), filled[g.part])
+        filled[g.part] += g.count * 3
+      }
+    out.parts = faces.map((list, k) => {
+      const packed = pack(list)
+      const box = new THREE.Box3()
+      const v = new THREE.Vector3()
+      for (let i = 0; i < packed.index.length; i++) box.expandByPoint(v.fromArray(m.vertices, packed.index[i] * 3))
+      return { ...packed, edges: edges[k], box }
+    })
+    if (loose.length) out.loose = pack(loose)
+  }
+  SORTED.set(d, out)
+  return out
+}
+
+/** `paint` with its lists as sets: asked once per face, on every hover. */
+type Brush = { status: boolean; selected: Set<number> | null; hovered: Set<number> | null; faces: Set<number> | null; highlight: Set<string> | null }
+const brushOf = (p: Paint): Brush => ({
+  status: p.status,
+  selected: p.selected?.length ? new Set(p.selected) : null,
+  hovered: p.hovered?.length ? new Set(p.hovered) : null,
+  faces: p.faces ? new Set(p.faces) : null,
+  highlight: p.highlight ? new Set(typeof p.highlight === "string" ? [p.highlight] : p.highlight) : null,
+})
+
+/**
+ * Give a mesh its draw groups: neighbouring faces in the same material are drawn together (a part at
+ * rest is one draw, not one per face). Which face a click landed on is read from `userData.groups`,
+ * never from these.
+ */
+function paintMesh(mesh: THREE.Mesh, brush: Brush) {
+  const groups = mesh.userData.groups as Group[]
+  const rests = mesh.userData.rests as number[] | undefined
+  const geo = mesh.geometry
+  geo.clearGroups()
+  let start = 0
+  let count = 0
+  let material = -1
+  for (let i = 0; i < groups.length; i++) {
+    const g = groups[i]
+    const m = materialIndex(g, brush, rests?.[i])
+    if (count && m === material && g.start === start + count) count += g.count
+    else {
+      if (count) geo.addGroup(start, count, material)
+      start = g.start
+      count = g.count
+      material = m
+    }
+  }
+  if (count) geo.addGroup(start, count, material)
+}
+
+/** Parts are shown each on its own (pulled apart, some hidden or alone): what belongs to the whole body steps aside. */
+const apart = (d: DisplayData, view: PartsView) => !!d.parts && (view.explode > 0 || view.hidden.size > 0 || !!view.focus || d.parts.some((p) => p.hidden))
+
+/**
+ * The live model as three.js objects: its faces (painted by this step's new / modified status, or by
+ * provenance when a feature is highlighted), its edges, and the sketch outline if any. At rest each
+ * part shows its own colour and finish (`looks`; off: a white model). A body in parts is one mesh and
+ * one set of edges per part, all of them always there: hiding, isolating and pulling apart only show,
+ * hide and move them (`applyView`), without building anything again.
  */
 export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view: PartsView = NO_PARTS_VIEW, looks = true): THREE.Group {
   const root = new THREE.Group()
@@ -61,80 +167,50 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
     if (!looks || !look) return kit.edge
     return kit.forLook(!look.color && look.fileColor ? { ...look, color: look.fileColor } : look).edge
   }
-  // Parts pulled apart or hidden: one mesh (and edge set) per part, moved along its explode vector.
-  if (d.parts && (view.explode > 0 || view.hidden.size || view.focus || d.parts.some((p) => p.hidden))) {
-    d.parts.forEach((part, k) => {
-      if (!partVisible(d, view, k) || !d.mesh) return
-      const ghost = view.focus?.mode === "ghost" && !view.focus.parts.includes(part.name)
-      const groups = d.groups.filter((g) => g.part === k)
-      const index: number[] = []
-      const own = groups.map((g) => {
-        const start = index.length
-        for (let i = g.start; i < g.start + g.count; i++) index.push(d.mesh!.triangles[i])
-        return { ...g, start }
-      })
-      const geo = new THREE.BufferGeometry()
-      geo.setAttribute("position", new THREE.BufferAttribute(d.mesh.vertices, 3))
-      geo.setAttribute("normal", new THREE.BufferAttribute(d.mesh.normals, 3))
-      geo.setIndex(index)
-      const rests = own.map((g) => restOf(k, g.color))
-      own.forEach((g, i) => geo.addGroup(g.start, g.count, materialIndex(g, paint, rests[i])))
-      const mesh = new THREE.Mesh(geo, ghost ? kit.ghost : materials)
-      mesh.userData.contextGhost = ghost
-      mesh.userData.groups = own
-      mesh.userData.rests = rests
+  const sorted = sortedOf(d)
+  const brush = brushOf(paint)
+  const meshOf = (groups: Group[], index: THREE.BufferAttribute, box?: THREE.Box3) => {
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute("position", sorted!.position)
+    geo.setAttribute("normal", sorted!.normal)
+    geo.setIndex(index)
+    if (box && !box.isEmpty()) {
+      geo.boundingBox = box.clone()
+      geo.boundingSphere = box.getBoundingSphere(new THREE.Sphere())
+    }
+    const mesh = new THREE.Mesh(geo, materials)
+    mesh.userData.groups = groups
+    mesh.userData.rests = groups.map((g) => restOf(g.part, g.color))
+    mesh.userData.materials = materials
+    paintMesh(mesh, brush)
+    return mesh
+  }
+  if (sorted?.parts && d.parts) {
+    sorted.parts.forEach((part, k) => {
+      const mesh = meshOf(part.groups, new THREE.BufferAttribute(part.index, 1), part.box)
       mesh.userData.part = k
-      const at = new THREE.Vector3(...part.explode).multiplyScalar(view.explode)
-      mesh.position.copy(at)
       root.add(mesh)
-      if (d.edges) {
-        const pts: number[] = []
-        for (const g of d.edgeGroups) if (g.part === k) for (let i = g.start * 3; i < (g.start + g.count) * 3; i++) pts.push(d.edges[i])
+      if (part.edges.length) {
         const eg = new THREE.BufferGeometry()
-        eg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3))
-        const lines = new THREE.LineSegments(eg, ghost ? kit.edgeGhost : edgeOf(k))
-        lines.position.copy(at)
+        eg.setAttribute("position", new THREE.BufferAttribute(part.edges, 3))
+        if (!part.box.isEmpty()) {
+          eg.boundingBox = part.box.clone()
+          eg.boundingSphere = part.box.getBoundingSphere(new THREE.Sphere())
+        }
+        const lines = new THREE.LineSegments(eg, edgeOf(k))
+        lines.userData.part = k
+        lines.userData.rest = lines.material
         root.add(lines)
       }
     })
-    addRefs(root, d, kit)
-    root.userData.partsMode = true
-    return root
-  }
-  if (d.mesh) {
-    const geo = new THREE.BufferGeometry()
-    geo.setAttribute("position", new THREE.BufferAttribute(d.mesh.vertices, 3))
-    geo.setAttribute("normal", new THREE.BufferAttribute(d.mesh.normals, 3))
-    geo.setIndex(new THREE.BufferAttribute(d.mesh.triangles, 1))
-    const rests = d.groups.map((g) => restOf(g.part, g.color))
-    d.groups.forEach((g, i) => geo.addGroup(g.start, g.count, materialIndex(g, paint, rests[i])))
-    const mesh = new THREE.Mesh(geo, materials)
-    mesh.userData.groups = d.groups
-    mesh.userData.rests = rests
-    root.add(mesh)
-  }
-  if (d.edges?.length) {
-    // One set of lines per edge material (parts in different colours have edges of their own).
-    const runs = new Map<THREE.Material, number[]>()
-    const parted = looks && d.parts && d.edgeGroups.some((g) => g.part !== undefined)
-    if (parted) {
-      for (const g of d.edgeGroups) {
-        const m = edgeOf(g.part)
-        const pts = runs.get(m) ?? []
-        for (let i = g.start * 3; i < (g.start + g.count) * 3; i++) pts.push(d.edges[i])
-        runs.set(m, pts)
-      }
-    }
-    if (!parted || runs.size === 1) {
+    if (sorted.loose) root.add(meshOf(sorted.loose.groups, new THREE.BufferAttribute(sorted.loose.index, 1)))
+    root.userData.parts = true
+  } else if (sorted && d.mesh) {
+    root.add(meshOf(d.groups, new THREE.BufferAttribute(d.mesh.triangles, 1)))
+    if (d.edges?.length) {
       const eg = new THREE.BufferGeometry()
       eg.setAttribute("position", new THREE.BufferAttribute(d.edges, 3))
-      root.add(new THREE.LineSegments(eg, parted ? [...runs.keys()][0] : edgeOf(undefined)))
-    } else {
-      for (const [m, pts] of runs) {
-        const eg = new THREE.BufferGeometry()
-        eg.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3))
-        root.add(new THREE.LineSegments(eg, m))
-      }
+      root.add(new THREE.LineSegments(eg, edgeOf(undefined)))
     }
   }
   if (d.threads?.length) {
@@ -156,6 +232,8 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
     const rings = new LineSegments2(tg, kit.construction)
     rings.computeLineDistances()
     rings.name = "threads"
+    // Drawn where the body is whole: they don't follow a part that moves or goes.
+    rings.userData.whole = true
     root.add(rings)
   }
   if (d.sketch?.length) {
@@ -163,10 +241,37 @@ export function modelObject(d: DisplayData, kit: MaterialKit, paint: Paint, view
     sg.setPositions(d.sketch)
     const lines = new LineSegments2(sg, kit.sketch)
     lines.renderOrder = 3
+    lines.userData.whole = true
     root.add(lines)
   }
   addRefs(root, d, kit)
+  applyView(root, d, view, kit)
   return root
+}
+
+/**
+ * Show a model the way `view` says: each part visible or not, where it is when pulled apart, and
+ * see-through when others are kept solid. Cheap enough for every step of the explode slider.
+ */
+export function applyView(root: THREE.Object3D, d: DisplayData, view: PartsView, kit: MaterialKit) {
+  if (!root.userData.parts || !d.parts) return
+  const split = apart(d, view)
+  const solid = view.focus?.mode === "ghost" ? new Set(view.focus.parts) : null
+  for (const o of root.children) {
+    const k = o.userData.part as number | undefined
+    if (k === undefined) {
+      if (o.userData.whole) o.visible = !split
+      continue
+    }
+    const part = d.parts[k]
+    o.visible = partVisible(d, view, k)
+    o.position.set(part.explode[0] * view.explode, part.explode[1] * view.explode, part.explode[2] * view.explode)
+    const ghost = !!solid && !solid.has(part.name)
+    if ((o as THREE.Mesh).isMesh) {
+      ;(o as THREE.Mesh).material = ghost ? kit.ghost : (o.userData.materials as THREE.Material[])
+      o.userData.contextGhost = ghost
+    } else (o as THREE.LineSegments).material = ghost ? kit.edgeGhost : (o.userData.rest as THREE.Material)
+  }
 }
 
 /** Reference bodies (`import`, desktop app): see-through, faint edges, not pickable, never painted. */
@@ -188,12 +293,12 @@ function addRefs(root: THREE.Group, d: DisplayData, kit: MaterialKit) {
   }
 }
 
-function materialIndex(g: DisplayData["groups"][number], paint: Paint, rest = 0) {
+function materialIndex(g: Group, paint: Brush, rest = 0) {
   // At rest: the part's own look (or the neutral white model); interaction and optional changes go on top.
-  if (g.part !== undefined && paint.selected?.includes(g.part)) return 1
-  if (paint.hovered?.includes(g.hash)) return 5
-  if (paint.faces) return paint.faces.includes(g.hash) ? 1 : rest
-  if (paint.highlight) return (typeof paint.highlight === "string" ? g.origin === paint.highlight : paint.highlight.includes(g.origin)) ? 1 : rest
+  if (g.part !== undefined && paint.selected?.has(g.part)) return 1
+  if (paint.hovered?.has(g.hash)) return 5
+  if (paint.faces) return paint.faces.has(g.hash) ? 1 : rest
+  if (paint.highlight) return paint.highlight.has(g.origin) ? 1 : rest
   if (!paint.status) return rest
   return g.status === "new" ? 6 : g.status === "modified" ? 2 : rest
 }
@@ -214,13 +319,11 @@ export function partOffset(d: DisplayData, view: PartsView, index?: number): [nu
 
 /** Re-paint an existing model object without rebuilding geometry. */
 export function repaint(root: THREE.Object3D, paint: Paint) {
-  root.traverse((o) => {
+  const brush = brushOf(paint)
+  for (const o of root.children) {
     const mesh = o as THREE.Mesh
-    if (!mesh.isMesh || !mesh.userData.groups || mesh.userData.contextGhost) return
-    const groups = mesh.userData.groups as DisplayData["groups"]
-    const rests = mesh.userData.rests as number[] | undefined
-    mesh.geometry.groups.forEach((gr, i) => (gr.materialIndex = materialIndex(groups[i], paint, rests?.[i])))
-  })
+    if (mesh.isMesh && mesh.userData.groups) paintMesh(mesh, brush)
+  }
 }
 
 /** Thick lines over the given edges (by mesh hash), drawn on top of the model. */
@@ -264,10 +367,20 @@ export function regionStrokes(strokes: [number, number, number][][], kit: Materi
 }
 
 /** The face group a raycast hit landed on. */
-export function groupAt(hit: THREE.Intersection): DisplayData["groups"][number] | null {
-  const groups = (hit.object as THREE.Mesh).userData.groups as DisplayData["groups"] | undefined
+export function groupAt(hit: THREE.Intersection): Group | null {
+  const groups = (hit.object as THREE.Mesh).userData.groups as Group[] | undefined
   if (!groups || hit.faceIndex === undefined || hit.faceIndex === null) return null
   const idx = hit.faceIndex * 3
+  // Groups come in the order of their triangles: halve the way to the one holding `idx`.
+  let lo = 0
+  let hi = groups.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    const g = groups[mid]
+    if (idx < g.start) hi = mid - 1
+    else if (idx >= g.start + g.count) lo = mid + 1
+    else return g
+  }
   return groups.find((x) => idx >= x.start && idx < x.start + x.count) ?? null
 }
 
