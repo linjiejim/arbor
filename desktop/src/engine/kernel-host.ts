@@ -5,7 +5,7 @@ import { Worker } from "node:worker_threads"
 import type { KernelHost } from "../../../app/src/desktop/core/engine"
 import type { KernelPhase, V3 } from "../../../app/src/desktop/core/protocol"
 import type { Tree } from "../../../app/src/studio/dsl"
-import type { Look } from "../../../app/src/studio/appearance"
+import type { Appearance, Look } from "../../../app/src/studio/appearance"
 import type { BuildReport, BuildProgress, DisplayData, ComponentSource, ContextSource } from "../../../app/src/studio/kernel/build"
 import type { Dim } from "../../../app/src/studio/kernel/dims"
 import type { DrawingData } from "../../../app/src/studio/kernel/drawing"
@@ -292,7 +292,7 @@ export class ThreadKernel implements KernelHost {
   }
 
   looks() {
-    return this.call<{ name: string; look: Look }[]>("looks", [])
+    return this.call<{ name: string; look: Look; here?: Appearance }[]>("looks", [])
   }
 
   inspect(what: "body" | "faces" | "edges", selector?: unknown) {

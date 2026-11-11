@@ -4,7 +4,6 @@
 import type { ChatRecord, ChatSummary } from "./chats"
 import type { PickInfo } from "../../studio/annotations"
 import type { Tree } from "../../studio/dsl"
-import type { PartAppearance } from "../../studio/appearance"
 import type { BuildReport, BuildProgress, DisplayData } from "../../studio/kernel/build"
 import type { MeasureTarget } from "../../studio/kernel/measure"
 import type { LookSection, LookShot } from "../../studio/look-plan"
@@ -46,7 +45,7 @@ export type PartNote = {
 
 export type KernelPhase = { phase: "loading" } | { phase: "ready" } | { phase: "error"; message: string }
 
-export type PartSummary = { path: string; name: string; features: number; openNotes: number; error?: string; kind?: "part" | "assembly"; look?: PartAppearance }
+export type PartSummary = { path: string; name: string; features: number; openNotes: number; error?: string; kind?: "part" | "assembly" }
 
 /** One open part as the window sees it. */
 export type DocState = {
@@ -86,8 +85,6 @@ export type ProjectFile = {
   features: number | null
   open: boolean
   openNotes: number
-  /** A part file's colour and finish (the whole part, and per part after a split). */
-  look?: PartAppearance
 }
 
 /** The folder the open files belong to (see core/project.ts). */

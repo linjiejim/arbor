@@ -29,7 +29,7 @@ import {
   type Shape3D,
 } from "replicad"
 import type { PickInfo } from "../annotations"
-import { ownLook, mergeLook, withoutLooks, hexOf, colorName, type Appearance, type Look } from "../appearance"
+import { ownLook, mergeLook, withoutLooks, hexOf, colorName, isSet, type Appearance, type Look } from "../appearance"
 import { mainColor, stepFaceColors } from "./step-colors"
 import { componentName, displayName, EMPTY_TREE, OP_NAMES, type EdgeSelector, type Feature, type FeatureOp, type FaceSelector, type PlaneRef, type Point, type SketchShape, type Tree } from "../dsl"
 import { num, resolveParams, type Scope } from "../expr"
@@ -178,9 +178,10 @@ export type DisplayData = {
   edgeGroups: { start: number; count: number; hash: number; part?: number }[]
   /**
    * After a split: the parts, with where each moves at full explode, their colour and finish, and in an
-   * assembly which component placed each (`sub`: its name inside that component's file).
+   * assembly which component placed each (`sub`: its name inside that component's file). `here`: what
+   * this assembly sets for the part (over its file); `under`: how it would look without that.
    */
-  parts?: { name: string; explode: V3; center: V3; hidden?: boolean; look?: Look; component?: string; sub?: string }[]
+  parts?: { name: string; explode: V3; center: V3; hidden?: boolean; look?: Look; component?: string; sub?: string; here?: Appearance; under?: Look }[]
   /** The whole body's look when it isn't split into parts. */
   look?: Look
   /** Reference bodies (`import`, desktop app): drawn see-through, not part of the model. */
@@ -550,22 +551,28 @@ export class Kernel {
    */
   private lookOf(p: Pick<Part, "name" | "trail" | "faceColors">): Look {
     if (!p.trail?.length) return { ...ownLook(this.tree.appearance, p.name), source: "part" }
-    const look = trailLook(this.tree, this.components, p.trail, 0)
-    const file = p.faceColors ? mainColor(p.faceColors) : undefined
-    return file ? { ...look, fileColor: file } : look
+    return withFileColor(trailLook(this.tree, this.components, p.trail, 0).look, p.faceColors)
+  }
+
+  /** An assembly's part: what this assembly sets for it, and how it looks without that (for the sidebar). */
+  private layersOf(p: Pick<Part, "trail" | "faceColors">): { here?: Appearance; under: Look } | null {
+    if (!p.trail?.length) return null
+    const { here, under } = trailLook(this.tree, this.components, p.trail, 0)
+    return { ...(isSet(here) ? { here } : {}), under: withFileColor(under, p.faceColors) }
   }
 
   /** Each part of the last body that built and how it looks (one entry for an unsplit body). */
-  looks(): { name: string; look: Look }[] {
+  looks(): { name: string; look: Look; here?: Appearance }[] {
     const last = this.lastBuilt(this.steps.length)
-    return last?.body ? this.looksOf(last).map(({ name, look }) => ({ name, look })) : []
+    return last?.body ? this.looksOf(last).map(({ name, look, here }) => ({ name, look, ...(here ? { here } : {}) })) : []
   }
 
-  /** The look of each part of a step's body (one entry for an unsplit body), for exports. */
-  private looksOf(step: Step): { name: string; body: Shape3D; look: Look }[] {
-    if (step.parts && step.parts.length > 1) return step.parts.map((p) => ({ name: p.name, body: p.body, look: this.lookOf(p) }))
+  /** The look of each part of a step's body (one entry for an unsplit body), for exports; `here`: what this assembly sets for it. */
+  private looksOf(step: Step): { name: string; body: Shape3D; look: Look; here?: Appearance }[] {
+    const one = (p: Part) => ({ look: this.lookOf(p), ...(this.layersOf(p)?.here ? { here: this.layersOf(p)!.here } : {}) })
+    if (step.parts && step.parts.length > 1) return step.parts.map((p) => ({ name: p.name, body: p.body, ...one(p) }))
     const only = step.parts?.length === 1 ? step.parts[0] : null
-    return [{ name: only?.name ?? step.mainName ?? "零件", body: step.body!, look: only ? this.lookOf(only) : { ...ownLook(this.tree.appearance, step.mainName), source: "part" } }]
+    return [{ name: only?.name ?? step.mainName ?? "零件", body: step.body!, ...(only ? one(only) : { look: { ...ownLook(this.tree.appearance, step.mainName), source: "part" as const } }) }]
   }
 
   /** What checks can name: reference bodies (and the assembly context) by id and name, parts by name. */
@@ -610,7 +617,8 @@ export class Kernel {
       const bb = boundsOf(body.body)
       out.bbox = [[...bb[0]], [...bb[1]]] as [V3, V3]
       out.threads = this.threadRings(this.steps.indexOf(body), body)
-      if (body.parts && (body.parts.length > 1 || body.parts.some((p) => p.hidden))) {
+      // An assembly lists its parts even when there is one: each has a row (and a colour dot) in the sidebar.
+      if (body.parts && (body.parts.length > 1 || body.parts.some((p) => p.hidden || p.trail))) {
         // Which part each face and edge belongs to, for colouring, hiding and exploding parts.
         const faceToPart = new Map<number, number>()
         const faceColor = new Map<number, string>()
@@ -634,7 +642,7 @@ export class Kernel {
             center: mul(add(a, b), 0.5),
             hidden: p.hidden,
             look: this.lookOf(p),
-            ...(where ? { component: where.component, ...(where.sub ? { sub: where.sub } : {}) } : {}),
+            ...(where ? { component: where.component, ...(where.sub ? { sub: where.sub } : {}), ...this.layersOf(p) } : {}),
           }
         })
         out.groups = out.groups.map((g) => ({ ...g, part: faceToPart.get(g.hash), ...(faceColor.has(g.hash) ? { color: faceColor.get(g.hash) } : {}) }))
@@ -2221,21 +2229,32 @@ function suppressedOf(tree: Tree) {
   return off
 }
 
-/** Follow a part's trail from `tree` (an assembly) down to the file it comes from; nearer looks win. */
-function trailLook(tree: Tree, components: Map<string, { source: ComponentSource }>, trail: Trail, i: number): Look {
+/**
+ * Follow a part's trail from `tree` (an assembly) down to the file it comes from; nearer looks win.
+ * `here`: what this assembly's component sets for the part (its name inside the component over the
+ * whole component); `under`: the look from below it.
+ */
+function trailLook(tree: Tree, components: Map<string, { source: ComponentSource }>, trail: Trail, i: number): { look: Look; here: Appearance; under: Look } {
   const at = trail[i]
   const f = tree.features.find((x): x is Extract<Feature, { op: "component" }> => x.op === "component" && x.id === at.component)
-  if (!f) return { source: "part" }
+  if (!f) return { look: { source: "part" }, here: {}, under: { source: "part" } }
   let inner: Look
   if (f.standard) inner = { source: "standard" }
   else {
     const src = f.file ? components.get(f.file)?.source : undefined
     if (f.file && /\.(step|stp)$/i.test(f.file)) inner = { source: "step" }
     else if (!src?.tree) inner = { source: "part" }
-    else if (i + 1 < trail.length) inner = trailLook(src.tree, new Map((src.components ?? []).map((c) => [c.file, { source: c }])), trail, i + 1)
+    else if (i + 1 < trail.length) inner = trailLook(src.tree, new Map((src.components ?? []).map((c) => [c.file, { source: c }])), trail, i + 1).look
     else inner = { ...ownLook(src.tree.appearance, at.sub), source: "part" }
   }
-  return { ...mergeLook(f.appearance, inner), source: inner.source }
+  const here = ownLook(f.appearance, at.sub)
+  return { look: { ...mergeLook(here, inner), source: inner.source }, here, under: inner }
+}
+
+/** A STEP file's own colour (the one most faces have) on a look. */
+function withFileColor(look: Look, faceColors: FaceColors | undefined): Look {
+  const file = faceColors ? mainColor(faceColors) : undefined
+  return file ? { ...look, fileColor: file } : look
 }
 
 /** What a component's built shape depends on: its tree, the bytes it reads, its own components. */

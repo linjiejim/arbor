@@ -126,7 +126,7 @@ export function DesktopApp() {
     const id = p.component ?? studio.display?.groups.find((g) => g.part === index)?.origin ?? ""
     const feature = studio.tree.features.find((f) => f.id === id)
     const file = feature?.op === "component" ? feature.file ?? "" : ""
-    return { name: p.name, index, id, file, look: p.look, own: !!file && !/\.(step|stp)$/i.test(file) && !/-asm\.json$/i.test(file) }
+    return { name: p.name, index, id, file, look: p.look, here: p.here, under: p.under, own: !!file && !/\.(step|stp)$/i.test(file) && !/-asm\.json$/i.test(file), layered: !!file && !/\.(step|stp)$/i.test(file) }
   }) ?? []
   const [presented, setPresented] = React.useState<unknown>(null)
   const assembly = doc?.kind === "assembly" && !doc.context

@@ -356,34 +356,94 @@ describe("appearance: a STEP file's own colours", () => {
   })
 })
 
-describe("appearance: the project list and the site's assistant", () => {
-  it("lists part files with their colours, and colours a part file nobody has open (undoable from its assembly)", async () => {
-    const { run, rebuild, disk, files, engine } = setup()
-    await files.write("/work/proj/parts/block.turnery.json", JSON.stringify({ params: {}, features: box(10, 10, 10), appearance: { color: "red" } }))
-    await files.write("/work/proj/parts/plain.turnery.json", JSON.stringify({ params: {}, features: box(5, 5, 5) }))
-    await run("open_part", { path: "proj/asm.turnery-asm.json", create: true })
-    await run("component", { id: "a", name: "块", file: "parts/block.turnery.json" })
-    await run("component", { id: "b", name: "块2", file: "parts/block.turnery.json", at: [20, 0, 0] })
-    await engine.run("scan_project", {}, USER)
-    const listed = (p: string) => engine.snapshot().project?.files.find((f) => f.path.endsWith(p))
-    expect(listed("block.turnery.json")?.look).toEqual({ color: "red" })
-    expect(listed("plain.turnery.json")?.look).toBeUndefined()
-    const builds = rebuild.mock.calls.length
-
-    // From the sidebar: the file isn't open, so it is written as it is and not built.
-    const r = await engine.run("set_appearance", { color: "green" }, { ...USER, part: "/work/proj/parts/block.turnery.json" })
-    expect(r.ok, r.text).toBe(true)
-    expect(engine.snapshot().parts.some((p) => p.path.endsWith("block.turnery.json"))).toBe(false)
-    expect(JSON.parse(disk.get("/work/proj/parts/block.turnery.json") as string).appearance).toEqual({ color: "green" })
-    expect(listed("block.turnery.json")?.look).toEqual({ color: "green" })
-    expect((await run("get_state", {})).text).toMatch(/块 绿、块2 绿/)
-    expect(rebuild.mock.calls.length).toBe(builds)
-    // The assembly on screen reads that file: its undo puts the file back.
-    expect((await run("undo", {}, USER)).ok).toBe(true)
-    expect(JSON.parse(disk.get("/work/proj/parts/block.turnery.json") as string).appearance).toEqual({ color: "red" })
-    expect(rebuild.mock.calls.length).toBe(builds)
+describe("appearance: set only in one assembly", () => {
+  it("lets an assembly set one half of a split part over its file, and says what is set where", () => {
+    const k = new Kernel()
+    k.setComponents([{ file: "shell.turnery.json", tree: { ...shell, appearance: { color: "blue" } } }])
+    const tree: Tree = { params: {}, features: [{ id: "c", op: "component", name: "外壳", file: "shell.turnery.json", appearance: { finish: "metal", parts: { 上盖: { color: "orange" } } } }] }
+    k.rebuild(tree)
+    const parts = Object.fromEntries(k.display().parts!.map((p) => [p.name, p]))
+    expect(parts["外壳/上盖"]).toMatchObject({ look: { color: "orange", finish: "metal", source: "part" }, here: { color: "orange", finish: "metal" }, under: { color: "blue", source: "part" } })
+    expect(parts["外壳/底壳"]).toMatchObject({ look: { color: "blue", finish: "metal", source: "part" }, here: { finish: "metal" }, under: { color: "blue", source: "part" } })
+    expect(k.looks().map((l) => [l.name, !!l.here])).toEqual([["外壳/底壳", true], ["外壳/上盖", true]])
+    // Nothing set in the assembly: no `here`.
+    k.restyle({ ...tree, features: [{ id: "c", op: "component", name: "外壳", file: "shell.turnery.json" }] })
+    expect(k.display().parts!.every((p) => p.here === undefined)).toBe(true)
+    k.dispose()
   })
 
+  it("keeps an assembly's own colour per half, says when the file's change won't show, and drops it again", async () => {
+    const { run, rebuild, disk, files } = setup()
+    await files.write("/work/parts/shell.turnery.json", JSON.stringify(shell))
+    await run("open_part", { path: "asm.turnery-asm.json", create: true })
+    expect((await run("component", { id: "c", name: "外壳", file: "parts/shell.turnery.json" })).ok).toBe(true)
+    const builds = rebuild.mock.calls.length
+    const comp = () => (JSON.parse(disk.get("/work/asm.turnery-asm.json") as string) as Tree).features[0] as { appearance?: unknown }
+    const file = () => JSON.parse(disk.get("/work/parts/shell.turnery.json") as string).appearance
+
+    // Only the lid, only here.
+    let r = await run("set_appearance", { parts: ["外壳/上盖"], color: "orange", where: "assembly" }, USER)
+    expect(r.ok, r.text).toBe(true)
+    expect(comp().appearance).toEqual({ parts: { 上盖: { color: "orange" } } })
+    expect(file()).toBeUndefined()
+    expect(r.text).toMatch(/外观：外壳\/底壳 未设置（白模）、外壳\/上盖 橙（这个装配里单独设的）/)
+
+    // Into the file: the lid keeps showing this assembly's orange, and the reply says so.
+    r = await run("set_appearance", { parts: ["外壳/上盖"], color: "blue" }, USER)
+    expect(file()).toEqual({ parts: { 上盖: { color: "blue" } } })
+    expect(r.text).toMatch(/这个装配里单独设过的仍然优先，这里看不到变化：「外壳\/上盖」橙/)
+    expect(r.text).toMatch(/外壳\/上盖 橙（这个装配里单独设的）/)
+
+    // Back to the file's colour.
+    r = await run("set_appearance", { parts: ["外壳/上盖"], color: null, finish: null, where: "assembly" }, USER)
+    expect(comp().appearance).toBeUndefined()
+    expect(r.text).toMatch(/外壳\/上盖 蓝(?!（)/)
+
+    // The whole part red here, then the lid back to its file: the base stays red, written for it.
+    await run("set_appearance", { parts: ["外壳"], color: "red", where: "assembly" }, USER)
+    expect((await run("get_state", {})).text).toMatch(/外壳\/底壳 红（这个装配里单独设的）、外壳\/上盖 红（这个装配里单独设的）/)
+    r = await run("set_appearance", { parts: ["外壳/上盖"], color: null, finish: null, where: "assembly" }, USER)
+    expect(comp().appearance).toEqual({ parts: { 底壳: { color: "red" } } })
+    expect(r.text).toMatch(/外壳\/底壳 红（这个装配里单独设的）、外壳\/上盖 蓝(?!（)/)
+
+    r = await run("set_appearance", { parts: ["外壳/顶盖"], color: "red", where: "assembly" }, USER)
+    expect(r.ok).toBe(false)
+    expect(r.text).toMatch(/没有叫「外壳\/顶盖」的零件：现在有 外壳\/底壳、外壳\/上盖/)
+    expect(rebuild.mock.calls.length).toBe(builds)
+  })
+})
+
+describe("appearance: review of the per-assembly colours", () => {
+  it("reads a component file saved a moment ago before passing a whole-part colour on to its other halves", async () => {
+    const { run, disk, files } = setup()
+    await files.write("/work/parts/shell.turnery.json", JSON.stringify(shell))
+    await run("open_part", { path: "asm.turnery-asm.json", create: true })
+    await run("component", { id: "c", name: "外壳", file: "parts/shell.turnery.json" })
+    await run("set_appearance", { parts: ["外壳"], color: "red", where: "assembly" }, USER)
+    // Split differently, saved without the watcher having fired yet.
+    await files.write("/work/parts/shell.turnery.json", JSON.stringify({ ...shell, features: [...box(40, 30, 20), { id: "sp", op: "split", by: { plane: "XY", offset: 12 }, parts: ["下半", "上半"] }] }))
+    const r = await run("set_appearance", { parts: ["外壳/上半"], color: null, finish: null, where: "assembly" }, USER)
+    expect(r.ok, r.text).toBe(true)
+    expect(((JSON.parse(disk.get("/work/asm.turnery-asm.json") as string) as Tree).features[0] as { appearance?: unknown }).appearance).toEqual({ parts: { 下半: { color: "red" } } })
+  })
+
+  it("lists the part of an assembly of one unsplit part, for its row and colour dot", () => {
+    const k = new Kernel()
+    k.setComponents([{ file: "a.turnery.json", tree: { params: {}, features: box(10, 10, 10), appearance: { color: "blue" } } }])
+    k.rebuild({ params: {}, features: [{ id: "a", op: "component", name: "块", file: "a.turnery.json", appearance: { finish: "metal" } }] })
+    const d = k.display()
+    expect(d.parts).toHaveLength(1)
+    expect(d.parts![0]).toMatchObject({ name: "块", component: "a", look: { color: "blue", finish: "metal", source: "part" }, here: { finish: "metal" }, under: { color: "blue", source: "part" } })
+    // Every face belongs to it (selecting and highlighting the part go by this).
+    expect(d.groups.every((g) => g.part === 0)).toBe(true)
+    // A part file on its own: no parts list.
+    k.rebuild({ params: {}, features: box(10, 10, 10) })
+    expect(k.display().parts).toBeUndefined()
+    k.dispose()
+  })
+})
+
+describe("appearance: the site's assistant", () => {
   it("gives the site's assistant its own set_appearance, and the desktop one command of that name", async () => {
     const { executeTool } = await import("@/studio/apply")
     const { COMMANDS } = await import("@/desktop/core/catalog")

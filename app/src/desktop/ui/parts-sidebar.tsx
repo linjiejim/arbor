@@ -2,12 +2,11 @@ import { useState, type ReactNode } from "react"
 import { Boxes, CircleAlert, FolderOpen, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Hint } from "@/components/hint"
-import { IconButton } from "@/components/ui/button"
-import { notify } from "@/components/ui/toast"
+import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { matchesPart } from "@/studio/part-selection"
-import { isSet, lookText, type Look, type LookChange, type PartAppearance } from "@/studio/appearance"
+import { isSet, lookText, type Appearance, type Look, type LookChange } from "@/studio/appearance"
 import { LookPicker } from "@/studio/ui/look-picker"
 import { turnery } from "../bridge"
 import type { PartSummary, ProjectFile, Snapshot } from "../core/protocol"
@@ -16,8 +15,12 @@ import type { PartSummary, ProjectFile, Snapshot } from "../core/protocol"
  * The project (a folder: its assemblies and parts) or, without one, the open
  * parts. Clicking a file opens it (and makes it the agent's default).
  */
-/** A part of the open assembly: `own` when it comes from a part file of its own (its colour can go there). */
-type Instance = { name: string; id: string; file: string; index: number; look?: Look; own?: boolean }
+/**
+ * A part of the open assembly: `own` when it comes from a part file of its own (its colour can go there);
+ * `layered` when a file under it has colours (a part file, a sub-assembly) this assembly can set over;
+ * `here`: what this assembly sets for it; `under`: how it looks without that.
+ */
+type Instance = { name: string; id: string; file: string; index: number; look?: Look; own?: boolean; layered?: boolean; here?: Appearance; under?: Look }
 export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect, onPoint, onLook }: {
   snapshot: Snapshot | null
   instances?: Instance[]
@@ -96,7 +99,7 @@ export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect
           <div className="flex items-center justify-between px-3 py-1 text-caption text-muted-foreground">
             <span>装配零件</span><span>{found.length} / {instances.length}</span>
           </div>
-          <p className="px-3 pb-1 text-caption text-faint-foreground">Shift 点击可多选；点圆点改颜色，选中几个就一起改</p>
+          <p className="px-3 pb-1 text-caption text-faint-foreground">Shift 点击可多选；点圆点改颜色，选中的一起改；带外圈的只在这个装配里改过</p>
           <ul aria-label="装配零件搜索结果" className="min-h-0 overflow-y-auto px-1.5">
             {found.map((p) => <li key={p.name} className={rowClass(selected.includes(p.name))}
               onMouseEnter={() => onPoint?.(p)} onMouseLeave={() => onPoint?.(null)}>
@@ -119,26 +122,46 @@ export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect
 
 /**
  * The colour dot of an assembly's part: the legend of the view, and the way to change it. With several
- * parts selected and this one among them, it changes all of them.
+ * parts selected and this one among them, it changes all of them. A part set in this assembly (over its
+ * part file) has a ring round its dot; its panel says so, keeps changing it here, and can drop it.
  */
 function InstanceLook({ part, group, onLook }: { part: Instance; group: Instance[]; onLook: (names: string[], change: LookChange, here: boolean) => void }) {
-  const [here, setHere] = useState(false)
+  // Set here over a part file: only those decide where a change goes (the rest are always set here).
+  const set = group.filter((p) => p.own && isSet(p.here))
+  const [here, setHere] = useState(set.length > 0)
   const own = group.some((p) => p.own)
   const id = `look-here-${part.index}`
+  const single = group.length === 1
   return (
     <LookPicker
       look={part.look}
-      label={group.length > 1 ? `${group.length} 个零件的颜色` : `「${part.name}」的颜色`}
+      label={single ? `「${part.name}」的颜色` : `${group.length} 个零件的颜色`}
       className="ml-1.5"
+      mark={part.layered && isSet(part.here)}
+      note={part.layered && isSet(part.here) ? "只在这个装配里" : undefined}
+      // Already set in this assembly: keep changing it here, or the part file's change wouldn't show.
+      onOpen={() => setHere(set.length > 0)}
       onChange={(change) => onLook(group.map((p) => p.name), change, here)}
       extra={
         own ? (
-          <div className="space-y-1">
+          <div className="space-y-1.5">
+            {set.length > 0 && (
+              <div className="space-y-1 rounded-md bg-muted px-2 py-1.5">
+                <p className="text-caption text-muted-foreground">
+                  {single ? `只在这个装配里设的；零件文件里${fileText(part.under)}` : `其中 ${set.length} 个只在这个装配里设了颜色`}
+                </p>
+                <Button size="sm" variant="link" onClick={() => onLook(set.map((p) => p.name), { color: null, finish: null }, true)}>
+                  改回跟零件文件一致
+                </Button>
+              </div>
+            )}
             <label htmlFor={id} className="flex items-center gap-2 text-small">
               <Checkbox id={id} checked={here} onCheckedChange={(v) => setHere(v === true)} />
               只改这个装配里的
             </label>
-            <p className="pl-6 text-caption text-faint-foreground">{here ? "写在装配上，零件文件不变" : "写进零件文件，用到它的地方都跟着变"}</p>
+            <p className="pl-6 text-caption text-faint-foreground">
+              {here ? "写在装配上，零件文件不变" : set.length ? "写进零件文件；这里单独设的仍然优先，这个装配里看不到变化" : "写进零件文件，用到它的地方都跟着变"}
+            </p>
           </div>
         ) : (
           <p className="text-caption text-faint-foreground">标准件、外购件和子装配没有自己的零件文件，颜色写在这个装配里。</p>
@@ -147,6 +170,9 @@ function InstanceLook({ part, group, onLook }: { part: Instance; group: Instance
     />
   )
 }
+
+/** A part file's look, after 「零件文件里」: 「是蓝」「没设颜色（白模）」. */
+const fileText = (l: Look | undefined) => (l && isSet(l) ? `是${lookText(l)}` : "没设颜色（白模）")
 
 function Group({ title, children }: { title?: string; children: ReactNode }) {
   return (
@@ -160,35 +186,12 @@ function Group({ title, children }: { title?: string; children: ReactNode }) {
 const rowClass = (active: boolean) => cn("group relative flex items-center rounded-md", active ? "bg-selected" : "hover:bg-accent")
 const buttonClass = "flex min-w-0 flex-1 items-center gap-2 px-2.5 py-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
 
-/**
- * A part file's colour dot: the whole part's look, changed right in the file (open or not). Split parts
- * with looks of their own keep them; the dot then shows the first of those when the whole has none.
- */
-function FileLook({ path, name, look }: { path: string; name: string; look?: PartAppearance }) {
-  const whole: Look = { ...(look?.color ? { color: look.color } : {}), ...(look?.finish ? { finish: look.finish } : {}), source: "part" }
-  const own = Object.entries(look?.parts ?? {}).filter(([, l]) => isSet(l))
-  const label = own.length ? `「${name}」整体的颜色（${own.map(([n, l]) => `${n} ${lookText(l)}`).join("、")} 另有自己的）` : `「${name}」的颜色`
-  return (
-    <LookPicker
-      look={whole}
-      dot={isSet(whole) || !own.length ? whole : { ...own[0][1], source: "part" }}
-      label={label}
-      className="ml-1.5"
-      onChange={async (change) => {
-        const r = await turnery.call("set_appearance", change, path)
-        if (!r.ok) notify.error(r.text.replace(/^✗ /, ""))
-      }}
-    />
-  )
-}
-
 /** A file of the project: open or not. */
 function FileRow({ file: f, active }: { file: ProjectFile; active: boolean }) {
   const unit = f.kind === "assembly" ? "个零件" : "个特征"
   return (
     <div className={rowClass(active)}>
-      {f.kind === "part" && f.features !== null && <FileLook path={f.path} name={f.name} look={f.look} />}
-      <button type="button" className={cn(buttonClass, f.kind === "part" && f.features !== null && "pl-1")} title={f.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: f.path })}>
+      <button type="button" className={buttonClass} title={f.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: f.path })}>
         <span className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate text-body", active && "font-medium", !f.open && !active && "text-muted-foreground")}>
           {f.kind === "assembly" && <Boxes className="size-3.5 shrink-0 text-faint-foreground" />}
           <span className="truncate">{f.name}</span>
@@ -205,11 +208,9 @@ function FileRow({ file: f, active }: { file: ProjectFile; active: boolean }) {
 
 /** An open part outside the project (or any open part, without a project). */
 function OpenRow({ part: p, active }: { part: PartSummary; active: boolean }) {
-  const colourable = p.kind !== "assembly" && !p.error
   return (
     <div className={rowClass(active)}>
-      {colourable && <FileLook path={p.path} name={p.name} look={p.look} />}
-      <button type="button" className={cn(buttonClass, colourable && "pl-1")} title={p.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: p.path })}>
+      <button type="button" className={buttonClass} title={p.path} aria-current={active ? "page" : undefined} onClick={() => void turnery.call("open_part", { path: p.path })}>
         <span className={cn("flex min-w-0 flex-1 items-center gap-1.5 truncate text-body", active && "font-medium")}>
           {p.error && <CircleAlert className="size-3.5 shrink-0 text-destructive" aria-label="文件有错" />}
           {p.kind === "assembly" && <Boxes className="size-3.5 shrink-0 text-faint-foreground" />}

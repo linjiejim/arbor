@@ -13,18 +13,20 @@ const defaultFinish = (look: Look | undefined): Finish => (look?.source === "sta
 
 /**
  * A part's colour as a dot: filled with it (clear: see-through, metal: a sheen), or an empty ring when
- * nothing is set. The colour comes from the part, not the theme.
+ * nothing is set. The colour comes from the part, not the theme. `mark`: an outer ring, for a colour
+ * set only in this assembly.
  */
-export function LookDot({ look, className }: { look: Look | Appearance | undefined; className?: string }) {
+export function LookDot({ look, mark, className }: { look: Look | Appearance | undefined; mark?: boolean; className?: string }) {
   const hex = hexOf(look?.color ?? (look && "fileColor" in look ? look.fileColor : undefined))
   const finish = look?.finish
+  const ring = mark && "outline-1 outline-offset-2 outline-foreground/70 outline-solid"
   // Nothing set: a dashed ring, so it never reads as a white part.
-  if (!hex) return <span aria-hidden className={cn("inline-block size-2.5 shrink-0 rounded-full border border-dashed border-muted-foreground", className)} />
+  if (!hex) return <span aria-hidden className={cn("inline-block size-2.5 shrink-0 rounded-full border border-dashed border-muted-foreground", ring, className)} />
   // Clear: half filled, the other half see-through. The ring follows the theme, so black and white dots both show.
   return (
     <span
       aria-hidden
-      className={cn("relative inline-block size-2.5 shrink-0 overflow-hidden rounded-full ring-1 ring-foreground/30", className)}
+      className={cn("relative inline-block size-2.5 shrink-0 overflow-hidden rounded-full ring-1 ring-foreground/30", ring, className)}
       style={{ background: finish === "clear" ? `linear-gradient(135deg, ${hex} 50%, ${hex}33 50%)` : hex }}
     >
       {finish === "metal" && <span className="absolute top-px left-0.5 size-1 rounded-full bg-background/70" />}
@@ -43,17 +45,23 @@ export function LookPicker({
   extra,
   disabled,
   className,
-  dot,
+  mark,
+  note,
+  onOpen,
 }: {
   look: Look | undefined
-  /** What the dot shows, when not `look` itself (a file whose split parts have colours of their own). */
-  dot?: Look
   /** 「上盖」的颜色 */
   label: string
   onChange: (change: LookChange) => unknown
   extra?: React.ReactNode
   disabled?: boolean
   className?: string
+  /** The dot's outer ring (see LookDot). */
+  mark?: boolean
+  /** Said after the colour when pointed at (「只在这个装配里」). */
+  note?: string
+  /** Each time the panel opens. */
+  onOpen?: () => void
 }) {
   const [open, setOpen] = React.useState(false)
   const current = paletteOf(look?.color)
@@ -62,23 +70,27 @@ export function LookPicker({
   const finish = look?.finish ?? defaultFinish(look)
   const customOk = !!hexOf(custom.startsWith("#") ? custom : `#${custom}`)
   const pick = (change: LookChange) => void onChange(change)
+  const tip = `${label}：${lookTip(look)}${note ? `（${note}）` : ""}`
   return (
     <Popover
       open={open}
       onOpenChange={(o) => {
         setOpen(o)
-        if (o) setCustom(hex && !current ? hex : "")
+        if (o) {
+          setCustom(hex && !current ? hex : "")
+          onOpen?.()
+        }
       }}
     >
-      <Tooltip content={`${label}：${lookTip(look)}`}>
+      <Tooltip content={tip}>
         <PopoverTrigger asChild disabled={disabled}>
           <button
             type="button"
-            aria-label={`${label}：${lookTip(look)}`}
+            aria-label={tip}
             className={cn("grid size-5 shrink-0 place-items-center rounded-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none", className)}
             onClick={(e) => e.stopPropagation()}
           >
-            <LookDot look={dot ?? look} />
+            <LookDot look={look} mark={mark} />
           </button>
         </PopoverTrigger>
       </Tooltip>

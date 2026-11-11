@@ -131,7 +131,7 @@ const own: CommandSpec[] = [
     name: "set_appearance",
     audience: "both",
     description:
-      "设零件的颜色和质感：窗口里按它显示，导出 3MF、STEP 时带上，零件清单里列出。只改外观，不改几何、不重建。零件文件里：不写 parts 是整个零件，写 parts 是拆件后的某几个零件。装配里：parts 写装配里的零件名；自建零件缺省写进它自己的零件文件（用到它的装配都跟着变），标准件、外购件（STEP）、子装配，以及写了 where: \"assembly\" 的，写在这个装配的 component 上。color、finish 写 null 是清除。",
+      "设零件的颜色和质感：窗口里按它显示，导出 3MF、STEP 时带上，零件清单里列出。只改外观，不改几何、不重建。零件文件里：不写 parts 是整个零件，写 parts 是拆件后的某几个零件。装配里：parts 写装配里的零件名；自建零件缺省写进它自己的零件文件（用到它的装配都跟着变），标准件、外购件（STEP）、子装配，以及写了 where: \"assembly\" 的，写在这个装配的 component 上（拆开的零件「外壳/上盖」可以只改上盖）。在装配里单独设过的比零件文件的优先：要改回跟零件文件一致，where 写 \"assembly\"，color、finish 写 null。color、finish 写 null 是清除。",
     input: z.object({
       parts: z.array(z.string()).optional().describe("零件名：拆件后的零件，或装配里的零件（get_state 的「外观」一行列着）；零件文件里不写就是整个零件"),
       color: Color.nullable().optional(),
@@ -454,7 +454,8 @@ ${promptSections(["数值", "坐标与基准面", "扫掠、放样、拔模", "�
 ## 颜色和质感
 - 用户说了颜色（「上盖做成橙色」「螺丝用黑色」），或者要看最终效果、区分几类零件时，用 set_appearance 设：color 写色板名（white、silver、gray、black、red、orange、yellow、green、teal、blue、purple、pink），要还原具体的耗材、喷漆颜色时写 #RRGGBB；finish 写 matte 哑光（缺省）、metal 金属、clear 透明（例如透明外壳，能看到里面的板子）。
 - 颜色只是外观：不改几何、不重建，窗口里随时可以关掉看白模。没设颜色的零件是白模，标准件按金属色、STEP 外购件按深灰显示。
-- 零件文件里：拆件后用 parts 分别设（上盖橙、底壳灰）；没拆就是整个零件。装配里：自建零件的颜色缺省写进它自己的零件文件，标准件和外购件写在装配的 component 上（component 也可以直接带 appearance）。同一类零件设同一种颜色，零件清单和导出的 3MF 也按颜色分开。
+- 零件文件里：拆件后用 parts 分别设（上盖橙、底壳灰）；没拆就是整个零件。装配里：自建零件的颜色缺省写进它自己的零件文件，标准件和外购件写在装配的 component 上（component 也可以直接带 appearance，拆开的零件用 appearance.parts 分别设）。同一类零件设同一种颜色，零件清单和导出的 3MF 也按颜色分开。
+- 同一个零件在不同装配里要不同颜色（样机橙色、量产黑色）：where: "assembly" 只改这个装配，零件文件不变。get_state 的「外观」一行里标着「这个装配里单独设的」；这些零件改零件文件，这个装配里看不到变化。
 - look 的图按颜色画，结果里有一行颜色图例；要看纯形状写 plain: true。
 
 ## 标准件和贴合摆放
