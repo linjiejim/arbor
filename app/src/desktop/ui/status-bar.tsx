@@ -15,7 +15,16 @@ export type StatusTarget = "activity" | "failed" | "params" | "notes" | "setup"
  * Each item says itself in a few words; the panels hold the detail, and an item with one clear place to
  * go (the activity, the failed step, the checks, the notes) goes there when clicked.
  */
-export function StatusBar({ snapshot, doc, pick, onGo, agentSeen = true }: { snapshot: Snapshot | null; doc: DocState | null; pick: PickRequest | null; onGo: (to: StatusTarget) => void; agentSeen?: boolean }) {
+export function StatusBar({ snapshot, doc, pick, onGo, agentSeen = true, sheet = false, onSheet }: {
+  snapshot: Snapshot | null
+  doc: DocState | null
+  pick: PickRequest | null
+  onGo: (to: StatusTarget) => void
+  agentSeen?: boolean
+  /** 「工程图」 over the 3D view: switched now and then, so it lives down here, at the far right. */
+  sheet?: boolean
+  onSheet?: (on: boolean) => void
+}) {
   const now = useNow()
   const kernel = snapshot?.kernel
   const loading = snapshot?.loading
@@ -67,6 +76,22 @@ export function StatusBar({ snapshot, doc, pick, onGo, agentSeen = true }: { sna
               第 {doc.rev} 版{last ? ` · ${ACTOR_LABEL[last.actor]} ${ago(last.at, now)}` : ""}
             </span>
           </Go>
+          {onSheet && (
+            <div role="radiogroup" aria-label="视图" className="-mr-1.5 flex items-center gap-0.5">
+              {([["3D", false], ["工程图", true]] as const).map(([label, on]) => (
+                <button
+                  key={label}
+                  type="button"
+                  role="radio"
+                  aria-checked={sheet === on}
+                  className={cn("h-5 rounded-sm px-1.5 outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring", sheet === on && "bg-muted font-medium text-foreground")}
+                  onClick={() => onSheet(on)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
         </>
       )}
     </footer>

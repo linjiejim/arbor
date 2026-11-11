@@ -87,8 +87,8 @@ export interface KernelHost {
   dimensions(): Promise<Dim[]>
   drawing(withIso: boolean): Promise<DrawingData | null>
   exportBody(format: "step" | "stl" | "3mf", index?: number): Promise<Uint8Array | null>
-  /** Show a source-validated portable mesh before preparing native components. */
-  preparePreview?(path: string, tree: Tree, assets: ComponentSource["assets"], components: ComponentSource[], context: ContextSource | null): Promise<void>
+  /** Show a source-validated portable mesh before preparing native components. `root`: the project folder that keeps it (its cache). */
+  preparePreview?(path: string, tree: Tree, assets: ComponentSource["assets"], components: ComponentSource[], context: ContextSource | null, root?: string | null): Promise<void>
   /** Files `import` features read (absent: this host can't read files). */
   setAssets?(list: { name: string; bytes: Uint8Array | null; error?: string }[]): Promise<void>
   /** What an assembly's components read (absent: this host can't read files). */
@@ -317,7 +317,8 @@ export class Engine {
   kernelDiagnostics(path: string, report: BuildReport) {
     const doc = this.docs.get(path)
     if (!doc) return
-    doc.report = report
+    // The checks ran the whole build again on the side: the time to show is still the time the model took.
+    doc.report = doc.report && !doc.report.paramError ? { ...report, ms: doc.report.ms } : report
     this.emitDoc(doc)
   }
 
@@ -1677,7 +1678,7 @@ export class Engine {
     if (key === this.assetsKeys.get(doc.path)) return false
     const full = await gather(files, doc.path, tree, [], true)
     const context = doc.context ? ((await this.contextOf(doc, true))?.source ?? null) : null
-    await this.opts.kernel.preparePreview?.(doc.path, this.effective(doc, tree), full.assets, full.components, context)
+    await this.opts.kernel.preparePreview?.(doc.path, this.effective(doc, tree), full.assets, full.components, context, this.project && inside(this.project.root, doc.path) ? this.project.root : null)
     await this.opts.kernel.setAssets?.(full.assets)
     await this.opts.kernel.setComponents?.(full.components)
     await this.opts.kernel.setContext?.(context)

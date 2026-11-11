@@ -33,7 +33,13 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build
-      - run: npx playwright install --with-deps chromium
+      # The browser comes from Playwright's CDN. Its system packages come from Ubuntu's mirrors, which
+      # the runners sometimes can't reach; the runner image already has what Chromium needs to run
+      # (it ships Chrome), and the missing extras are fonts no test compares, so that part may fail.
+      - run: npx playwright install chromium
+      - run: npx playwright install-deps chromium
+        timeout-minutes: 3
+        continue-on-error: true
       - run: npm run e2e
       - uses: actions/upload-artifact@v7
         if: failure()

@@ -34,6 +34,8 @@ export class ThreadKernel implements KernelHost {
   private diagnosticWorkers = new Map<string, Worker>()
   private generations = new Map<string, number>()
   private projectPreview = new ProjectPreview()
+  /** Per assembly: the project folder its preview is cached in (none: beside the assembly). */
+  private previewRoots = new Map<string, string | null>()
   private writes = new Set<Promise<void>>()
   private preview: DisplayData | null = null
   private worker: Worker | null = null
@@ -173,12 +175,13 @@ export class ThreadKernel implements KernelHost {
     if (prior) { this.diagnosticWorkers.delete(this.slot); void prior.terminate() }
   }
 
-  async preparePreview(file: string, tree: Tree, assets: ComponentSource["assets"], components: ComponentSource[], context: ContextSource | null) {
+  async preparePreview(file: string, tree: Tree, assets: ComponentSource["assets"], components: ComponentSource[], context: ContextSource | null, root: string | null = null) {
     if (!tree.features.some((f) => f.op === "component")) return
+    this.previewRoots.set(file, root)
     const directory = await this.pool.directory
     if (!directory) return
     const key = assemblyKey([tree, assets ?? [], components, context])
-    const display = await this.projectPreview.read(file, key, path.basename(directory))
+    const display = await this.projectPreview.read(file, key, path.basename(directory), root)
     if (display) this.onPreview(display)
   }
 
@@ -227,7 +230,7 @@ export class ThreadKernel implements KernelHost {
       if (key && this.preview && !r.paramError && r.features.every((f) => f.state !== "error" && f.state !== "skipped")) {
         const directory = await this.pool.directory
         if (directory && path.isAbsolute(slot)) {
-          const write = this.projectPreview.write(slot, key, path.basename(directory), this.preview)
+          const write = this.projectPreview.write(slot, key, path.basename(directory), this.preview, this.previewRoots.get(slot))
           this.writes.add(write)
           void write.finally(() => this.writes.delete(write))
         }
