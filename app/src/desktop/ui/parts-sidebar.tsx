@@ -2,9 +2,12 @@ import { useState, type ReactNode } from "react"
 import { Boxes, CircleAlert, FolderOpen, Plus, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Hint } from "@/components/hint"
-import { IconButton } from "@/components/ui/button"
+import { Button, IconButton } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Checkbox } from "@/components/ui/checkbox"
 import { matchesPart } from "@/studio/part-selection"
+import { isSet, lookText, type Appearance, type Look, type LookChange } from "@/studio/appearance"
+import { LookPicker } from "@/studio/ui/look-picker"
 import { turnery } from "../bridge"
 import type { PartSummary, ProjectFile, Snapshot } from "../core/protocol"
 
@@ -12,13 +15,20 @@ import type { PartSummary, ProjectFile, Snapshot } from "../core/protocol"
  * The project (a folder: its assemblies and parts) or, without one, the open
  * parts. Clicking a file opens it (and makes it the agent's default).
  */
-type Instance = { name: string; id: string; file: string; index: number }
-export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect, onPoint }: {
+/**
+ * A part of the open assembly: `own` when it comes from a part file of its own (its colour can go there);
+ * `layered` when a file under it has colours (a part file, a sub-assembly) this assembly can set over;
+ * `here`: what this assembly sets for it; `under`: how it looks without that.
+ */
+type Instance = { name: string; id: string; file: string; index: number; look?: Look; own?: boolean; layered?: boolean; here?: Appearance; under?: Look }
+export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect, onPoint, onLook }: {
   snapshot: Snapshot | null
   instances?: Instance[]
   selected?: string[]
   onSelect?: (part: Instance, additive: boolean) => void
   onPoint?: (part: Instance | null) => void
+  /** Colour these parts; `here`: only in this assembly, not in their part files. */
+  onLook?: (names: string[], change: LookChange, here: boolean) => void
 }) {
   const [query, setQuery] = useState("")
   const project = snapshot?.project ?? null
@@ -89,10 +99,11 @@ export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect
           <div className="flex items-center justify-between px-3 py-1 text-caption text-muted-foreground">
             <span>装配零件</span><span>{found.length} / {instances.length}</span>
           </div>
-          <p className="px-3 pb-1 text-caption text-faint-foreground">Shift 点击可多选</p>
+          <p className="px-3 pb-1 text-caption text-faint-foreground">Shift 点击可多选；点圆点改颜色，选中的一起改；带外圈的只在这个装配里改过</p>
           <ul aria-label="装配零件搜索结果" className="min-h-0 overflow-y-auto px-1.5">
             {found.map((p) => <li key={p.name} className={rowClass(selected.includes(p.name))}
               onMouseEnter={() => onPoint?.(p)} onMouseLeave={() => onPoint?.(null)}>
+              {onLook && <InstanceLook part={p} group={selected.includes(p.name) && selected.length > 1 ? instances.filter((x) => selected.includes(x.name)) : [p]} onLook={onLook} />}
               <button type="button" aria-label={`选择零件：${p.name}`} aria-pressed={selected.includes(p.name)}
                 className={buttonClass} title={[p.name, p.file, p.id].filter(Boolean).join("\n")}
                 onFocus={() => onPoint?.(p)} onBlur={() => onPoint?.(null)}
@@ -108,6 +119,60 @@ export function PartsSidebar({ snapshot, instances = [], selected = [], onSelect
     </aside>
   )
 }
+
+/**
+ * The colour dot of an assembly's part: the legend of the view, and the way to change it. With several
+ * parts selected and this one among them, it changes all of them. A part set in this assembly (over its
+ * part file) has a ring round its dot; its panel says so, keeps changing it here, and can drop it.
+ */
+function InstanceLook({ part, group, onLook }: { part: Instance; group: Instance[]; onLook: (names: string[], change: LookChange, here: boolean) => void }) {
+  // Set here over a part file: only those decide where a change goes (the rest are always set here).
+  const set = group.filter((p) => p.own && isSet(p.here))
+  const [here, setHere] = useState(set.length > 0)
+  const own = group.some((p) => p.own)
+  const id = `look-here-${part.index}`
+  const single = group.length === 1
+  return (
+    <LookPicker
+      look={part.look}
+      label={single ? `「${part.name}」的颜色` : `${group.length} 个零件的颜色`}
+      className="ml-1.5"
+      mark={part.layered && isSet(part.here)}
+      note={part.layered && isSet(part.here) ? "只在这个装配里" : undefined}
+      // Already set in this assembly: keep changing it here, or the part file's change wouldn't show.
+      onOpen={() => setHere(set.length > 0)}
+      onChange={(change) => onLook(group.map((p) => p.name), change, here)}
+      extra={
+        own ? (
+          <div className="space-y-1.5">
+            {set.length > 0 && (
+              <div className="space-y-1 rounded-md bg-muted px-2 py-1.5">
+                <p className="text-caption text-muted-foreground">
+                  {single ? `只在这个装配里设的；零件文件里${fileText(part.under)}` : `其中 ${set.length} 个只在这个装配里设了颜色`}
+                </p>
+                <Button size="sm" variant="link" onClick={() => onLook(set.map((p) => p.name), { color: null, finish: null }, true)}>
+                  改回跟零件文件一致
+                </Button>
+              </div>
+            )}
+            <label htmlFor={id} className="flex items-center gap-2 text-small">
+              <Checkbox id={id} checked={here} onCheckedChange={(v) => setHere(v === true)} />
+              只改这个装配里的
+            </label>
+            <p className="pl-6 text-caption text-faint-foreground">
+              {here ? "写在装配上，零件文件不变" : set.length ? "写进零件文件；这里单独设的仍然优先，这个装配里看不到变化" : "写进零件文件，用到它的地方都跟着变"}
+            </p>
+          </div>
+        ) : (
+          <p className="text-caption text-faint-foreground">标准件、外购件和子装配没有自己的零件文件，颜色写在这个装配里。</p>
+        )
+      }
+    />
+  )
+}
+
+/** A part file's look, after 「零件文件里」: 「是蓝」「没设颜色（白模）」. */
+const fileText = (l: Look | undefined) => (l && isSet(l) ? `是${lookText(l)}` : "没设颜色（白模）")
 
 function Group({ title, children }: { title?: string; children: ReactNode }) {
   return (

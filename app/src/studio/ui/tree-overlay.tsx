@@ -12,6 +12,8 @@ import type { Annotations } from "../use-annotations"
 import type { Reselect } from "../use-reselect"
 import type { Studio } from "../use-studio"
 import { Hint } from "@/components/hint"
+import { setPartLook, type LookChange } from "../appearance"
+import { LookDot, LookPicker } from "./look-picker"
 
 
 /**
@@ -37,6 +39,7 @@ export function TreeOverlay({
   locateStep,
   onSelectFeature,
   partsList = true,
+  looks = true,
   footer,
   detailsIn,
 }: {
@@ -57,6 +60,8 @@ export function TreeOverlay({
   rowActions?: (f: Feature) => React.ReactNode
   /** The list of parts with their eyes over the timeline (off when the steps carry them). */
   partsList?: boolean
+  /** Colour pickers for the part and its parts (off in an assembly: its sidebar has them). */
+  looks?: boolean
   /** At the end of the timeline (the desktop's 「+ 零件」). */
   footer?: React.ReactNode
   /** Where a step's details go: an empty layer over the host's side panel. */
@@ -143,6 +148,9 @@ export function TreeOverlay({
     steps[Math.max(0, Math.min(steps.length - 1, at + (e.key === "ArrowRight" ? 1 : -1)))]?.focus()
   }
   const splitParts = partsList && studio.display?.parts && studio.display.parts.length > 1 ? studio.display.parts : null
+  // Colours are a tree edit like any other: undoable, and only restyled (nothing rebuilds).
+  const setLook = (parts: string[] | undefined, change: LookChange) => void studio.editTree((t) => setPartLook(t, parts, change))
+  const canColor = looks && !readOnly
 
   return (
     <nav aria-label="特征树" className="pointer-events-none absolute right-3 bottom-3 left-3 z-10 flex flex-col items-start gap-1.5">
@@ -176,7 +184,7 @@ export function TreeOverlay({
                 onMouseEnter={() => onHover({ ids: [], label: `零件「${p.name}」`, faces })}
                 onMouseLeave={() => onHover(null)}
               >
-                <span aria-hidden className={cn("size-3 shrink-0 rounded-xs border", k % 2 ? "bg-scene-model-dark" : "bg-scene-model")} />
+                {canColor ? <LookPicker look={p.look} label={`「${p.name}」的颜色`} onChange={(c) => setLook([p.name], c)} className="-ml-1" /> : <LookDot look={p.look} />}
                 <span className={cn("max-w-32 truncate", hidden && "line-through opacity-60")}>{p.name}</span>
                 <IconButton
                   label={hidden ? `显示「${p.name}」` : `隐藏「${p.name}」`}
@@ -199,6 +207,14 @@ export function TreeOverlay({
       <div className="pointer-events-auto flex max-w-full items-stretch rounded-lg border bg-background/90 shadow-sm" onMouseLeave={hide}>
         <div className="flex shrink-0 flex-col items-start justify-center gap-1 border-r px-2.5 py-1.5 text-caption text-faint-foreground">
           <div className="flex items-center gap-1 whitespace-nowrap">
+            {canColor && studio.display?.mesh && (
+              <LookPicker
+                look={{ ...(tree.appearance?.color ? { color: tree.appearance.color } : {}), ...(tree.appearance?.finish ? { finish: tree.appearance.finish } : {}), source: "part" }}
+                label={splitParts ? "整个零件的颜色（各零件自己设的优先）" : "零件的颜色"}
+                onChange={(c) => setLook(undefined, c)}
+                className="-ml-1"
+              />
+            )}
             <span>{tree.features.length} 个特征</span>
             <Hint
               label="特征树怎么用"

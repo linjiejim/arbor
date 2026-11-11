@@ -9,6 +9,7 @@
 // known parameters, operators, the functions expr.ts allows), ids must be ids,
 // text goes through JSON.stringify, and comments lose their line breaks. What
 // can't be printed safely becomes None and is listed at the top of the file.
+import { hexOf, lookText, ownLook, rgbOf, type Appearance } from "./appearance"
 import { standardHole } from "./holes"
 import type { EdgeSelector, FaceSelector, Feature, PlaneRef, Point, SketchShape } from "./dsl"
 import { displayName, Tree } from "./dsl"
@@ -492,8 +493,31 @@ export function buildCode(raw: Tree, opts: { title?: string; body?: boolean } = 
   const { problems } = ctx
   ctx = { problems: [], params: new Set(), badParams: new Set(), where: "", feature: null }
   const warn = problems.length ? [`# 有 ${problems.length} 处没能导出，代码里写成了 None，运行前要先改好：`, ...problems.map((p) => `#   ${p}`), ""] : []
-  if (opts.body) return { code: [...warn, "# 参数", ...head, "", "part = None", "", ...body].join("\n").trimEnd(), problems }
-  return { code: [...prelude(opts.title ?? "Turnery 工作台导出"), ...warn, "# 参数", ...head, "", "part = None", "", ...body, "show_object(part) if 'show_object' in globals() else None", ""].join("\n"), problems }
+  const colours = lookLines(tree, partNames)
+  if (opts.body) return { code: [...warn, "# 参数", ...head, "", "part = None", "", ...body, ...colours].join("\n").trimEnd(), problems }
+  return { code: [...prelude(opts.title ?? "Turnery 工作台导出"), ...warn, "# 参数", ...head, "", "part = None", "", ...body, ...colours, "show_object(part) if 'show_object' in globals() else None", ""].join("\n"), problems }
+}
+
+/**
+ * The colours set in Turnery, as build123d colours (viewers such as OCP CAD Viewer show them; STEP export
+ * from build123d writes them). Per part after a split; finish clear as a half see-through colour.
+ */
+function lookLines(tree: Tree, partNames: string[]): string[] {
+  const colour = (l: Appearance) => {
+    const hex = hexOf(l.color)
+    if (!hex) return null
+    const [r, g, b] = rgbOf(hex).map((x) => Math.round(x * 1000) / 1000)
+    return `Color(${r}, ${g}, ${b}${l.finish === "clear" ? ", 0.4" : ""})  # ${lookText(l)}`
+  }
+  if (!partNames.length) {
+    const c = colour(ownLook(tree.appearance))
+    return c ? ["# 颜色（在 Turnery 里设的）", `part.color = ${c}`, ""] : []
+  }
+  const lines = partNames.flatMap((name) => {
+    const c = colour(ownLook(tree.appearance, name))
+    return c ? [`parts[${JSON.stringify(name)}].color = ${c}`] : []
+  })
+  return lines.length ? ["# 颜色（在 Turnery 里设的）", ...lines, "part = Compound(list(parts.values()))", ""] : []
 }
 
 /** `body: true` = just parameters and features (for reading); otherwise a runnable file. */

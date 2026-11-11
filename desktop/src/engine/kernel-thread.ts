@@ -8,7 +8,7 @@ import { compileComponent, type BuildProgress, type DisplayData } from "../../..
 
 export type KernelRequest = {
   id: number
-  op: "compileComponent" | "use" | "setAssets" | "setComponents" | "setContext" | "rebuild" | "inspect" | "display" | "pick" | "locate" | "selectorFor" | "faceEdges" | "measure" | "dimensions" | "drawing" | "exportBody"
+  op: "compileComponent" | "use" | "setAssets" | "setComponents" | "setContext" | "rebuild" | "restyle" | "looks" | "inspect" | "display" | "pick" | "locate" | "selectorFor" | "faceEdges" | "measure" | "dimensions" | "drawing" | "exportBody"
   args: unknown[]
 }
 export type KernelReply =

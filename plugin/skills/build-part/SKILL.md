@@ -13,6 +13,7 @@ Turnery is a desktop app; its MCP server (`turnery`, tools named `mcp__plugin_tu
 4. **Read every result.** `✗` means fix that feature with `edit_feature`; do not stack a new feature on top. `⚠` must be handled or explained.
 5. **Check, don't claim.** When the request has numbers, call `check` with one item per number, quoting the user's words in `said` and writing the number they gave as the expected value. Then `look` at the result. Use `measure` for distances; do not compute them yourself.
 6. **The user points, you read.** Notes the user pins on faces arrive through `get_notes`; answer each with `resolve_note`. When you cannot tell which face they mean, call `request_pick`.
-7. **Deliver** with `export` (`step`, `stl`, `py`, `json`, `bom`).
+7. **Colours.** When the user names colours ("lid in orange", "black screws") or wants to see the final look, call `set_appearance` (a palette name or `#RRGGBB`; finish `matte`, `metal` or `clear`). It never changes geometry; `look` draws the colours and names them.
+8. **Deliver** with `export` (`step`, `stl`, `3mf`, `py`, `json`, `bom`); STEP, 3MF and the BOM carry the colours.
 
 If the `turnery` server failed to connect, Turnery.app is not installed or has never been opened: point the user to https://github.com/linjiejim/turnery/releases/latest and have them reconnect with `/mcp`.

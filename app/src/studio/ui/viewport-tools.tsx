@@ -1,6 +1,6 @@
 import { MousePointer2, MessageSquarePlus } from "lucide-react"
 import * as React from "react"
-import { ArrowLeftRight, Expand, Ruler, RulerDimensionLine, ScissorsLineDashed, X } from "lucide-react"
+import { ArrowLeftRight, Expand, Palette, Ruler, RulerDimensionLine, ScissorsLineDashed, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { IconButton } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
@@ -24,6 +24,8 @@ export function ViewTools({
   explode,
   onExplode,
   onExplodeEnd,
+  looks,
+  onLooks,
   tips,
 }: {
   annotation?: boolean
@@ -40,6 +42,9 @@ export function ViewTools({
   explode: number | null
   onExplode: (f: number) => void
   onExplodeEnd: () => void
+  /** Parts in their colours and finishes, or a white model; `available`: anything to colour at all. */
+  looks?: { on: boolean; available: boolean }
+  onLooks?: (on: boolean) => void
   /** 「视图怎么用」 under the tools. */
   tips: string[]
 }) {
@@ -102,6 +107,20 @@ export function ViewTools({
         >
           <Expand />
         </IconButton>
+        {looks && onLooks && (
+          <IconButton
+            label="颜色"
+            tooltip={!looks.available ? "颜色：零件还没有设颜色和质感" : looks.on ? "颜色：按零件的颜色和质感显示，单击换成白模" : "颜色：现在是白模，单击按零件的颜色和质感显示"}
+            tooltipSide="right"
+            size="icon-sm"
+            aria-pressed={looks.on && looks.available}
+            className={cn(looks.on && looks.available && on)}
+            disabled={!looks.available}
+            onClick={() => onLooks(!looks.on)}
+          >
+            <Palette />
+          </IconButton>
+        )}
         <div className="my-0.5 h-px w-5 bg-border" />
         <Hint label="视图怎么用" side="right" align="start" className="mb-1" tips={tips} />
       </div>

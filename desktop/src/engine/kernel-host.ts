@@ -5,6 +5,7 @@ import { Worker } from "node:worker_threads"
 import type { KernelHost } from "../../../app/src/desktop/core/engine"
 import type { KernelPhase, V3 } from "../../../app/src/desktop/core/protocol"
 import type { Tree } from "../../../app/src/studio/dsl"
+import type { Appearance, Look } from "../../../app/src/studio/appearance"
 import type { BuildReport, BuildProgress, DisplayData, ComponentSource, ContextSource } from "../../../app/src/studio/kernel/build"
 import type { Dim } from "../../../app/src/studio/kernel/dims"
 import type { DrawingData } from "../../../app/src/studio/kernel/drawing"
@@ -221,6 +222,7 @@ export class ThreadKernel implements KernelHost {
       if (cached) this.onPreview(cached.display)
       const deferred = background && assembly
       const r = await this.call<BuildReport>("rebuild", [tree, { interferences: cached?.interferences, deferChecks: deferred }])
+      if (process.env.TURNERY_PROFILE) process.stderr.write(`REBUILD ${slot} ${Math.round(r.ms)} ms\n`)
       this.cur.lastTree = tree
       if (key && this.preview && !r.paramError && r.features.every((f) => f.state !== "error" && f.state !== "skipped")) {
         const directory = await this.pool.directory
@@ -279,6 +281,18 @@ export class ThreadKernel implements KernelHost {
       finish()
       if (report.features.every((f) => f.state !== "error" && f.state !== "skipped")) await cache?.put(key, { display, interferences: report.interferences })
     })
+  }
+
+  /** Only colours changed: the thread takes the tree without rebuilding (false: rebuild instead). */
+  async restyle(tree: Tree) {
+    const ok = await this.call<boolean>("restyle", [tree])
+    if (process.env.TURNERY_PROFILE) process.stderr.write(`RESTYLE ${this.slot} ${ok ? "ok" : "needs a rebuild"}\n`)
+    if (ok) this.cur.lastTree = tree
+    return ok
+  }
+
+  looks() {
+    return this.call<{ name: string; look: Look; here?: Appearance }[]>("looks", [])
   }
 
   inspect(what: "body" | "faces" | "edges", selector?: unknown) {

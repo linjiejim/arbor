@@ -9,8 +9,8 @@ import { sectionPlane } from "./section"
 /** A numbered annotation pin at a point on the model. */
 export type Pin = { part?: string; n: number; point: [number, number, number] }
 
-/** How to draw a set of shots: what to light up, pins, a cut, parts or reference bodies left out, picture size. */
-export type ShotOptions = { highlight?: string; pins?: Pin[]; section?: LookSection; hide?: string[]; size?: "normal" | "large" }
+/** How to draw a set of shots: what to light up, pins, a cut, parts or reference bodies left out, picture size, a white model. */
+export type ShotOptions = { highlight?: string; pins?: Pin[]; section?: LookSection; hide?: string[]; size?: "normal" | "large"; plain?: boolean }
 
 /**
  * Render the current model from standard views as PNG data URLs, for the
@@ -41,7 +41,7 @@ export function renderShots(d: DisplayData, shots: LookShot[], opts: ShotOptions
       canvas.width = W
       canvas.height = H
       const ctx = canvas.getContext("2d")!
-      const obj = modelObject(shown, snap.kit, { status: false, highlight: opts.highlight }, { explode: 0, hidden: hiddenParts })
+      const obj = modelObject(shown, snap.kit, { status: false, highlight: opts.highlight }, { explode: 0, hidden: hiddenParts }, !opts.plain)
       const box = shot.box ? new THREE.Box3(new THREE.Vector3(...shot.box[0]), new THREE.Vector3(...shot.box[1])) : undefined
       snap.draw(ctx, obj, { w: W, h: H, dir: new THREE.Vector3(...shot.dir), box, padding: shot.padding ?? LOOK_PADDING })
       disposeObject(obj)

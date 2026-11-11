@@ -1,6 +1,7 @@
 import { tool, type ToolSet } from "ai"
 import { z } from "zod"
 import { Check, DESKTOP_CHECKS, EdgeSelector, FaceSelector, Feature, Num, SketchShape, WebMode, WebPoint, type FeatureOp } from "./dsl"
+import { Color, Finish } from "./appearance"
 
 /**
  * The tools the model may call. Shared by the server (schemas + how results
@@ -165,6 +166,17 @@ export const STUDIO_TOOLS = {
     toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
   }),
   check: checkTool(WebCheck),
+  // The desktop app has its own set_appearance (it also writes colours into an assembly's part files).
+  set_appearance: tool({
+    description:
+      "设零件的颜色和质感，只改外观、不改几何（学习者说「做成橙色」「上盖用透明的」，或想看最终效果时用）。不写 parts 是整个零件；拆件以后用 parts 分别设。color、finish 写 null 是清除。",
+    inputSchema: z.object({
+      parts: z.array(z.string()).optional().describe("拆件以后的零件名；不写就是整个零件"),
+      color: Color.nullable().optional(),
+      finish: Finish.nullable().optional(),
+    }),
+    toModelOutput: ({ output }) => ({ type: "text", value: textOf(output) }),
+  }),
   inspect: tool({
     description:
       "查看当前模型：tree = 特征树和每步结果；body = 包围盒、体积、质心；faces / edges = 列出面或边（可用选择器过滤），用来确认选择器会选中什么。",

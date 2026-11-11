@@ -29,6 +29,7 @@ const COMMAND_LABELS: Record<string, string> = {
   look: "看模型",
   measure: "测量",
   check: "核对需求",
+  set_appearance: "设颜色",
   export: "导出",
   get_notes: "读备注",
   resolve_note: "回复备注",
