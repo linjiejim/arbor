@@ -1,6 +1,6 @@
 {
   "name": "turnery-mcp",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Launcher for the MCP server that ships inside the Turnery desktop app (parametric CAD for coding agents)",
   "mcpName": "io.github.linjiejim/turnery",
   "license": "MIT",
