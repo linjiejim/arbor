@@ -175,6 +175,42 @@ describe("onto: an even depth along a face", () => {
   })
 })
 
+// replicad hands back a different kind of sketch depending on what the 2D booleans left: one outline,
+// a list of regions, or a region with holes on its own (what an even number of cuts gives). The last
+// has `face()` but no `faces()`, and the sketch step once called `faces()` on all of them.
+describe("sketch with several cut shapes", () => {
+  const slot = (x: number) => ({ type: "slot" as const, length: 30, width: 3, center: [x, 0] as [number, number], angle: 90, cut: true })
+  const slotArea = 27 * 3 + Math.PI * 1.5 ** 2
+  const plate = (xs: number[]) =>
+    build([
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 179.6, h: 37.6 }, ...xs.map(slot)] },
+      { id: "g", op: "extrude", sketch: "s", distance: 3 },
+    ])
+
+  const xs = (count: number) => Array.from({ length: count }, (_, i) => -76.5 + 17 * i)
+
+  it.each([[1], [2], [3], [10]])("builds a plate with %i slots cut out of the sketch", (count) => {
+    const r = plate(xs(count))
+    expect(states(r)).toEqual(["s:ok", "g:ok"])
+    expect(r.body?.volume).toBeCloseTo((179.6 * 37.6 - count * slotArea) * 3, 1)
+  })
+
+  it("draws every slot in the sketch's preview lines", () => {
+    const lines = [0, 1, 2, 3].map((count) => {
+      plate(xs(count))
+      return k.display(0).sketch!.length
+    })
+    for (let i = 1; i < lines.length; i++) expect(lines[i]).toBeGreaterThan(lines[i - 1])
+  })
+
+  it("keeps a separate region beside the one with holes", () => {
+    const r = build([
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 60, h: 20 }, { type: "circle", d: 6, center: [-15, 0], cut: true }, { type: "circle", d: 6, center: [15, 0], cut: true }, { type: "circle", d: 10, center: [0, 40] }] },
+    ])
+    expect(states(r)).toEqual(["s:ok"])
+  })
+})
+
 describe("exports and the site assistant", () => {
   it("writes the new forms as build123d", () => {
     const code = toBuild123d({
