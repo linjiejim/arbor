@@ -116,6 +116,20 @@ function sketchOn<T>(d: { sketchOnPlane(p: Plane): T }, p: ResolvedPlane, origin
   }
 }
 
+/**
+ * The face or faces a sketch covers. `sketchOnPlane` returns one of three kinds of sketch, and they
+ * don't share a name for this: a single outline (Sketch) and a list of regions (Sketches) have
+ * `faces()`; a region with holes on its own (CompoundSketch) only has `face()`. Which one comes
+ * back depends on what the 2D booleans left: with holes cut one after another it alternates between
+ * the last two.
+ */
+function sketchFaces(sk: unknown): AnyShape {
+  const s = sk as { faces?: () => AnyShape; face?: () => AnyShape }
+  if (typeof s.faces === "function") return s.faces()
+  if (typeof s.face === "function") return s.face()
+  throw new Error("sketch has neither faces() nor face()")
+}
+
 export type FeatureResult = {
   id: string
   op: FeatureOp
@@ -1421,8 +1435,7 @@ export class Kernel {
         let lines: number[] = []
         if (drawing) {
           const sk = sketchOn(drawing.clone(), plane)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const faceShape: any = (sk as any).faces()
+          const faceShape = sketchFaces(sk)
           lines = Array.from(meshEdges(faceShape).lines)
           faceShape.delete?.()
           // eslint-disable-next-line @typescript-eslint/no-explicit-any

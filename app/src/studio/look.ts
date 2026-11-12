@@ -63,8 +63,11 @@ export function renderShots(d: DisplayData, shots: LookShot[], opts: ShotOptions
 
 /** A numbered dot where the learner clicked, as seen by `camera`. */
 function drawPin(ctx: CanvasRenderingContext2D, pin: Pin, camera: THREE.Camera, W: number, H: number) {
-  const v = new THREE.Vector3(...pin.point).project(camera)
-  if (v.z > 1) return
+  const p = new THREE.Vector3(...pin.point)
+  // Behind the camera. Judged in view space, not against the far plane: that one sits just behind
+  // the model (see frameCamera), and a pin can be on something further back that isn't drawn.
+  if (p.clone().applyMatrix4(camera.matrixWorldInverse).z >= 0) return
+  const v = p.project(camera)
   const x = ((v.x + 1) / 2) * W
   const y = ((1 - v.y) / 2) * H
   ctx.beginPath()
