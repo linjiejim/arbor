@@ -23,8 +23,8 @@ import {
   Plane,
   sketchCircle,
   sketchRectangle,
+  CompoundBlueprint,
   type Blueprint,
-  type CompoundBlueprint,
   type AnyShape,
   type Shape3D,
 } from "replicad"
@@ -128,6 +128,69 @@ function sketchFaces(sk: unknown): AnyShape {
   if (typeof s.faces === "function") return s.faces()
   if (typeof s.face === "function") return s.face()
   throw new Error("sketch has neither faces() nor face()")
+}
+
+type Loftable = { loftWith(others: unknown[], config: { ruled: boolean }): Shape3D }
+
+/**
+ * An extrusion `d` long with its walls drafted by `angle`. OpenCascade's draft gives up on a solid
+ * with a hole or on several solids at once, so each region's outline and each of its holes is
+ * drafted on its own, the holes the other way so they open up as the outside closes in (as a
+ * moulded part's would), and the holes are then cut out. An outline the draft can't take is lofted
+ * to a mitred offset of itself instead: mitred, so straight edges keep sharp corners.
+ */
+function taperedExtrude(profile: Drawing, angle: number, d: number, plane: ResolvedPlane, origin: V3, dir: V3): Shape3D {
+  const shape = (profile as unknown as { innerShape: Blueprint | Blueprints | CompoundBlueprint | null }).innerShape
+  const pieces = !shape ? [] : shape instanceof Blueprints ? shape.blueprints : [shape]
+  const far = add(origin, mul(dir, d))
+  const wall = (bp: Blueprint, a: number, what: string) => {
+    const outline = new Drawing(bp)
+    const inset = d * Math.tan((a * Math.PI) / 180)
+    // The outline at the far end. Asked for up front when the walls close in: the draft happily
+    // runs them past each other into a solid that crosses itself.
+    const farEnd = () => {
+      let end: Drawing | null = null
+      try {
+        end = outline.offset(-inset, { lineJoinType: "miter" })
+      } catch {
+        // checked below
+      }
+      const one = (end as unknown as { innerShape: unknown } | null)?.innerShape
+      // Moved in by `inset` all round, it is at least 2 × inset narrower both ways. A circle moved
+      // in past its centre comes back as a circle of the leftover radius, which this catches.
+      const span = (x: Drawing) => {
+        const [lo, hi] = x.boundingBox.bounds
+        return [hi[0] - lo[0], hi[1] - lo[1]]
+      }
+      const shrunk = () => span(end!).every((w, i) => w <= span(outline)[i] - 2 * inset + 1e-6)
+      if (!one || one instanceof Blueprints || one instanceof CompoundBlueprint || !shrunk())
+        throw new InputError(`拔模角太大：${what}在拉伸的另一头收没了或断成了几块，减小拔模角或拉伸距离`)
+      return end!
+    }
+    const end = inset > 0 ? farEnd() : null
+    return tapered(
+      () => sketchOn(outline.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D,
+      () => sketchOn(outline.clone() as unknown as { sketchOnPlane(p: Plane): Loftable }, plane, origin).loftWith([sketchOn(end ?? farEnd(), plane, far)], { ruled: true }),
+      origin,
+      plane.x,
+      dir,
+      a,
+    )
+  }
+  const solids = pieces.map((p) => {
+    const [outer, ...holes] = p instanceof CompoundBlueprint ? p.blueprints : [p]
+    let solid = wall(outer as Blueprint, angle, "轮廓")
+    for (const h of holes) {
+      const tool = wall(h as Blueprint, -angle, "孔")
+      const next = solid.cut(tool)
+      solid.delete()
+      tool.delete()
+      solid = next
+    }
+    return solid
+  })
+  if (!solids.length) throw new InputError("草图里没有能拉伸的面")
+  return solids.length === 1 ? solids[0] : mergeOverlaps(makeCompound(solids) as unknown as Shape3D)
 }
 
 export type FeatureResult = {
@@ -1530,19 +1593,7 @@ export class Kernel {
           if (f.draft !== undefined && n(f.draft) !== 0) {
             const angle = n(f.draft)
             if (f.direction === "both") throw new InputError("两侧对称（both）不能带拔模角")
-            const inset = d * Math.tan((angle * Math.PI) / 180)
-            tool = tapered(
-              () => sketchOn(profile.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D,
-              () => {
-                const top = sketchOn(profile.offset(-inset), plane, add(origin, mul(dir, d)))
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                return (sketchOn(profile.clone(), plane, origin) as any).loftWith([top], { ruled: true }) as Shape3D
-              },
-              origin,
-              plane.x,
-              dir,
-              angle,
-            )
+            tool = taperedExtrude(profile, angle, d, plane, origin, dir)
           } else tool = mergeOverlaps(sketchOn(profile.clone(), plane, origin).extrude(d, { extrusionDirection: dir }) as Shape3D)
           how = `${f.direction === "both" ? "两侧对称 " : f.direction === "reverse" ? "反向 " : ""}${fmt(d)} mm${f.draft ? ` · 拔模 ${fmt(n(f.draft))}°` : ""}`
         }

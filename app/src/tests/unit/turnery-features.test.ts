@@ -4,7 +4,7 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { z } from "zod"
 import { toBuild123d } from "@/studio/codegen"
-import type { Feature, Point, Tree } from "@/studio/dsl"
+import type { Feature, Point, SketchShape, Tree } from "@/studio/dsl"
 import { Kernel } from "@/studio/kernel/build"
 import { initNodeKernel } from "@/studio/kernel/node"
 import { DESKTOP_TOOLS, STUDIO_TOOLS } from "@/studio/tools"
@@ -208,6 +208,65 @@ describe("sketch with several cut shapes", () => {
       { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 60, h: 20 }, { type: "circle", d: 6, center: [-15, 0], cut: true }, { type: "circle", d: 6, center: [15, 0], cut: true }, { type: "circle", d: 10, center: [0, 40] }] },
     ])
     expect(states(r)).toEqual(["s:ok"])
+  })
+})
+
+describe("drafted extrusion of a sketch with holes or several regions", () => {
+  const tan = Math.tan((3 * Math.PI) / 180) * 10
+  // A ruled taper from a w × h rectangle to one moved in by `i` all round; a cone frustum for a hole.
+  const prismoid = (w: number, h: number, i: number) => (10 / 6) * (w * h + (w - 2 * i) * (h - 2 * i) + 4 * (w - i) * (h - i))
+  const frustum = (r: number, i: number) => ((Math.PI * 10) / 3) * (r * r + (r + i) ** 2 + r * (r + i))
+  const hole = (x: number) => ({ type: "circle" as const, d: 6, center: [x, 0] as [number, number], cut: true })
+  const drafted = (shapes: SketchShape[], draft: number) =>
+    build([
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 60, h: 20 }, ...shapes] },
+      { id: "e", op: "extrude", sketch: "s", distance: 10, draft },
+    ])
+
+  it.each([[1], [2], [3]])("tapers a plate with %i holes, the holes opening up as the outside closes in", (count) => {
+    const r = drafted([hole(-15), hole(15), hole(0)].slice(0, count), 3)
+    expect(states(r)).toEqual(["s:ok", "e:ok"])
+    expect(r.body?.volume).toBeCloseTo(prismoid(60, 20, tan) - count * frustum(3, tan), 0)
+  })
+
+  it("leans the walls the other way with a negative draft", () => {
+    const r = drafted([hole(0)], -3)
+    expect(states(r)).toEqual(["s:ok", "e:ok"])
+    expect(r.body?.volume).toBeCloseTo(prismoid(60, 20, -tan) - frustum(3, -tan), 0)
+  })
+
+  it("tapers separate regions, one of them with a hole", () => {
+    const r = drafted([hole(0), { type: "circle", d: 10, center: [0, 40] }], 3)
+    expect(states(r)).toEqual(["s:ok", "e:ok"])
+    expect(r.body?.solids).toBe(2)
+    expect(r.body?.volume).toBeCloseTo(prismoid(60, 20, tan) - frustum(3, tan) + frustum(5, -tan), 0)
+  })
+
+  it("cuts a tapered pocket with a boss left standing in it", () => {
+    const r = build([
+      { id: "b", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "rect", w: 80, h: 40 }] },
+      { id: "box", op: "extrude", sketch: "b", distance: 20 },
+      { id: "s", op: "sketch", on: { plane: "XY", offset: 20 }, shapes: [{ type: "rect", w: 60, h: 20 }, hole(0)] },
+      { id: "e", op: "extrude", sketch: "s", distance: 10, draft: 3, mode: "cut", direction: "reverse" },
+    ])
+    expect(states(r)).toEqual(["b:ok", "box:ok", "s:ok", "e:ok"])
+    expect(r.body?.volume).toBeCloseTo(80 * 40 * 20 - (prismoid(60, 20, tan) - frustum(3, tan)), 0)
+  })
+
+  it("tapers raised text", () => {
+    const r = build([
+      { id: "s", op: "sketch", on: { plane: "XY" }, shapes: [{ type: "text", text: "AB8", size: 10 }] },
+      { id: "e", op: "extrude", sketch: "s", distance: 2, draft: 5 },
+    ])
+    expect(states(r)).toEqual(["s:ok", "e:ok"])
+  })
+
+  it("says the draft is too steep when it closes an outline or a hole before the far end", () => {
+    const closes = (shapes: SketchShape[], distance: number, draft: number) =>
+      build([{ id: "s", op: "sketch", on: { plane: "XY" }, shapes }, { id: "e", op: "extrude", sketch: "s", distance, draft }]).features[1].message
+    expect(closes([{ type: "circle", d: 20 }], 100, 10)).toMatch(/拔模角太大：轮廓/)
+    expect(closes([{ type: "circle", d: 20 }, { type: "circle", d: 4, cut: true }], 100, 10)).toMatch(/拔模角太大：轮廓/)
+    expect(closes([{ type: "rect", w: 60, h: 60 }, { type: "circle", d: 4, cut: true }], 30, -10)).toMatch(/拔模角太大：孔/)
   })
 })
 
