@@ -1,5 +1,6 @@
 import * as THREE from "three"
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js"
+import { frameCamera } from "./framing"
 import { MaterialKit } from "./materials"
 import { readSceneTokens } from "./tokens"
 import { disposeObject } from "./viewer"
@@ -50,16 +51,11 @@ export class Snapshotter {
     const { w, h } = opts
     this.renderer.setSize(w, h, false)
     this.camera.aspect = w / h
-    this.camera.updateProjectionMatrix()
     this.holder.add(object)
-    const box = opts.box ?? new THREE.Box3().setFromObject(object)
-    const sphere = box.getBoundingSphere(new THREE.Sphere())
-    const vfov = THREE.MathUtils.degToRad(this.camera.fov)
-    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.camera.aspect)
-    const dist = (sphere.radius * (opts.padding ?? 1.15)) / Math.sin(Math.min(vfov, hfov) / 2)
-    const dir = (opts.dir ?? new THREE.Vector3(1, -1.1, 0.85)).clone().normalize()
-    this.camera.position.copy(sphere.center).addScaledVector(dir, dist)
-    this.camera.lookAt(sphere.center)
+    // The clipping planes go around the whole object even when `box` frames only part of it:
+    // the rest is still in the picture, in front of and behind the part.
+    const own = new THREE.Box3().setFromObject(object)
+    frameCamera(this.camera, opts.box ?? own, opts.dir ?? new THREE.Vector3(1, -1.1, 0.85), opts.padding ?? 1.15, own)
     this.renderer.render(this.scene, this.camera)
     this.holder.remove(object)
     const c = ctx.canvas
